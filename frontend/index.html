@@ -1,0 +1,1240 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-stage="1">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#EDEDE7">
+  <meta name="description" content="Pattern Studio 本地纹样工作台：上传、框选、本地提取、AI 候选选择、蒙版修正、局部修复确认与手动平铺。">
+  <title>本地纹样工作台 · Pattern Studio</title>
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./workbench.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#workspace-main">跳到工作台</a>
+
+  <svg class="svg-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+    <symbol id="i-mark" viewBox="0 0 32 32">
+      <path d="M16 3.5c4.2 4.2 8 8 12.5 12.5C24 20.5 20.2 24.3 16 28.5 11.8 24.3 8 20.5 3.5 16 8 11.5 11.8 7.7 16 3.5Z" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <path d="M16 9.6c2.3 2.3 4.1 4.1 6.4 6.4-2.3 2.3-4.1 4.1-6.4 6.4-2.3-2.3-4.1-4.1-6.4-6.4 2.3-2.3 4.1-4.1 6.4-6.4Z" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <circle cx="16" cy="16" r="1.6" fill="currentColor"/>
+    </symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24">
+      <rect x="5" y="10" width="14" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <path d="M8.5 10V7.8a3.5 3.5 0 0 1 7 0V10" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <path d="M12 14v2.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-history" viewBox="0 0 24 24">
+      <path d="M4.5 9.2A8.2 8.2 0 1 1 4 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+      <path d="M4.2 5.5v4.2h4.2M12 7.7V12l3 2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24">
+      <path d="M3.5 12s3.1-5.2 8.5-5.2 8.5 5.2 8.5 5.2-3.1 5.2-8.5 5.2S3.5 12 3.5 12Z" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <circle cx="12" cy="12" r="2.4" fill="none" stroke="currentColor" stroke-width="1.7"/>
+    </symbol>
+    <symbol id="i-eye-off" viewBox="0 0 24 24">
+      <path d="M4 4.5 20 20M9.6 7.2A8.8 8.8 0 0 1 12 6.8c5.4 0 8.5 5.2 8.5 5.2a15 15 0 0 1-2.8 3.2M6.4 8.6A15 15 0 0 0 3.5 12s3.1 5.2 8.5 5.2a8.8 8.8 0 0 0 3.2-.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+      <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+    </symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24">
+      <path d="M12 15.5V4.7M7.8 8.7 12 4.5l4.2 4.2M5 15.5v2.8A2.2 2.2 0 0 0 7.2 20.5h9.6a2.2 2.2 0 0 0 2.2-2.2v-2.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-x" viewBox="0 0 24 24">
+      <path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24">
+      <path d="M19.5 9.5A8 8 0 1 0 20 14M19.5 4.8v4.7h-4.7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-download" viewBox="0 0 24 24">
+      <path d="M12 4.5v11M7.8 11.2 12 15.5l4.2-4.3M5 16.5v1.8a2.2 2.2 0 0 0 2.2 2.2h9.6a2.2 2.2 0 0 0 2.2-2.2v-1.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24">
+      <path d="m7 9.5 5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-image" viewBox="0 0 24 24">
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2.3" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <circle cx="9" cy="9.5" r="1.5" fill="currentColor"/>
+      <path d="m5.5 17 4.4-4.5 3.1 3 2.5-2.4 3 3.9" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-check" viewBox="0 0 24 24">
+      <path d="m5 12.5 4.3 4.3L19.5 6.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24">
+      <path d="M12 4.2 21 20H3L12 4.2Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+      <path d="M12 9.5v4.7M12 17.2v.2" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24">
+      <path d="M4.5 12h15M14 6.5l5.5 5.5L14 17.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-crop" viewBox="0 0 24 24">
+      <path d="M7 3.5V17h13.5M17 20.5V7H3.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-zip" viewBox="0 0 24 24">
+      <path d="M6 3.5h8l4 4v13H6v-17Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+      <path d="M14 3.5v4h4M10 4v10M8.5 6.5H10M8.5 9.5H10M8.5 12.5H10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24">
+      <path d="M12 3.5c.5 4.5 2 6 6.5 6.5-4.5.5-6 2-6.5 6.5-.5-4.5-2-6-6.5-6.5 4.5-.5 6-2 6.5-6.5ZM18.5 15c.2 2 .9 2.8 3 3-2.1.2-2.8 1-3 3-.2-2-.9-2.8-3-3 2.1-.2 2.8-1 3-3Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-brush" viewBox="0 0 24 24">
+      <path d="M14.6 4.2 19.8 9.4 10 19.2H4.8v-5.2L14.6 4.2Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+      <path d="m12.7 6.1 5.2 5.2M4.8 19.2 8 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-repair" viewBox="0 0 24 24">
+      <path d="M13.8 4.2a4.3 4.3 0 0 0-5.3 5.3L4.6 13.4a2.2 2.2 0 0 0 3.1 3.1l3.9-3.9a4.3 4.3 0 0 0 5.3-5.3l-2.7 2.7-2.1-.5-.5-2.1 2.2-3.2Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+      <path d="m14.8 15.2 4.1 4.1M18.2 14.1l1.7 1.7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24">
+      <rect x="3.5" y="3.5" width="7" height="7" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <rect x="13.5" y="3.5" width="7" height="7" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <rect x="3.5" y="13.5" width="7" height="7" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <rect x="13.5" y="13.5" width="7" height="7" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/>
+    </symbol>
+  </svg>
+
+  <div class="app-view" id="app-view">
+    <header class="app-bar">
+      <a class="brand" href="#workspace-main" aria-label="回到工作台顶部">
+        <svg class="brand-glyph" aria-hidden="true"><use href="#i-mark"></use></svg>
+        <span class="brand-name">Pattern Studio</span>
+        <span class="brand-sub">本地纹样工作台</span>
+      </a>
+      <div class="app-bar-tools">
+        <button class="health" id="health-chip" type="button" aria-label="检查本机服务状态" title="检查本机服务状态">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="health-label">检查连接</span>
+        </button>
+        <button class="btn btn-quiet btn-sm" id="open-history" type="button">
+          <svg class="icon" aria-hidden="true"><use href="#i-history"></use></svg>
+          <span>历史</span>
+        </button>
+      </div>
+    </header>
+
+    <nav class="rail" aria-label="工序导航">
+      <button class="rail-step" type="button" data-stage="1" aria-current="step">
+        <span class="rail-num">01</span><span class="rail-name">来源</span>
+      </button>
+      <button class="rail-step" type="button" data-stage="2">
+        <span class="rail-num">02</span><span class="rail-name">裁切</span>
+      </button>
+      <button class="rail-step" type="button" data-stage="3">
+        <span class="rail-num">03</span><span class="rail-name">处理</span>
+      </button>
+      <button class="rail-step" type="button" data-stage="4">
+        <span class="rail-num">04</span><span class="rail-name">候选</span>
+      </button>
+      <button class="rail-step" type="button" data-stage="5">
+        <span class="rail-num">05</span><span class="rail-name">蒙版</span>
+      </button>
+      <button class="rail-step" type="button" data-stage="6">
+        <span class="rail-num">06</span><span class="rail-name">修复</span>
+      </button>
+      <button class="rail-step" type="button" data-stage="7">
+        <span class="rail-num">07</span><span class="rail-name">平铺</span>
+      </button>
+    </nav>
+
+    <div class="banner banner-error" id="connection-banner" role="alert" hidden>
+      <span class="banner-mark"><svg class="icon" aria-hidden="true"><use href="#i-alert"></use></svg></span>
+      <div class="banner-copy">
+        <strong>本机处理服务尚未就绪</strong>
+        <p id="connection-message">请确认本机工作台正在运行。</p>
+      </div>
+      <button class="btn btn-line btn-sm" id="retry-connection" type="button">重试连接</button>
+    </div>
+
+    <div class="banner banner-warn" id="pending-banner" role="alert" hidden>
+      <span class="banner-mark"><svg class="icon" aria-hidden="true"><use href="#i-alert"></use></svg></span>
+      <div class="banner-copy">
+        <strong>上一次提交未得到确定响应</strong>
+        <p id="pending-message">为避免重复创建，请用相同请求重试；页面不会自动重发。</p>
+      </div>
+      <div class="banner-acts">
+        <button class="btn btn-line btn-sm" id="pending-discard" type="button">放弃此提交</button>
+        <button class="btn btn-solid btn-sm" id="pending-retry" type="button">用同一请求重试</button>
+      </div>
+    </div>
+
+    <main class="work" id="workspace-main" tabindex="-1">
+
+      <!-- 左栏：版本胶片条（常驻） -->
+      <aside class="film" aria-labelledby="film-title">
+        <div class="film-head">
+          <h2 class="film-title" id="film-title">版本</h2>
+          <span class="film-count" id="version-count">0</span>
+        </div>
+        <p class="film-empty" id="version-empty">上传后，原图与每一步成果都会保留在这里。</p>
+        <div class="film-list" id="version-list" role="list" aria-label="图像与成果版本"></div>
+        <div class="film-foot">
+          <span class="film-selection" id="selection-count">未选择版本</span>
+          <div class="film-acts">
+            <button class="btn btn-quiet btn-xs" id="clear-selection" type="button" disabled>清空</button>
+            <button class="btn btn-line btn-xs" id="export-button" type="button" disabled>打包 ZIP</button>
+          </div>
+        </div>
+        <p class="field-error" id="export-error" role="alert" hidden></p>
+      </aside>
+
+      <!-- 中栏：看样台 -->
+      <section class="light" id="canvas-panel" aria-labelledby="canvas-heading">
+        <div class="light-head">
+          <h2 class="light-title" id="canvas-heading">
+            <strong id="current-name">尚未载入图像</strong>
+            <span class="light-kind" id="current-kind">等待上传</span>
+          </h2>
+          <div class="light-tools">
+            <span class="chip" id="source-state" hidden>已载入</span>
+            <span class="chip chip-fill" id="preview-mode-badge" hidden>成果预览</span>
+            <span class="chip chip-mark" id="pending-preview-badge" hidden>预览未应用</span>
+            <button class="btn btn-quiet btn-sm" id="undo-button" type="button" disabled title="撤销当前图片的上一步编辑（Ctrl+Z）">撤销</button>
+            <button class="btn btn-quiet btn-sm" id="redo-button" type="button" disabled title="重做当前图片的下一步编辑（Ctrl+Shift+Z）">重做</button>
+            <button class="btn btn-line btn-sm" id="compare-button" type="button" disabled>
+              <svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg>
+              <span>对比</span>
+            </button>
+          </div>
+        </div>
+
+        <dl class="dims">
+          <div><dt>原尺寸</dt><dd id="original-dims">—</dd></div>
+          <div><dt>处理尺寸</dt><dd id="working-dims">—</dd></div>
+          <div><dt>坐标空间</dt><dd id="coordinate-id">—</dd></div>
+        </dl>
+
+        <div class="preview-bar" id="preview-bar" role="status" aria-live="polite" hidden>
+          <div class="preview-bar-main">
+            <span class="preview-bar-tag" id="preview-bar-tag">预览</span>
+            <div class="preview-bar-copy">
+              <strong id="preview-bar-title">预览未应用</strong>
+              <p id="preview-bar-detail">应用后才会写入版本并切换工作区。</p>
+            </div>
+          </div>
+          <div class="preview-bar-acts">
+            <button class="btn btn-line btn-sm" id="preview-discard" type="button">放弃预览</button>
+            <button class="btn btn-solid btn-sm" id="preview-apply" type="button" disabled>应用此预览</button>
+          </div>
+        </div>
+
+        <p class="light-note" id="source-note-display" hidden></p>
+
+        <div class="banner banner-warn light-warning" id="large-warning" hidden>
+          <span class="banner-mark"><svg class="icon" aria-hidden="true"><use href="#i-alert"></use></svg></span>
+          <div class="banner-copy">
+            <strong>大图需要先创建工作副本</strong>
+            <p id="large-warning-text">当前图超过本地处理上限，不会自动缩小。</p>
+          </div>
+          <button class="btn btn-line btn-sm" id="large-goto-working" type="button">设置副本</button>
+        </div>
+
+        <div class="light-body">
+          <div class="stage" id="canvas-stage">
+            <div class="stage-empty" id="canvas-empty">
+              <p class="stage-empty-line">先放入一张纹样</p>
+              <p class="stage-empty-note">PNG 或 JPEG。上传后可拖拽框选，或直接填写真实像素坐标。</p>
+            </div>
+            <div class="stage-loading" id="canvas-loading" hidden>
+              <span class="spinner" aria-hidden="true"></span>
+              <p>正在读取受控预览…</p>
+            </div>
+            <div class="stage-empty is-error" id="canvas-error" hidden>
+              <p class="stage-empty-line">预览未能加载</p>
+              <p class="stage-empty-note" id="canvas-error-text">请检查本机服务后重试。</p>
+              <button class="btn btn-line btn-sm" id="retry-preview" type="button">重新读取预览</button>
+            </div>
+            <div class="frame" id="canvas-frame" hidden>
+              <img id="preview-image" alt="" draggable="false">
+              <div class="selection-layer" id="selection-layer" aria-hidden="true">
+                <div class="selection-box" id="selection-box" hidden>
+                  <span class="selection-label" id="selection-label"></span>
+                </div>
+              </div>
+            </div>
+            <div class="watermark" id="preview-watermark" hidden>
+              <span id="preview-watermark-label">成果预览 · 非当前输入</span>
+              <button class="text-btn" id="back-to-current" type="button">回到当前输入</button>
+            </div>
+          </div>
+
+
+        </div>
+
+        <p class="light-hint" id="canvas-hint">上传后可拖拽框选；数值坐标始终使用当前输入的真实像素。</p>
+      </section>
+
+      <!-- 右栏：当前工序 -->
+      <aside class="tools" aria-label="当前工序参数">
+        <div class="tools-scroll">
+
+          <section class="guide" id="guide-panel" aria-labelledby="guide-heading">
+            <div class="guide-head">
+              <h2 class="guide-title" id="guide-heading">引导</h2>
+              <span class="guide-tone" id="guide-tone">等待开始</span>
+            </div>
+            <p class="guide-next" id="guide-next">先放入一张纹样。</p>
+            <p class="guide-detail" id="guide-detail">上传后可从本地提取开始；不会调用 AI。</p>
+            <ol class="guide-steps" id="guide-steps"></ol>
+            <p class="guide-location" id="guide-location">成果会出现在左栏版本区。</p>
+            <p class="guide-blocked" id="guide-blocked" hidden></p>
+            <details class="guide-failure" id="guide-failure" hidden>
+              <summary id="guide-failure-title">失败后的下一步</summary>
+              <ul id="guide-failure-lines"></ul>
+            </details>
+          </section>
+
+          <section class="stage-panel" id="source-panel" data-stage="1" aria-labelledby="source-heading">
+            <h2 class="tools-title" id="source-heading">来源</h2>
+            <p class="tools-note">原文件保留，规范输入另存为新资产。</p>
+
+            <div class="dropzone" id="dropzone" aria-describedby="dropzone-help">
+              <svg class="dropzone-icon" aria-hidden="true"><use href="#i-upload"></use></svg>
+              <p class="dropzone-title" id="dropzone-title">拖入 PNG 或 JPEG</p>
+              <p class="dropzone-sub" id="dropzone-help">规范输入另存为新资产，原文件不会被改写。</p>
+              <button class="btn btn-line btn-sm" id="choose-file" type="button">选择文件</button>
+              <input class="visually-hidden" id="image-file" type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg">
+            </div>
+
+            <div class="file-row" id="file-summary" hidden>
+              <span class="file-tag">IMG</span>
+              <span class="file-copy">
+                <strong id="file-name">—</strong>
+                <small id="file-meta">—</small>
+              </span>
+              <button class="icon-btn" id="clear-file" type="button" aria-label="移除所选文件" title="移除所选文件">
+                <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
+              </button>
+            </div>
+
+            <label class="field" for="source-note">
+              <span class="field-label">来源备注 <em>可选</em></span>
+              <textarea id="source-note" name="source-note" rows="2" maxlength="500" placeholder="馆藏编号、来源或授权范围"></textarea>
+            </label>
+            <p class="hint">备注仅作记录，不构成来源许可证明。</p>
+            <p class="field-error" id="upload-error" role="alert" hidden></p>
+            <button class="btn btn-solid btn-wide" id="upload-submit" type="button" disabled>上传并进入工作区</button>
+
+            <details class="group">
+              <summary>
+                <span class="group-label">工作副本</span>
+                <span class="group-meta">大图显式缩小</span>
+                <svg class="icon group-chevron" aria-hidden="true"><use href="#i-chevron"></use></svg>
+              </summary>
+              <div class="group-body">
+                <div class="field">
+                  <label class="field-label" for="working-max">最大像素</label>
+                  <input id="working-max" type="number" min="10000" max="1000000" step="1000" value="1000000" inputmode="numeric">
+                </div>
+                <p class="hint">大图不会自动缩小。确认像素上限后创建副本，原图与处理尺寸同时保留。</p>
+                <p class="hint" id="working-projection">上传后可估算处理尺寸。</p>
+                <p class="field-error" id="working-error" role="alert" hidden></p>
+                <button class="btn btn-line btn-wide" id="working-copy-button" type="button" disabled>创建工作副本</button>
+              </div>
+            </details>
+          </section>
+
+          <section class="stage-panel" id="crop-panel" data-stage="2" aria-labelledby="crop-heading">
+            <h2 class="tools-title" id="crop-heading">裁切</h2>
+            <p class="tools-note">在图上拖拽框选，或直接填写真实像素。半开区间，单位 px。</p>
+
+            <fieldset class="bbox" id="bbox-fieldset" disabled>
+              <legend class="field-label">框选坐标</legend>
+              <div class="bbox-grid">
+                <label for="bbox-left"><span>左 L</span><input id="bbox-left" type="number" min="0" step="1" inputmode="numeric"></label>
+                <label for="bbox-top"><span>上 T</span><input id="bbox-top" type="number" min="0" step="1" inputmode="numeric"></label>
+                <label for="bbox-right"><span>右 R</span><input id="bbox-right" type="number" min="1" step="1" inputmode="numeric"></label>
+                <label for="bbox-bottom"><span>下 B</span><input id="bbox-bottom" type="number" min="1" step="1" inputmode="numeric"></label>
+              </div>
+              <p class="field-error" id="bbox-error" role="alert" hidden></p>
+            </fieldset>
+
+            <div class="crop-state">
+              <span class="status-dot" id="bbox-state-dot" aria-hidden="true"></span>
+              <span id="bbox-status">未框选</span>
+            </div>
+
+            <div class="row">
+              <button class="btn btn-quiet btn-sm" id="bbox-full" type="button" disabled>全图</button>
+              <button class="btn btn-quiet btn-sm" id="bbox-cancel" type="button" disabled>取消框选</button>
+              <button class="btn btn-solid btn-sm" id="crop-button" type="button" disabled>
+                <svg class="icon" aria-hidden="true"><use href="#i-crop"></use></svg>
+                <span>裁切</span>
+              </button>
+            </div>
+            <p class="hint">GrabCut 需要框选；其他方式在框选有效时会一并使用当前矩形。提交不会隐式修改画布。</p>
+
+            <details class="group">
+              <summary>
+                <span class="group-label">旋转与纠偏</span>
+                <span class="group-meta">生成新坐标系版本</span>
+                <svg class="icon group-chevron" aria-hidden="true"><use href="#i-chevron"></use></svg>
+              </summary>
+              <div class="group-body">
+                <div class="field">
+                  <label class="field-label" for="prepare-rotation">旋转（逆时针）</label>
+                  <select id="prepare-rotation">
+                    <option value="0" selected>不旋转</option>
+                    <option value="90">90°</option>
+                    <option value="180">180°</option>
+                    <option value="270">270°</option>
+                  </select>
+                </div>
+                <div class="range">
+                  <label class="field-label" for="straighten-range">纠偏角度 <output id="straighten-readout">0.0</output>°</label>
+                  <div class="range-row">
+                    <input id="straighten-range" type="range" min="-15" max="15" step="0.5" value="0">
+                    <input id="straighten-value" type="number" min="-15" max="15" step="0.5" value="0" inputmode="decimal" aria-label="纠偏角度数值">
+                  </div>
+                </div>
+                <p class="hint">准备会创建新的坐标空间；旧框选与旧蒙版笔画不会迁移，需要重新标记。透明边缘可能增加。</p>
+                <p class="hint" id="prepare-projection">上传后可预估准备输出尺寸。</p>
+                <p class="field-error" id="prepare-limit" role="status" hidden></p>
+                <p class="field-error" id="prepare-error" role="alert" hidden></p>
+                <button class="btn btn-line btn-wide" id="prepare-button" type="button" disabled>生成准备版本</button>
+              </div>
+            </details>
+          </section>
+
+          <section class="stage-panel" id="controls-panel" data-stage="3" aria-labelledby="controls-heading">
+            <h2 class="tools-title" id="controls-heading">处理</h2>
+            <p class="tools-note">本地处理始终可用，不依赖 AI 服务状态。</p>
+
+            <label class="check-row preview-toggle">
+              <input type="checkbox" id="preview-mode" checked>
+              <span><strong>先预览，再应用</strong><small>默认开启；关闭后保持完成任务即应用</small></span>
+            </label>
+            <p class="hint">预览只显示在画布，不会自动写入版本。应用确认后才切换工作区；放弃不会删除已生成任务。</p>
+
+            <div class="oneclick">
+              <div class="oneclick-top">
+                <span class="oneclick-tag">推荐</span>
+                <span class="oneclick-skip">不调用 AI</span>
+              </div>
+              <h3 class="oneclick-title" id="oneclick-title">提取 → 矢量化</h3>
+              <p class="oneclick-copy">保留当前尺寸、跳过轻增强。完成后可预览并下载每一步成果。</p>
+              <p class="recipe" id="one-click-recipe">Otsu · 深色 · 阈值 128 → 彩色 · 8 色 · 中细节</p>
+              <label class="check-row">
+                <input type="checkbox" id="include-enhance">
+                <span><strong>本次包含轻增强</strong><small>默认关闭</small></span>
+              </label>
+              <button class="btn btn-solid btn-wide" id="oneclick-button" type="button" disabled>开始本地一键</button>
+              <p class="oneclick-state" id="oneclick-block">上传后可开始。</p>
+            </div>
+
+            <div class="banner banner-info" id="preview-block-hint" hidden>
+              <span class="banner-mark"><svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg></span>
+              <div class="banner-copy">
+                <p>画布正在预览成果。处理只作用于当前输入 —— 先回到当前输入，或在版本区“设为输入”。</p>
+              </div>
+            </div>
+            <p class="field-error" id="compose-error" role="alert" hidden></p>
+
+            <details class="group" open>
+              <summary>
+                <span class="group-label">提取</span>
+                <span class="group-meta">蒙版与透明 PNG</span>
+                <svg class="icon group-chevron" aria-hidden="true"><use href="#i-chevron"></use></svg>
+              </summary>
+              <div class="group-body">
+                <fieldset class="fieldset">
+                  <legend class="field-label">提取方式</legend>
+                  <div class="choices">
+                    <label class="choice"><input type="radio" name="extract-mode" value="alpha"><span><strong>既有 Alpha</strong><small>保留已有透明边缘</small></span></label>
+                    <label class="choice"><input type="radio" name="extract-mode" value="otsu"><span><strong>Otsu</strong><small>自动选择阈值</small></span></label>
+                    <label class="choice"><input type="radio" name="extract-mode" value="manual"><span><strong>手动阈值</strong><small>指定 0–255 分界</small></span></label>
+                    <label class="choice"><input type="radio" name="extract-mode" value="grabcut"><span><strong>框选 GrabCut</strong><small>需要有效矩形</small></span></label>
+                    <label class="choice"><input type="radio" name="extract-mode" value="adaptive_mean"><span><strong>自适应均值</strong><small>局部阈值 · 光照不均</small></span></label>
+                    <label class="choice"><input type="radio" name="extract-mode" value="adaptive_gaussian"><span><strong>自适应高斯</strong><small>局部阈值 · 过渡平滑</small></span></label>
+                    <label class="choice"><input type="radio" name="extract-mode" value="sauvola"><span><strong>Sauvola</strong><small>扫描线稿补充候选</small></span></label>
+                  </div>
+                </fieldset>
+
+                <fieldset class="fieldset">
+                  <legend class="field-label">前景极性</legend>
+                  <div class="segmented">
+                    <label><input type="radio" name="polarity" value="dark" checked><span>深色前景</span></label>
+                    <label><input type="radio" name="polarity" value="light"><span>浅色前景</span></label>
+                  </div>
+                </fieldset>
+
+                <div class="field" id="iterations-field">
+                  <label class="field-label" for="iterations">迭代次数</label>
+                  <input id="iterations" type="number" min="1" max="10" step="1" value="3" inputmode="numeric">
+                </div>
+
+                <div class="range" id="threshold-field">
+                  <label class="field-label" for="threshold-range">阈值 <output id="threshold-readout">128</output></label>
+                  <div class="range-row">
+                    <input id="threshold-range" type="range" min="0" max="255" step="1" value="128">
+                    <input id="threshold-value" type="number" min="0" max="255" step="1" value="128" inputmode="numeric" aria-label="阈值数值">
+                  </div>
+                </div>
+                <p class="hint" id="extract-hint">Otsu 会忽略手动阈值；已有 Alpha 使用透明通道。</p>
+                <p class="hint extract-note" id="extract-transparency-note" hidden></p>
+
+                <details class="group" id="extract-advanced">
+                  <summary>
+                    <span class="group-label">高级参数</span>
+                    <span class="group-meta">局部窗口、偏移与保守清理</span>
+                    <svg class="icon group-chevron" aria-hidden="true"><use href="#i-chevron"></use></svg>
+                  </summary>
+                  <div class="group-body">
+                    <div class="range" id="window-field">
+                      <label class="field-label" for="window-range">局部窗口 <output id="window-readout">31</output> px</label>
+                      <div class="range-row">
+                        <input id="window-range" type="range" min="3" max="255" step="2" value="31">
+                        <input id="window-size" type="number" min="3" max="255" step="2" value="31" inputmode="numeric" aria-label="局部窗口数值">
+                      </div>
+                      <p class="hint">奇数，3–255。窗口过小会选入纸纹，过大则丢失局部明暗变化。</p>
+                    </div>
+                    <div class="range" id="offset-field">
+                      <label class="field-label" for="offset-range">局部偏移 <output id="offset-readout">10</output></label>
+                      <div class="range-row">
+                        <input id="offset-range" type="range" min="-50" max="50" step="1" value="10">
+                        <input id="offset-value" type="number" min="-50" max="50" step="1" value="10" inputmode="numeric" aria-label="局部偏移数值">
+                      </div>
+                    </div>
+                    <label class="check-row" id="clahe-field">
+                      <input type="checkbox" id="extract-clahe">
+                      <span><strong>分割前局部对比（CLAHE）</strong><small>只用于估计前景，不改写源 RGB</small></span>
+                    </label>
+                    <div class="pair-fields" id="cleanup-fields">
+                      <div class="field">
+                        <label class="field-label" for="min-component-area">最小连通面积</label>
+                        <input id="min-component-area" type="number" min="0" max="10000" step="1" value="0" inputmode="numeric">
+                      </div>
+                      <div class="field">
+                        <label class="field-label" for="max-hole-area">最大孔洞面积</label>
+                        <input id="max-hole-area" type="number" min="0" max="10000" step="1" value="0" inputmode="numeric">
+                      </div>
+                    </div>
+                    <p class="hint">0 表示不清理。面积按原图像素计算，只作用于前景蒙版；小区域不一定是杂点。</p>
+                  </div>
+                </details>
+                <button class="btn btn-line btn-wide" id="extract-button" type="button" disabled>仅执行提取</button>
+              </div>
+            </details>
+
+            <details class="group" open>
+              <summary>
+                <span class="group-label">矢量</span>
+                <span class="group-meta">SVG 参数</span>
+                <svg class="icon group-chevron" aria-hidden="true"><use href="#i-chevron"></use></svg>
+              </summary>
+              <div class="group-body">
+                <fieldset class="fieldset">
+                  <legend class="field-label">模式</legend>
+                  <div class="segmented">
+                    <label><input type="radio" name="vector-mode" value="monochrome"><span>黑白 SVG</span></label>
+                    <label><input type="radio" name="vector-mode" value="color" checked><span>彩色 SVG</span></label>
+                  </div>
+                </fieldset>
+                <fieldset class="fieldset">
+                  <legend class="field-label">颜色上限</legend>
+                  <div class="segmented">
+                    <label><input type="radio" name="max-colors" value="2"><span>2</span></label>
+                    <label><input type="radio" name="max-colors" value="4"><span>4</span></label>
+                    <label><input type="radio" name="max-colors" value="8" checked><span>8</span></label>
+                    <label><input type="radio" name="max-colors" value="16"><span>16</span></label>
+                  </div>
+                  <p class="hint">颜色数是上限，结果可能更少。</p>
+                </fieldset>
+                <fieldset class="fieldset">
+                  <legend class="field-label">细节</legend>
+                  <div class="segmented">
+                    <label><input type="radio" name="vector-detail" value="low"><span>低</span></label>
+                    <label><input type="radio" name="vector-detail" value="medium" checked><span>中</span></label>
+                    <label><input type="radio" name="vector-detail" value="high"><span>高</span></label>
+                  </div>
+                </fieldset>
+                <details class="group" id="vector-advanced">
+                  <summary>
+                    <span class="group-label">高级追踪参数</span>
+                    <span class="group-meta">留空沿用细节预设</span>
+                    <svg class="icon group-chevron" aria-hidden="true"><use href="#i-chevron"></use></svg>
+                  </summary>
+                  <div class="group-body">
+                    <div class="pair-fields">
+                      <div class="field">
+                        <label class="field-label" for="vector-length">长度阈值</label>
+                        <input id="vector-length" type="number" min="0.5" max="10" step="0.5" placeholder="自动" inputmode="decimal">
+                      </div>
+                      <div class="field">
+                        <label class="field-label" for="vector-corner">角点阈值</label>
+                        <input id="vector-corner" type="number" min="0" max="180" step="1" placeholder="自动" inputmode="numeric">
+                      </div>
+                    </div>
+                    <div class="field">
+                      <label class="field-label" for="vector-splice">拼接阈值</label>
+                      <input id="vector-splice" type="number" min="0" max="180" step="1" placeholder="自动" inputmode="numeric">
+                    </div>
+                    <p class="hint">这些值会写入任务参数；不填写时由低／中／高细节预设决定。</p>
+                  </div>
+                </details>
+                <button class="btn btn-line btn-wide" id="vector-button" type="button" disabled>仅重新矢量化</button>
+                <p class="hint">只处理当前输入，不会顺带重做其他版本。</p>
+              </div>
+            </details>
+
+            <details class="group" id="recolor-group">
+              <summary>
+                <span class="group-label">SVG 颜色</span>
+                <span class="group-meta">替换与多色合并</span>
+                <svg class="icon group-chevron" aria-hidden="true"><use href="#i-chevron"></use></svg>
+              </summary>
+              <div class="group-body">
+                <div class="field">
+                  <label class="field-label" for="recolor-svg-select">目标 SVG</label>
+                  <select id="recolor-svg-select"></select>
+                </div>
+                <p class="hint" id="recolor-note">选择已生成的 SVG 后，可逐色替换为新的实色。</p>
+                <div class="recolor-list" id="recolor-list"></div>
+                <p class="field-error" id="recolor-error" role="alert" hidden></p>
+                <div class="row">
+                  <button class="btn btn-quiet btn-sm" id="recolor-reset" type="button">恢复原色</button>
+                  <button class="btn btn-line btn-sm" id="recolor-button" type="button" disabled>预览颜色替换</button>
+                </div>
+                <p class="hint">仅替换该 SVG 的实色，不改几何；多个原色可以映射到同一目标色。最多 16 个映射。</p>
+              </div>
+            </details>
+
+            <details class="group">
+              <summary>
+                <span class="group-label">增强</span>
+                <span class="group-meta">轻量本地调整</span>
+                <svg class="icon group-chevron" aria-hidden="true"><use href="#i-chevron"></use></svg>
+              </summary>
+              <div class="group-body">
+                <div class="range">
+                  <label class="field-label" for="brightness-range">亮度 <output id="brightness-readout">1.00</output></label>
+                  <div class="range-row">
+                    <input id="brightness-range" type="range" min="0.2" max="3" step="0.05" value="1">
+                    <input id="brightness-value" type="number" min="0.2" max="3" step="0.05" value="1" inputmode="decimal" aria-label="亮度数值">
+                  </div>
+                </div>
+                <div class="range">
+                  <label class="field-label" for="contrast-range">对比度 <output id="contrast-readout">1.00</output></label>
+                  <div class="range-row">
+                    <input id="contrast-range" type="range" min="0.2" max="3" step="0.05" value="1">
+                    <input id="contrast-value" type="number" min="0.2" max="3" step="0.05" value="1" inputmode="decimal" aria-label="对比度数值">
+                  </div>
+                </div>
+                <div class="field">
+                  <label class="field-label" for="denoise">降噪</label>
+                  <select id="denoise">
+                    <option value="0">关闭</option>
+                    <option value="1">3×3 中值</option>
+                    <option value="2">5×5 中值</option>
+                  </select>
+                </div>
+                <div class="range">
+                  <label class="field-label" for="sharpen-range">锐化 <output id="sharpen-readout">0.00</output></label>
+                  <div class="range-row">
+                    <input id="sharpen-range" type="range" min="0" max="1" step="0.05" value="0">
+                    <input id="sharpen-value" type="number" min="0" max="1" step="0.05" value="0" inputmode="decimal" aria-label="锐化数值">
+                  </div>
+                </div>
+                <label class="check-row">
+                  <input type="checkbox" id="auto-preview-enhance">
+                  <span><strong>轻增强自动预览</strong><small>调整后延迟生成预览；不会自动应用</small></span>
+                </label>
+                <button class="btn btn-line btn-wide" id="enhance-button" type="button" disabled>仅执行轻增强</button>
+                <p class="hint">增强保留 alpha 并创建新版本；原图不变。预览与正式应用使用同一组参数。</p>
+              </div>
+            </details>
+          </section>
+
+          <section class="stage-panel" id="ai-panel" data-stage="4" aria-labelledby="ai-heading">
+            <h2 class="tools-title" id="ai-heading">候选</h2>
+            <div class="tools-head-row">
+              <span class="tag" id="ai-state-badge">未开始</span>
+              <button class="icon-btn" id="refresh-ai-status" type="button" aria-label="刷新 AI 状态" title="刷新 AI 状态">
+                <svg class="icon" aria-hidden="true"><use href="#i-refresh"></use></svg>
+              </button>
+            </div>
+
+            <div class="service" id="ai-service" role="status" aria-live="polite">
+              <span class="status-dot" id="ai-service-dot" aria-hidden="true"></span>
+              <div class="service-copy">
+                <strong id="ai-service-label">正在读取 AI 能力…</strong>
+                <p id="ai-service-note">本地处理不依赖此状态。</p>
+              </div>
+              <span class="chip" id="ai-vector-summary">彩色 · 8 色 · 中细节</span>
+            </div>
+
+            <div class="ai-start" id="ai-start">
+              <label class="field" for="ai-call-id">
+                <span class="field-label">归档编号 <em>可选</em></span>
+                <input id="ai-call-id" type="text" autocomplete="off" spellcheck="false" placeholder="粘贴已归档拆层编号">
+              </label>
+              <p class="hint">填写已归档编号可只读复用候选，不生成、不产生新费用；图像不匹配时不会加载。</p>
+
+              <div class="consents" id="ai-consents">
+                <label class="check-row">
+                  <input type="checkbox" id="ai-consent-upload">
+                  <span><strong>允许上传当前图像</strong><small>默认关闭，单独确认</small></span>
+                </label>
+                <label class="check-row">
+                  <input type="checkbox" id="ai-consent-charge">
+                  <span><strong>同意可能产生的费用</strong><small>默认关闭，单独确认</small></span>
+                </label>
+                <p class="hint">新生成需要两项都确认。复用归档时不会上传，也不会产生新费用。</p>
+              </div>
+
+              <button class="btn btn-solid btn-wide" id="ai-start-button" type="button" disabled>生成 AI 候选</button>
+              <p class="hint" id="ai-start-note">上传图像后可开始；也可填入归档编号复用。</p>
+            </div>
+
+            <p class="field-error" id="ai-error" role="alert" hidden></p>
+
+            <div class="empty-note" id="ai-empty">
+              <strong>AI 候选不会自动合并</strong>
+              <p>完成拆层后需要你明确选择图层。底图只作参考，所有候选默认不选。</p>
+            </div>
+
+            <div class="pipeline" id="ai-pipeline" hidden>
+              <div class="pipeline-head">
+                <div>
+                  <strong id="ai-pipeline-title">AI 拆层流程</strong>
+                  <p id="ai-pipeline-meta">等待更新</p>
+                </div>
+                <div class="pipeline-acts">
+                  <button class="text-btn" id="ai-refresh-pipeline" type="button" hidden>重新查询</button>
+                  <span class="status-pill" id="ai-pipeline-state" role="status" aria-live="polite">准备中</span>
+                </div>
+              </div>
+              <ol class="steps" id="ai-steps"></ol>
+              <p class="field-error" id="ai-pipeline-error" role="alert" hidden></p>
+              <div class="decision" id="ai-decision">
+                <span id="ai-selection-note">尚未选择图层</span>
+                <div class="decision-acts">
+                  <button class="btn btn-quiet btn-sm" id="ai-use-local" type="button">改用本地流程</button>
+                  <button class="btn btn-line btn-sm" id="ai-reject" type="button">拒绝候选</button>
+                  <button class="btn btn-solid btn-sm" id="ai-compose" type="button" disabled>合成所选图层</button>
+                </div>
+              </div>
+              <div class="results" id="ai-result" hidden>
+                <p class="hint">流程结果已加入版本区，可继续预览、下载或设为当前输入。</p>
+                <div id="ai-result-list" class="results-list"></div>
+              </div>
+            </div>
+
+            <div class="candidates" id="ai-candidates" hidden>
+              <div class="section-head">
+                <h3>候选图层</h3>
+                <span class="chip chip-mark">AI 生成 · 几何未核验</span>
+              </div>
+              <p class="hint">底图仅参考，不可作为纹样图层；合成后按当前矢量参数生成可选 SVG。</p>
+              <div class="references" id="ai-reference-list"></div>
+              <div class="layers" id="ai-layer-list" role="group" aria-label="AI 候选图层"></div>
+            </div>
+          </section>
+
+          <section class="stage-panel" id="mask-panel" data-stage="5" aria-labelledby="mask-heading">
+            <h2 class="tools-title" id="mask-heading">蒙版</h2>
+            <p class="tools-note">只修正前景蒙版。在同一次提取的源图与蒙版上编辑，保存后生成新版本。</p>
+
+            <div class="empty-note" id="mask-empty">
+              <p>运行提取后，这里会出现可编辑的源图与蒙版组合。</p>
+            </div>
+
+            <div class="mask-setup" id="mask-setup" hidden>
+              <label class="field" for="mask-pair">
+                <span class="field-label">编辑组合</span>
+                <select id="mask-pair"></select>
+              </label>
+              <p class="hint" id="mask-pair-note">只能编辑同一来源、同一尺寸的蒙版。</p>
+              <button class="btn btn-solid btn-wide" id="mask-open" type="button">打开蒙版画笔</button>
+              <p class="hint">画笔按原图像素工作；保存前可随时取消。默认训练与展示授权保持关闭。</p>
+            </div>
+          </section>
+
+          <section class="stage-panel" id="repair-panel" data-stage="6" aria-labelledby="repair-heading">
+            <h2 class="tools-title" id="repair-heading">修复</h2>
+            <div class="tools-head-row">
+              <span class="tag" id="repair-state-badge">未开始</span>
+              <button class="icon-btn" id="repair-refresh" type="button" aria-label="刷新修复记录" title="刷新修复记录" hidden>
+                <svg class="icon" aria-hidden="true"><use href="#i-refresh"></use></svg>
+              </button>
+            </div>
+            <p class="tools-note">只修复当前框选区域。新生成必须分别同意上传与费用；归档调用可在 AI 新生成禁用时只读复用。</p>
+            <span class="chip chip-mark">AI 推测 · 几何未核验</span>
+
+            <fieldset class="fieldset">
+              <legend class="field-label">修复意图 <em>固定两项</em></legend>
+              <div class="choices">
+                <label class="choice">
+                  <input type="radio" name="repair-intent" value="restore_small_gap" checked>
+                  <span><strong>补齐小面积缺口</strong><small>restore_small_gap</small></span>
+                </label>
+                <label class="choice">
+                  <input type="radio" name="repair-intent" value="reconnect_lines">
+                  <span><strong>接续断裂线条</strong><small>reconnect_lines</small></span>
+                </label>
+              </div>
+            </fieldset>
+
+            <div class="pair-fields">
+              <div class="field">
+                <label class="field-label" for="repair-feather">羽化（原图像素）</label>
+                <input id="repair-feather" type="number" min="0" max="64" step="1" value="0" inputmode="numeric">
+              </div>
+              <div class="field">
+                <label class="field-label" for="repair-size">输出尺寸</label>
+                <select id="repair-size">
+                  <option value="1K" selected>1K · 默认</option>
+                  <option value="1.5K">1.5K</option>
+                  <option value="2K">2K</option>
+                </select>
+              </div>
+            </div>
+            <p class="hint">羽化权重只生成在编辑矩形内；编辑矩形外必须保持原输入，不接受强制缩放补齐。</p>
+
+            <div class="bbox-summary" id="repair-bbox-summary">
+              <span class="status-dot" aria-hidden="true"></span>
+              <span id="repair-bbox-text">尚未选择当前输入与框选区域。</span>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="repair-call-id">已归档编辑调用 <em>可选</em></label>
+              <input id="repair-call-id" type="text" autocomplete="off" spellcheck="false" placeholder="粘贴已归档编辑调用编号">
+            </div>
+            <p class="hint">归档复用要求同一输入、矩形、意图与尺寸；只读复用，不上传、不产生新费用。</p>
+
+            <div class="field">
+              <label class="field-label" for="repair-damage-mask">损伤标注 <em>可选</em></label>
+              <select id="repair-damage-mask">
+                <option value="">不提供损伤标注</option>
+              </select>
+            </div>
+            <p class="hint" id="repair-damage-note">不会把当前矩形当作损伤真值；只接受已登记、同源、同尺寸的损伤标注。</p>
+
+            <div class="consents" id="repair-consents">
+              <label class="check-row">
+                <input type="checkbox" id="repair-consent-upload">
+                <span><strong>允许上传当前图像</strong><small>默认关闭，单独确认</small></span>
+              </label>
+              <label class="check-row">
+                <input type="checkbox" id="repair-consent-charge">
+                <span><strong>同意可能产生的费用</strong><small>默认关闭，单独确认</small></span>
+              </label>
+            </div>
+            <p class="hint">新修复需要两项都确认；页面不会自动重发收费请求。复用归档时两项都以 false 提交。</p>
+
+            <button class="btn btn-solid btn-wide" id="repair-start" type="button" disabled>提交修复任务</button>
+            <p class="hint" id="repair-start-note">先选择规范输入并框选缺损区域。</p>
+
+            <p class="field-error" id="repair-error" role="alert" hidden></p>
+
+            <div class="empty-note" id="repair-empty">
+              <strong>候选不会自动接受</strong>
+              <p>任务完成后在此比较原输入、全图候选与局部保护版。默认接受局部保护版；接受整图候选需额外勾选确认。</p>
+            </div>
+
+            <div class="record" id="repair-record" hidden>
+              <div class="record-head">
+                <div>
+                  <strong id="repair-record-title">修复记录</strong>
+                  <p id="repair-record-meta">等待更新</p>
+                </div>
+                <div class="record-badges">
+                  <span class="chip" id="repair-revision">revision —</span>
+                  <span class="status-pill" id="repair-status" role="status" aria-live="polite">已提交</span>
+                </div>
+              </div>
+
+              <div class="warnings" id="repair-warnings" hidden></div>
+              <div class="assets" id="repair-assets"></div>
+
+              <div class="row">
+                <button class="btn btn-line btn-sm" id="repair-compare" type="button">
+                  <svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg>
+                  <span>比较三版</span>
+                </button>
+                <button class="btn btn-quiet btn-sm" id="repair-edit-view" type="button" disabled>查看编辑区域</button>
+                <button class="btn btn-quiet btn-sm" id="repair-diff-view" type="button" disabled>查看差异图</button>
+              </div>
+
+              <div class="metrics" id="repair-metrics" hidden></div>
+
+              <div class="decision" id="repair-decision">
+                <p id="repair-decision-note">等待修复候选。</p>
+                <div class="banner banner-warn" id="repair-full-warning" hidden>
+                  <span class="banner-mark"><svg class="icon" aria-hidden="true"><use href="#i-alert"></use></svg></span>
+                  <div class="banner-copy">
+                    <strong>整图候选可能改变框外像素</strong>
+                    <p>全图候选不是局部保护版，不能保证矩形外与原输入一致。选择它必须单独勾选下方确认。</p>
+                    <label class="check-row">
+                      <input type="checkbox" id="repair-accept-full">
+                      <span>我已知晓并接受整图可能变化，仍选择全图候选</span>
+                    </label>
+                  </div>
+                </div>
+                <div class="decision-acts">
+                  <button class="btn btn-quiet btn-sm" id="repair-reject" type="button">拒绝修复</button>
+                  <button class="btn btn-solid btn-sm" id="repair-accept" type="button" disabled>接受局部保护版</button>
+                </div>
+                <p class="hint">接受会创建新的已接受修复资产并切换输入；拒绝不改变当前输入，也不会自动再生成或收费。</p>
+              </div>
+
+              <div class="metrics" id="repair-decision-result" hidden></div>
+              <button class="btn btn-line btn-wide" id="repair-next" type="button" hidden>用已接受版本继续提取 / SVG</button>
+            </div>
+          </section>
+
+          <section class="stage-panel" id="tile-panel" data-stage="7" aria-labelledby="tile-heading">
+            <h2 class="tools-title" id="tile-heading">平铺</h2>
+            <p class="tools-note">整数复制，不自动消缝。复用现有裁切单元，再按整数位移复制。</p>
+
+            <label class="field" for="tile-unit">
+              <span class="field-label">裁切单元</span>
+              <select id="tile-unit">
+                <option value="">请选择已保存的裁切单元</option>
+              </select>
+            </label>
+            <div class="row">
+              <button class="btn btn-line btn-sm" id="tile-crop" type="button" disabled>裁切当前框选为单元</button>
+              <button class="btn btn-quiet btn-sm" id="tile-unit-download" type="button" disabled>下载单元</button>
+            </div>
+            <p class="hint">单元复用裁切接口保存的 cropped 资产与 bbox 映射；不会另建一套裁切流程。</p>
+
+            <div class="unit-preview" id="tile-unit-preview" hidden>
+              <div class="unit-thumb">
+                <img id="tile-unit-image" alt="裁切单元预览">
+              </div>
+              <div class="unit-copy">
+                <strong id="tile-unit-name">裁切单元</strong>
+                <p id="tile-unit-meta">—</p>
+              </div>
+            </div>
+
+            <fieldset class="fieldset">
+              <legend class="field-label">平铺预设</legend>
+              <div class="segmented">
+                <label><input type="radio" name="tile-preset" value="2" checked><span>2 × 2</span></label>
+                <label><input type="radio" name="tile-preset" value="3"><span>3 × 3</span></label>
+              </div>
+            </fieldset>
+            <div class="field">
+              <label class="field-label" for="tile-seam">接缝观察</label>
+              <select id="tile-seam">
+                <option value="not_reviewed" selected>尚未检查</option>
+                <option value="visible">肉眼可见接缝</option>
+                <option value="not_obvious">暂未看到明显接缝</option>
+              </select>
+            </div>
+            <p class="hint">这是你的目测记录，不是系统的无缝判定；不提供自动消缝。</p>
+            <p class="tile-note" id="tile-note">选择单元后显示输出尺寸与 4 MP 上限检查。</p>
+            <p class="field-error" id="tile-error" role="alert" hidden></p>
+            <button class="btn btn-solid btn-wide" id="tile-generate" type="button" disabled>生成平铺预览</button>
+
+            <div class="tile-result" id="tile-result" hidden>
+              <div class="section-head">
+                <strong>平铺预览</strong>
+                <span class="chip" id="tile-result-seam">接缝未检查</span>
+              </div>
+              <div class="tile-visual">
+                <img id="tile-result-image" alt="平铺预览">
+              </div>
+              <p class="tile-meta" id="tile-result-meta">—</p>
+              <div class="row">
+                <button class="btn btn-line btn-sm" id="tile-download" type="button">下载平铺 PNG</button>
+                <button class="btn btn-quiet btn-sm" id="tile-zip" type="button">打包单元与平铺</button>
+              </div>
+              <p class="hint">输出尺寸为列数 × 单元宽、行数 × 单元高；超过 4 MP 会拒绝，不会隐式缩放。</p>
+            </div>
+          </section>
+
+        </div>
+      </aside>
+    </main>
+
+    <section class="status" id="status-bar" aria-label="当前任务与评价">
+      <div class="status-row">
+        <span class="status-key">任务</span>
+        <span class="status-pill" id="task-status" role="status" aria-live="polite" hidden>等待</span>
+        <p class="status-line" id="task-empty">尚未运行任务</p>
+        <div class="status-acts">
+          <button class="btn btn-line btn-xs" id="task-cancel" type="button" hidden>取消任务</button>
+          <button class="btn btn-line btn-xs" id="task-retry" type="button" hidden>重试此任务</button>
+          <button class="btn btn-quiet btn-xs" id="task-poll" type="button" hidden>重新查询</button>
+          <button class="btn btn-quiet btn-xs" id="task-evaluate" type="button" hidden>评价此任务</button>
+          <button class="status-toggle" type="button" aria-expanded="false" aria-controls="status-body">详情</button>
+        </div>
+      </div>
+
+      <div class="status-body" id="status-body">
+        <div class="task-body" id="task-body" hidden>
+          <div class="task-meta">
+            <span id="task-kind">—</span>
+            <span id="task-id">—</span>
+            <span id="task-time">—</span>
+          </div>
+          <ol class="steps" id="task-steps"></ol>
+          <p class="field-error" id="task-error" role="alert" hidden></p>
+          <p class="task-poll-error" id="task-poll-error" role="status" hidden></p>
+          <p class="task-cancel-note" id="task-cancel-note" role="status" hidden></p>
+          <div class="results-list" id="task-results"></div>
+        </div>
+
+        <section class="feedback" aria-labelledby="feedback-title">
+          <div class="section-head">
+            <h3 id="feedback-title">任务评价</h3>
+            <span class="chip" id="feedback-job-chip">未选择</span>
+          </div>
+          <p class="hint" id="feedback-empty">已完成或失败的任务可评价。授权项分别保存，且默认关闭。</p>
+          <form class="feedback-form" id="feedback-form" autocomplete="off" hidden>
+            <fieldset class="fieldset">
+              <legend class="field-label">评分 <em>必填</em></legend>
+              <div class="rating" id="rating-stars">
+                <label><input type="radio" name="rating" value="1"><span aria-hidden="true">★</span><span class="visually-hidden">1 分</span></label>
+                <label><input type="radio" name="rating" value="2"><span aria-hidden="true">★</span><span class="visually-hidden">2 分</span></label>
+                <label><input type="radio" name="rating" value="3"><span aria-hidden="true">★</span><span class="visually-hidden">3 分</span></label>
+                <label><input type="radio" name="rating" value="4"><span aria-hidden="true">★</span><span class="visually-hidden">4 分</span></label>
+                <label><input type="radio" name="rating" value="5"><span aria-hidden="true">★</span><span class="visually-hidden">5 分</span></label>
+              </div>
+              <span class="rating-readout" id="rating-readout">未评分</span>
+            </fieldset>
+
+            <fieldset class="fieldset">
+              <legend class="field-label">问题标签 <em>可选</em></legend>
+              <div class="issues">
+                <label><input type="checkbox" name="feedback-issue" value="edges"><span>边缘</span></label>
+                <label><input type="checkbox" name="feedback-issue" value="details"><span>细节</span></label>
+                <label><input type="checkbox" name="feedback-issue" value="color"><span>色彩</span></label>
+                <label><input type="checkbox" name="feedback-issue" value="speed"><span>速度</span></label>
+                <label><input type="checkbox" name="feedback-issue" value="stability"><span>稳定性</span></label>
+                <label><input type="checkbox" name="feedback-issue" value="other"><span>其他</span></label>
+              </div>
+            </fieldset>
+
+            <label class="field" for="feedback-comment">
+              <span class="field-label">补充说明 <em>可选</em></span>
+              <textarea id="feedback-comment" rows="2" maxlength="500" placeholder="描述可复现的问题或满意之处"></textarea>
+            </label>
+
+            <div class="consents">
+              <label class="check-row">
+                <input type="checkbox" id="allow-display">
+                <span><strong>允许展示</strong><small>默认关闭，单独授权</small></span>
+              </label>
+              <label class="check-row">
+                <input type="checkbox" id="allow-training">
+                <span><strong>允许训练</strong><small>默认关闭，单独授权</small></span>
+              </label>
+            </div>
+            <p class="hint">两项授权分别保存，勾选前不会授权。备注与来源记录不代表来源许可证明。</p>
+            <p class="field-error" id="feedback-error" role="alert" hidden></p>
+            <button class="btn btn-line btn-wide" id="feedback-submit" type="button" disabled>提交评价</button>
+          </form>
+          <div class="feedback-success" id="feedback-success" hidden>
+            <svg class="icon" aria-hidden="true"><use href="#i-check"></use></svg>
+            <div><strong>评价已保存</strong><p id="feedback-success-text">感谢反馈。</p></div>
+          </div>
+        </section>
+      </div>
+    </section>
+  </div>
+
+  <div class="scrim" id="history-scrim" hidden></div>
+  <aside class="drawer" id="history-drawer" role="dialog" aria-modal="true" aria-labelledby="history-title" hidden>
+    <header class="drawer-head">
+      <div>
+        <h2 id="history-title">历史任务</h2>
+        <p>本机记录</p>
+      </div>
+      <button class="icon-btn" id="close-history" type="button" aria-label="关闭历史抽屉" title="关闭">
+        <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
+      </button>
+    </header>
+    <div class="drawer-tools">
+      <span id="history-summary">尚未加载</span>
+      <button class="icon-btn" id="refresh-history" type="button" aria-label="刷新历史任务" title="刷新">
+        <svg class="icon" aria-hidden="true"><use href="#i-refresh"></use></svg>
+      </button>
+    </div>
+    <div class="drawer-list" id="history-list"></div>
+    <div class="drawer-foot">
+      <button class="btn btn-line btn-sm" id="history-more" type="button" hidden>加载更多</button>
+    </div>
+  </aside>
+
+  <dialog class="dialog" id="confirm-dialog" aria-labelledby="confirm-title">
+    <form method="dialog" class="dialog-card">
+      <h2 id="confirm-title">确认操作</h2>
+      <p id="confirm-message"></p>
+      <div class="dialog-acts">
+        <button class="btn btn-quiet" id="confirm-cancel" type="submit" value="cancel">保留</button>
+        <button class="btn btn-danger" id="confirm-accept" type="submit" value="confirm">继续</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="dialog" id="compare-dialog" aria-labelledby="compare-title">
+    <div class="dialog-card is-wide">
+      <header class="dialog-head">
+        <div>
+          <h2 id="compare-title">输入与成果对比</h2>
+          <p>版本检查</p>
+        </div>
+        <button class="icon-btn" id="close-compare" type="button" aria-label="关闭对比" title="关闭">
+          <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
+        </button>
+      </header>
+      <div class="compare-grid" id="compare-grid"></div>
+      <p class="hint">两幅图均从本机受控读取后显示；SVG 只作为图像渲染，不写入页面结构。</p>
+    </div>
+  </dialog>
+
+  <dialog class="dialog" id="repair-compare-dialog" aria-labelledby="repair-compare-title">
+    <div class="dialog-card is-wide">
+      <header class="dialog-head">
+        <div>
+          <h2 id="repair-compare-title">原输入 / 全图候选 / 局部保护版</h2>
+          <p id="repair-compare-subtitle">AI 推测，几何未核验；差异图只表示数值变化。</p>
+        </div>
+        <button class="icon-btn" id="close-repair-compare" type="button" aria-label="关闭修复比较" title="关闭">
+          <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
+        </button>
+      </header>
+      <div class="view-tabs" role="group" aria-label="修复比较视图">
+        <button class="btn btn-line btn-sm is-active" type="button" data-repair-view="three">三版并列</button>
+        <button class="btn btn-ghost btn-sm" type="button" data-repair-view="edit" disabled>编辑区域</button>
+        <button class="btn btn-ghost btn-sm" type="button" data-repair-view="difference" disabled>差异图</button>
+      </div>
+      <p class="field-error" id="repair-compare-error" role="alert" hidden></p>
+      <div class="compare-body" id="repair-compare-body"></div>
+      <p class="hint" id="repair-compare-note">三版同时显示；局部保护版的框外像素应与原输入一致。差异图不表示质量改善。</p>
+    </div>
+  </dialog>
+
+  <dialog class="dialog" id="asset-preview-dialog" aria-labelledby="asset-preview-title">
+    <div class="dialog-card is-wide">
+      <header class="dialog-head">
+        <div>
+          <h2 id="asset-preview-title">候选预览</h2>
+          <p id="asset-preview-kicker">候选预览</p>
+          <p id="asset-preview-meta"></p>
+        </div>
+        <button class="icon-btn" id="close-asset-preview" type="button" aria-label="关闭候选预览" title="关闭">
+          <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
+        </button>
+      </header>
+      <div class="preview-badges" id="asset-preview-badges"></div>
+      <div class="preview-body" id="asset-preview-body"></div>
+      <div class="dialog-acts">
+        <button class="btn btn-line btn-sm" id="asset-preview-download" type="button">
+          <svg class="icon" aria-hidden="true"><use href="#i-download"></use></svg>
+          <span>下载此版本</span>
+        </button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="dialog" id="brush-dialog" aria-labelledby="brush-title">
+    <div class="dialog-card is-wide brush-card">
+      <header class="dialog-head">
+        <div>
+          <h2 id="brush-title">前景蒙版画笔</h2>
+          <p id="brush-subtitle">在源图上按原图像素添加或擦除前景。</p>
+        </div>
+        <button class="icon-btn" id="brush-close" type="button" aria-label="关闭蒙版画笔" title="关闭">
+          <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
+        </button>
+      </header>
+
+      <div class="brush-layout">
+        <div class="brush-stage">
+          <div class="brush-viewport" id="brush-viewport">
+            <canvas id="brush-canvas" tabindex="0" aria-label="前景蒙版编辑画布"></canvas>
+            <span class="brush-cursor" id="brush-cursor" hidden></span>
+            <div class="brush-loading" id="brush-loading">
+              <span class="spinner" aria-hidden="true"></span>
+              <p id="brush-loading-text">正在读取源图与蒙版…</p>
+            </div>
+          </div>
+          <div class="brush-legend">
+            <span><i class="brush-swatch"></i>前景蒙版覆盖</span>
+            <span>添加 / 擦除均按原图像素</span>
+          </div>
+        </div>
+
+        <aside class="brush-controls">
+          <p class="brush-pair" id="brush-pair-meta">—</p>
+
+          <fieldset class="fieldset">
+            <legend class="field-label">画笔模式</legend>
+            <div class="segmented">
+              <label><input type="radio" name="brush-mode" value="add" checked><span>添加</span></label>
+              <label><input type="radio" name="brush-mode" value="erase"><span>擦除</span></label>
+            </div>
+          </fieldset>
+
+          <fieldset class="fieldset">
+            <legend class="field-label">蒙版算法</legend>
+            <div class="segmented">
+              <label><input type="radio" name="brush-algorithm" value="brush" checked><span>逐笔直接</span></label>
+              <label><input type="radio" name="brush-algorithm" value="grabcut"><span>GrabCut 细化</span></label>
+            </div>
+          </fieldset>
+          <div class="field" id="brush-iterations-field">
+            <label class="field-label" for="brush-iterations">GrabCut 迭代</label>
+            <input id="brush-iterations" type="number" min="1" max="10" step="1" value="5" inputmode="numeric">
+          </div>
+          <p class="hint" id="brush-algorithm-note">逐笔直接：画布叠加接近最终蒙版。</p>
+
+          <div class="range">
+            <label class="field-label" for="brush-radius-range">笔刷半径 <output id="brush-radius-readout">6</output> px</label>
+            <div class="range-row">
+              <input id="brush-radius-range" type="range" min="1" max="64" step="1" value="6">
+              <input id="brush-radius-value" type="number" min="1" max="64" step="1" value="6" inputmode="numeric" aria-label="笔刷半径数值">
+            </div>
+            <div class="preset-row" role="group" aria-label="常用笔刷半径">
+              <button class="btn btn-quiet btn-xs" type="button" data-brush-radius="2">2</button>
+              <button class="btn btn-quiet btn-xs" type="button" data-brush-radius="6">6</button>
+              <button class="btn btn-quiet btn-xs" type="button" data-brush-radius="12">12</button>
+              <button class="btn btn-quiet btn-xs" type="button" data-brush-radius="24">24</button>
+            </div>
+            <p class="hint">1–64 原图像素连续调整；保存时按每一笔的实际半径提交。</p>
+          </div>
+
+          <label class="check-row">
+            <input type="checkbox" id="brush-invert">
+            <span><strong>反相蒙版</strong><small>先反相，再应用去噪与笔画</small></span>
+          </label>
+          <div class="field">
+            <label class="field-label" for="brush-denoise">去噪</label>
+            <select id="brush-denoise">
+              <option value="0">关闭</option>
+              <option value="1">3×3 中值</option>
+              <option value="2">5×5 中值</option>
+            </select>
+          </div>
+          <label class="check-row">
+            <input type="checkbox" id="brush-overlay" checked>
+            <span><strong>显示蒙版叠加</strong><small>仅影响本地预览</small></span>
+          </label>
+
+          <div class="brush-stats">
+            <span id="brush-counts">0 笔 · 0 点</span>
+            <span id="brush-status" role="status" aria-live="polite">未修改</span>
+          </div>
+          <div class="row brush-history-acts">
+            <button class="btn btn-quiet btn-sm" id="brush-undo" type="button" disabled title="撤销上一笔或上一次参数切换（Ctrl+Z）">撤销一步</button>
+            <button class="btn btn-quiet btn-sm" id="brush-redo" type="button" disabled title="重做下一笔（Ctrl+Shift+Z）">重做</button>
+          </div>
+          <p class="field-error" id="brush-error" role="alert" hidden></p>
+
+          <div class="brush-acts">
+            <button class="btn btn-quiet" id="brush-cancel" type="button">取消本次修改</button>
+            <button class="btn btn-solid" id="brush-save" type="button" disabled>保存新蒙版</button>
+          </div>
+          <p class="hint">保存会创建新蒙版、透明图与轮廓，旧版本不变。最多 64 笔、2048 个点；保存前可逐笔撤销。</p>
+        </aside>
+      </div>
+    </div>
+  </dialog>
+
+  <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="false"></div>
+</body>
+</html>

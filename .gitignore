@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.env
+.env.*
+!.env.example
+storage/
+node_modules/
+frontend/dist/
+build/
+dist/
+
+# Local environments, tool caches and machine-generated files
+.venv/
+venv/
+.ruff_cache/
+.coverage
+htmlcov/
+*.log
+.DS_Store
+Thumbs.db
