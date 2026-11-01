@@ -17,6 +17,8 @@ from app.services.local_workbench import RGB_KINDS, _output, _read_image
 from app.services.vector import vectorize
 from app.storage import ServiceError, canonical_json
 from app.workbench_store import validate_key
+from app.providers.prompts import decomposition_prompt
+from app.services.workflow import WORKFLOW_ID, WORKFLOW_VERSION
 
 
 def archived_layers(store, call, input_id):
@@ -90,7 +92,44 @@ class AssistedWorkbench:
                 raise ServiceError("PROVIDER_INPUT_DIMENSIONS", "AI decomposition requires 262144..25000000 pixels and an aspect ratio in 1/16..16", 422)
             if source["bytes"] > DEFAULT_LIMITS.max_upload_bytes:
                 raise ServiceError("NORMALIZED_TOO_LARGE", "Create an explicit smaller input before sending this image", 413)
-        return self.store.create_ai_flow(input_id, values, key, archived_result=archived)
+        prompt_text = decomposition_prompt(values["prompt_version"])
+        snapshot = {"id": WORKFLOW_ID, "version": WORKFLOW_VERSION, "snapshot": {
+            "model": self.settings.model if self.settings else None,
+            "base_url": self.settings.base_url if self.settings else None,
+            "prompt_version": values["prompt_version"], "prompt_text": prompt_text,
+            "input_asset_id": input_id, "size": values["size"], "vector": values["vector"],
+            "selection_policy": values["selection_policy"], "provider_call_id": values["provider_call_id"]}}
+        if archived:
+            call = self.store.get_call(values["provider_call_id"])
+            snapshot["snapshot"].update({k: call["request"].get(k) for k in ("model", "base_url", "prompt_version", "prompt_text", "size")})
+        return self.store.create_ai_flow(input_id, values, key, archived_result=archived, snapshot=snapshot)
+
+    def rerun(self, flow_id, payload, key):
+        """Create an explicit local branch from immutable, workflow-owned assets."""
+        from app.storage import digest
+        validate_key(key)
+        values = payload.model_dump(mode="json")
+        self.local.safe_text(key + canonical_json(values))
+        existing = self.store.existing("rerun/" + flow_id, key, digest(canonical_json(values).encode()))
+        if existing:
+            return self.store.get_job(existing)
+        flow = self.store.get_ai_flow(flow_id)
+        if flow["revision"] != payload.revision:
+            raise ServiceError("STALE_REVISION", "Reload the workflow before creating a local branch", 409)
+        if payload.action == "compose":
+            self.validate_selection(flow["decomposition_job_id"], values["layer_ids"])
+            kind, input_id = "compose-layers", flow["input_asset_id"]
+            params = {"decomposition_job_id": flow["decomposition_job_id"], "layer_ids": values["layer_ids"],
+                      "vector": values["vector"] if "vector" in payload.model_fields_set else flow["vector"]}
+        else:
+            input_id = values["input_asset_id"]
+            if input_id not in flow["recovery"]["vector_input_asset_ids"]:
+                raise ServiceError("WORKFLOW_INPUT_MISMATCH", "Choose a PNG produced by this workflow or its local correction", 422)
+            metadata, _ = self.store.get_asset(input_id)
+            if metadata["width"] * metadata["height"] > DEFAULT_LIMITS.max_vector_pixels:
+                raise ServiceError("WORKING_COPY_REQUIRED", "Create a working copy before vectorization", 413)
+            kind, params = "vectorize", values["vector"]
+        return self.store.submit_workflow_branch(flow_id, values, key, kind, input_id, params)
 
     def validate_selection(self, decomposition_id, layer_ids):
         layers = self.layers(decomposition_id)
@@ -124,7 +163,7 @@ class AssistedWorkbench:
             raise ServiceError("BRUSH_OUT_OF_BOUNDS", "Brush points must be inside the current image", 422)
         return self.store.submit("refine-mask", source["asset_id"], values, key)
 
-    def continue_pipeline(self, flow_id, payload, key):
+    def continue_pipeline(self, flow_id, payload, key, *, actor="human"):
         validate_key(key)
         values = payload.model_dump(mode="json")
         scope = "continue/" + flow_id
@@ -154,7 +193,7 @@ class AssistedWorkbench:
                 if request.extract.mode == "grabcut" and request.extract.bbox.as_tuple() == (0, 0, metadata["width"], metadata["height"]):
                     raise ServiceError("GRABCUT_NEEDS_BACKGROUND", "Leave background outside the GrabCut rectangle", 422)
             kind, parameters = "pipeline", request.model_dump(mode="json", exclude={"input_asset_id"})
-        return self.store.continue_ai_flow(flow_id, values, key, kind=kind, parameters=parameters)
+        return self.store.continue_ai_flow(flow_id, values, key, kind=kind, parameters=parameters, actor=actor)
 
 
 def _publish_mask_products(store, job, token, source, image, mask, *, params, extra=None):
@@ -233,10 +272,14 @@ def execute_assisted(store, job, token):
     parents = [{"asset_id": layer["layer_id"], "role": "selected_candidate_layer"} for layer in ordered]
     parents.extend({"asset_id": layer["asset"]["asset_id"], "role": "generated_layer_source"} for layer in ordered)
     parents.append({"asset_id": base["asset_id"], "role": "basemap_coordinate_reference"})
+    origin = "human"
+    if params.get("ai_pipeline_id"):
+        origin = (store.get_ai_flow(params["ai_pipeline_id"]).get("decision") or {}).get("actor", "human")
     extra = {"provider_call_id": layers["provider_call_id"], "decomposition_job_id": params["decomposition_job_id"],
              "selected_layer_ids": [layer["layer_id"] for layer in ordered], "alpha_threshold": 128,
              "source_rgb_asset_id": candidate_id, "source_input_asset_id": job["input_asset_id"],
-             "composition": "ordered_source_over", "human_decision": "selected_candidate_layers"}
+             "composition": "ordered_source_over", "selection_origin": origin,
+             "human_decision": "selected_candidate_layers" if origin == "human" else None}
     contour, contour_meta = contour_line_art(mask)
     outputs = [_output(mask, "foreground_mask", source, job_id, asset_id=mask_id, parents=parents,
                         extra={**extra, "mask_kind": "foreground_mask", "values": [0, 255]}),
@@ -260,11 +303,17 @@ def execute_decomposition(store, job, token, settings, *, transport=None):
     """One budgeted provider attempt, never an implicit provider retry."""
     from app.providers.seedream import SeedreamClient
     from app.services.provider_validation import ProviderValidationService
+    from dataclasses import replace
+    snapshot = job["parameters"].get("execution_snapshot")
+    if snapshot:
+        settings = replace(settings, model=snapshot["model"], base_url=snapshot["base_url"])
     request = ValidationRequest(input_asset_id=job["input_asset_id"], operation="decompose", intent="separate_pattern",
+                                prompt_version=job["parameters"].get("prompt_version", "s0-seedream-v1"),
                                 size=job["parameters"]["size"], consent_to_upload=job["parameters"]["consent_to_upload"],
                                 consent_to_charge=job["parameters"]["consent_to_charge"])
     store.step(job["job_id"], token, "decompose-layers", "running")
-    call, _ = ProviderValidationService(settings, store, SeedreamClient(settings, transport=transport)).submit(request, "ai-" + job["job_id"])
+    call, _ = ProviderValidationService(settings, store, SeedreamClient(settings, transport=transport)).submit(
+        request, "ai-" + job["job_id"], prompt_text=snapshot.get("prompt_text") if snapshot else None)
     store.record_provider_result(job["job_id"], token, call)
     if call["state"] != "succeeded":
         raise ServiceError(call["result"].get("error_code", "DECOMPOSITION_FAILED"),

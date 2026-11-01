@@ -7,6 +7,7 @@ from pydantic import Field, model_validator
 
 from app.schemas.contracts import VectorOptions
 from app.schemas.workbench import StrictModel, ExtractOptions
+from app.providers.prompts import DEFAULT_PROMPT_VERSION
 
 
 class AiPipelineRequest(StrictModel):
@@ -16,6 +17,8 @@ class AiPipelineRequest(StrictModel):
     consent_to_charge: bool = Field(default=False, strict=True)
     size: Literal["1K", "1.5K", "2K", "auto"] = "1K"
     vector: VectorOptions = Field(default_factory=lambda: VectorOptions(max_colors=4, detail="low"))
+    prompt_version: str = Field(default=DEFAULT_PROMPT_VERSION, min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_.-]+$")
+    selection_policy: Literal["auto_or_confirm", "manual"] = "auto_or_confirm"
 
     @model_validator(mode="after")
     def explicit_consents(self):
@@ -57,6 +60,23 @@ class ContinueRequest(StrictModel):
 class BrushPoint(StrictModel):
     x: float = Field(ge=0, strict=True)
     y: float = Field(ge=0, strict=True)
+
+
+class RerunRequest(StrictModel):
+    revision: int = Field(ge=1, strict=True)
+    action: Literal["compose", "vectorize"]
+    layer_ids: list[UUID] = Field(default_factory=list, max_length=16)
+    input_asset_id: UUID | None = None
+    vector: VectorOptions | None = None
+
+    @model_validator(mode="after")
+    def local_operation(self):
+        if self.action == "compose":
+            if not self.layer_ids or self.input_asset_id is not None or len(set(self.layer_ids)) != len(self.layer_ids):
+                raise ValueError("Composition requires unique layer IDs only")
+        elif self.input_asset_id is None or self.layer_ids or self.vector is None:
+            raise ValueError("Vectorization requires a PNG asset and vector options only")
+        return self
 
 
 class BrushStroke(StrictModel):

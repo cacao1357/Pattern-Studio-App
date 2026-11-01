@@ -16,7 +16,7 @@ from app.storage import ServiceError
 
 FRONTEND_MODULES = (
     "brush-history.js", "edit-history.js", "guidance.js",
-    "job-cancel.js", "params.js", "preview-session.js",
+    "job-cancel.js", "params.js", "preview-session.js", "settings.js",
 )
 
 

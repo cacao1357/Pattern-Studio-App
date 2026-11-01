@@ -91,6 +91,10 @@
       <rect x="3.5" y="13.5" width="7" height="7" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/>
       <rect x="13.5" y="13.5" width="7" height="7" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/>
     </symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="3.1" fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <path d="M12 2.8v2.3M12 18.9v2.3M2.8 12h2.3M18.9 12h2.3M5.5 5.5l1.6 1.6M16.9 16.9l1.6 1.6M18.5 5.5l-1.6 1.6M7.1 16.9l-1.6 1.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    </symbol>
   </svg>
 
   <div class="app-view" id="app-view">
@@ -108,6 +112,10 @@
         <button class="btn btn-quiet btn-sm" id="open-history" type="button">
           <svg class="icon" aria-hidden="true"><use href="#i-history"></use></svg>
           <span>历史</span>
+        </button>
+        <button class="btn btn-quiet btn-sm" id="open-settings" type="button" aria-haspopup="dialog">
+          <svg class="icon" aria-hidden="true"><use href="#i-settings"></use></svg>
+          <span>设置</span>
         </button>
       </div>
     </header>
@@ -699,10 +707,33 @@
                   <p id="ai-pipeline-meta">等待更新</p>
                 </div>
                 <div class="pipeline-acts">
-                  <button class="text-btn" id="ai-refresh-pipeline" type="button" hidden>重新查询</button>
+                  <button class="text-btn" id="ai-refresh-pipeline" type="button" hidden>刷新流程</button>
                   <span class="status-pill" id="ai-pipeline-state" role="status" aria-live="polite">准备中</span>
                 </div>
               </div>
+
+              <div class="ai-trace" id="ai-trace" hidden>
+                <div class="ai-trace-head">
+                  <strong>工作流记录</strong>
+                  <span class="chip" id="ai-trace-chip">只读</span>
+                </div>
+                <dl class="ai-trace-grid">
+                  <div><dt>标识</dt><dd id="ai-workflow-id">—</dd></div>
+                  <div><dt>版本</dt><dd id="ai-workflow-version">—</dd></div>
+                  <div><dt>提示词</dt><dd id="ai-workflow-prompt">—</dd></div>
+                  <div><dt>模型</dt><dd id="ai-workflow-model">—</dd></div>
+                  <div><dt>选层</dt><dd id="ai-workflow-selection">—</dd></div>
+                  <div><dt>输入</dt><dd id="ai-workflow-input">—</dd></div>
+                </dl>
+                <p class="hint ai-trace-note" id="ai-workflow-note" hidden></p>
+                <details class="ai-workflow-snapshot" id="ai-workflow-snapshot" hidden>
+                  <summary>提示词快照（不含密钥）</summary>
+                  <pre id="ai-workflow-prompt-text"></pre>
+                </details>
+                <div class="ai-recovery" id="ai-recovery"></div>
+                <div class="ai-branches" id="ai-branches"></div>
+              </div>
+
               <ol class="steps" id="ai-steps"></ol>
               <p class="field-error" id="ai-pipeline-error" role="alert" hidden></p>
               <div class="decision" id="ai-decision">
@@ -716,6 +747,21 @@
               <div class="results" id="ai-result" hidden>
                 <p class="hint">流程结果已加入版本区，可继续预览、下载或设为当前输入。</p>
                 <div id="ai-result-list" class="results-list"></div>
+              </div>
+
+              <div class="ai-rerun" id="ai-rerun" hidden>
+                <h3 class="ai-rerun-title">局部重跑 · 仅本地</h3>
+                <p class="hint">只复用已归档图层或本流程 PNG 重跑本地合成／矢量化；不发起云端调用、不产生新费用，旧结果保留。</p>
+                <label class="field" for="ai-rerun-input">
+                  <span class="field-label">矢量化输入（本流程 PNG）</span>
+                  <select id="ai-rerun-input"></select>
+                </label>
+                <div class="row">
+                  <button class="btn btn-line btn-sm" id="ai-rerun-compose" type="button" disabled>用所选图层重跑合成</button>
+                  <button class="btn btn-line btn-sm" id="ai-rerun-vectorize" type="button" disabled>重跑矢量化</button>
+                </div>
+                <p class="hint" id="ai-rerun-note">重跑会创建新的本地任务；可在状态栏查看并预览成果。</p>
+                <p class="field-error" id="ai-rerun-error" role="alert" hidden></p>
               </div>
             </div>
 
@@ -1058,6 +1104,96 @@
       <button class="btn btn-line btn-sm" id="history-more" type="button" hidden>加载更多</button>
     </div>
   </aside>
+
+  <dialog class="dialog" id="settings-dialog" aria-labelledby="settings-title">
+    <form class="dialog-card settings-card" id="settings-form" autocomplete="off" novalidate>
+      <header class="dialog-head">
+        <div>
+          <h2 id="settings-title">AI 服务设置</h2>
+          <p>只保存在本机服务端；密钥不会回显，也不写入浏览器存储。</p>
+        </div>
+        <button class="icon-btn" id="settings-close" type="button" aria-label="关闭设置" title="关闭">
+          <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
+        </button>
+      </header>
+
+      <div class="settings-status">
+        <span class="tag" id="settings-state">尚未读取</span>
+        <span class="chip" id="settings-revision">revision —</span>
+        <span class="chip" id="settings-effective">—</span>
+      </div>
+      <p class="hint" id="settings-effective-note">保存后对新任务生效；正在执行的云端请求保持提交时配置。</p>
+
+      <fieldset class="fieldset">
+        <legend class="field-label">API Key <em>不回显</em></legend>
+        <p class="hint" id="settings-key-state">尚未读取。</p>
+        <div class="field">
+          <label class="field-label" for="settings-key-action">密钥操作</label>
+          <select id="settings-key-action">
+            <option value="keep" selected>保留当前密钥</option>
+            <option value="replace">替换为新密钥</option>
+            <option value="clear">清除密钥</option>
+          </select>
+        </div>
+        <div class="field" id="settings-key-field" hidden>
+          <label class="field-label" for="settings-key-input">新 API Key</label>
+          <input id="settings-key-input" type="password" autocomplete="new-password" spellcheck="false" maxlength="1024" placeholder="粘贴后保存；提交后本页立即清空">
+        </div>
+        <p class="hint" id="settings-key-note">只有“替换为新密钥”会携带密钥；保存后输入框清空。</p>
+      </fieldset>
+
+      <div class="field">
+        <label class="field-label" for="settings-model">模型或接入点</label>
+        <input id="settings-model" type="text" maxlength="128" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field">
+        <label class="field-label" for="settings-base-url">Ark 端点</label>
+        <input id="settings-base-url" type="text" maxlength="256" autocomplete="off" spellcheck="false" list="settings-base-options">
+        <datalist id="settings-base-options">
+          <option value="https://ark.cn-beijing.volces.com/api/v3"></option>
+          <option value="https://ark.cn-beijing.volces.com/api/v3/images/generations"></option>
+        </datalist>
+      </div>
+      <p class="hint">只接受现有白名单中的官方端点；保存不会发起云端测试或图像生成。</p>
+
+      <div class="settings-checks">
+        <label class="check-row">
+          <input type="checkbox" id="settings-paid">
+          <span><strong>允许付费云端调用</strong><small>只阻止尚未开始的新请求；已开始的请求不变</small></span>
+        </label>
+        <label class="check-row">
+          <input type="checkbox" id="settings-pricing">
+          <span><strong>已确认价格</strong><small>需与所用模型的实际计费核对</small></span>
+        </label>
+      </div>
+
+      <div class="pair-fields">
+        <div class="field">
+          <label class="field-label" for="settings-budget">预算（元）</label>
+          <input id="settings-budget" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00">
+        </div>
+        <div class="field">
+          <label class="field-label" for="settings-reservation">单次预留（元）</label>
+          <input id="settings-reservation" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00">
+        </div>
+      </div>
+      <p class="hint">页面按元输入，服务端以分保存，最多两位小数。这是本地费用门禁估算，不是账单硬上限。</p>
+
+      <div class="field">
+        <label class="field-label" for="settings-max-calls">最大调用数</label>
+        <input id="settings-max-calls" type="number" min="1" max="100" step="1" inputmode="numeric">
+      </div>
+
+      <ul class="settings-blockers" id="settings-blockers" hidden></ul>
+      <p class="field-error" id="settings-error" role="alert" hidden></p>
+      <p class="hint" id="settings-message" role="status" hidden></p>
+
+      <div class="dialog-acts">
+        <button class="btn btn-quiet" id="settings-reload" type="button">重新读取</button>
+        <button class="btn btn-solid" id="settings-save" type="submit">保存设置</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog class="dialog" id="confirm-dialog" aria-labelledby="confirm-title">
     <form method="dialog" class="dialog-card">

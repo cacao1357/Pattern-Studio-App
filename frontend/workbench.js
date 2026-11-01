@@ -32,6 +32,18 @@ import {
   successRaceMessage
 } from "./job-cancel.js";
 import { buildGuidance } from "./guidance.js";
+import {
+  SETTINGS_API_KEY_ACTIONS,
+  buildSettingsUpdate,
+  centsToYuan,
+  composeRerunPayload,
+  createSettingsClient,
+  normalizeWorkflowTrace,
+  selectionPolicyLabel,
+  settingsEffective,
+  vectorizeRerunPayload,
+  workflowPngCandidates
+} from "./settings.js";
 
 const API_BASE = "/api/v1";
 const PROCESS_PIXEL_LIMIT = 1_000_000;
@@ -195,6 +207,13 @@ const AI_STATE_LABELS = {
   rejected: "已拒绝"
 };
 
+const RECOVERY_STATE_LABELS = {
+  needs_reconcile: "需要核对云端结果",
+  uncertain: "云端结果不确定",
+  unknown: "云端结果未知",
+  result_unknown: "云端结果未知"
+};
+
 const ISSUE_LABELS = {
   edges: "边缘",
   details: "细节",
@@ -211,6 +230,31 @@ const dom = {
   healthChip: $("health-chip"),
   healthLabel: $("health-label"),
   openHistory: $("open-history"),
+  openSettings: $("open-settings"),
+  settingsDialog: $("settings-dialog"),
+  settingsForm: $("settings-form"),
+  settingsClose: $("settings-close"),
+  settingsReload: $("settings-reload"),
+  settingsSave: $("settings-save"),
+  settingsState: $("settings-state"),
+  settingsRevision: $("settings-revision"),
+  settingsEffectiveChip: $("settings-effective"),
+  settingsEffectiveNote: $("settings-effective-note"),
+  settingsKeyState: $("settings-key-state"),
+  settingsKeyAction: $("settings-key-action"),
+  settingsKeyField: $("settings-key-field"),
+  settingsKeyInput: $("settings-key-input"),
+  settingsKeyNote: $("settings-key-note"),
+  settingsModel: $("settings-model"),
+  settingsBaseUrl: $("settings-base-url"),
+  settingsPaid: $("settings-paid"),
+  settingsPricing: $("settings-pricing"),
+  settingsBudget: $("settings-budget"),
+  settingsReservation: $("settings-reservation"),
+  settingsMaxCalls: $("settings-max-calls"),
+  settingsBlockers: $("settings-blockers"),
+  settingsError: $("settings-error"),
+  settingsMessage: $("settings-message"),
   connectionBanner: $("connection-banner"),
   connectionMessage: $("connection-message"),
   retryConnection: $("retry-connection"),
@@ -422,6 +466,25 @@ const dom = {
   aiPipelineMeta: $("ai-pipeline-meta"),
   aiPipelineState: $("ai-pipeline-state"),
   aiRefreshPipeline: $("ai-refresh-pipeline"),
+  aiTrace: $("ai-trace"),
+  aiTraceChip: $("ai-trace-chip"),
+  aiWorkflowId: $("ai-workflow-id"),
+  aiWorkflowVersion: $("ai-workflow-version"),
+  aiWorkflowPrompt: $("ai-workflow-prompt"),
+  aiWorkflowModel: $("ai-workflow-model"),
+  aiWorkflowSelection: $("ai-workflow-selection"),
+  aiWorkflowInput: $("ai-workflow-input"),
+  aiWorkflowNote: $("ai-workflow-note"),
+  aiWorkflowSnapshot: $("ai-workflow-snapshot"),
+  aiWorkflowPromptText: $("ai-workflow-prompt-text"),
+  aiRecovery: $("ai-recovery"),
+  aiBranches: $("ai-branches"),
+  aiRerun: $("ai-rerun"),
+  aiRerunInput: $("ai-rerun-input"),
+  aiRerunCompose: $("ai-rerun-compose"),
+  aiRerunVectorize: $("ai-rerun-vectorize"),
+  aiRerunNote: $("ai-rerun-note"),
+  aiRerunError: $("ai-rerun-error"),
   aiSteps: $("ai-steps"),
   aiPipelineError: $("ai-pipeline-error"),
   aiDecision: $("ai-decision"),
@@ -601,6 +664,16 @@ const state = {
     seq: 0
   },
   confirmResolver: null,
+  settings: {
+    loaded: false,
+    loading: false,
+    saving: false,
+    value: null,
+    revision: null,
+    keyAction: "keep",
+    error: "",
+    message: ""
+  },
   ai: {
     status: null,
     statusLoading: false,
@@ -614,7 +687,10 @@ const state = {
     pollFailures: 0,
     pollError: "",
     error: "",
-    processingKey: ""
+    processingKey: "",
+    branchJobs: new Map(),
+    rerunAssetId: "",
+    traceError: ""
   },
   brush: {
     pairs: [],
@@ -1504,12 +1580,14 @@ function isPreviewCurrent() {
 }
 
 function jobContext(job) {
+  const parameters = job && job.parameters && typeof job.parameters === "object" ? job.parameters : {};
   return {
     origin: "job",
     jobId: jobIdOf(job),
     jobKind: String(job.kind || ""),
-    jobParameters: job.parameters || {},
-    jobState: job.state || ""
+    jobParameters: parameters,
+    jobState: job.state || "",
+    aiPipelineId: String(job.ai_pipeline_id || parameters.ai_pipeline_id || "")
   };
 }
 
@@ -2617,6 +2695,11 @@ function previewBindingId(session) {
     const pair = selectedMaskPair();
     return pair ? pair.sourceId : "";
   }
+  // Local workflow reruns preview a specific archived layer/PNG, which is not
+  // necessarily the workspace's current input.
+  if (session.kind === "compose_layers" || session.kind === "vectorize") {
+    return session.inputAssetId;
+  }
   return state.currentInputId;
 }
 
@@ -2667,8 +2750,9 @@ function requireOperationReady(request) {
 
 function submitJob(path, payload, label, options) {
   const opts = options || {};
+  const errorNode = opts.errorNode || dom.composeError;
   if (!opts.skipReady && !requireProcessReady()) return false;
-  setError(dom.composeError, "");
+  setError(errorNode, "");
   const bodyText = JSON.stringify(payload);
   return startSubmission({
     path: path,
@@ -2680,14 +2764,21 @@ function submitJob(path, payload, label, options) {
       const job = extractJobFromResponse(data);
       if (!job) throw new ApiError("任务响应缺少 job_id。", { status: 202 });
       state.submissionSnapshots.set(job.job_id, state.lastCommittedSnapshot || captureWorkspace());
+      if (opts.onJob) {
+        try {
+          opts.onJob(job);
+        } catch (_) {
+          /* 提交外的界面回调失败不应影响任务本身。 */
+        }
+      }
       await adoptJob(job, { announce: true });
     },
     onError: (error) => {
-      setError(dom.composeError, label + "未创建：" + friendlyError(error));
+      setError(errorNode, label + "未创建：" + friendlyError(error));
       showToast(label + "未创建：" + friendlyError(error), "error", 6500);
     },
     onUnknown: () => {
-      setError(dom.composeError, label + "提交结果未知。请用页面顶部的同一请求重试，不会自动重发。");
+      setError(errorNode, label + "提交结果未知。请用页面顶部的同一请求重试，不会自动重发。");
     }
   });
 }
@@ -3094,7 +3185,8 @@ function resetRecolorColors() {
 async function runLocalRequest(request, options) {
   const opts = options || {};
   if (!request || request.handled) return false;
-  const errorNode = request.kind === "recolor-svg" ? dom.recolorError : dom.composeError;
+  const errorNode = request.errorNode ||
+    (request.kind === "recolor-svg" ? dom.recolorError : dom.composeError);
   if (!request.ok) {
     setError(errorNode, request.error || "参数无效。");
     showToast(request.error || "参数无效，请检查输入。", "warning", 5500);
@@ -3115,7 +3207,9 @@ async function runLocalRequest(request, options) {
   }
   return submitJob(request.path, request.payload, request.label, {
     markBboxClean: Boolean(request.markBboxClean),
-    skipReady: Boolean(request.targetAssetId)
+    skipReady: Boolean(request.targetAssetId),
+    errorNode: errorNode,
+    onJob: request.onJob || null
   });
 }
 
@@ -3126,6 +3220,7 @@ async function startPreviewRequest(request) {
   }
   if (!request || !request.ok) return false;
   if (!requireOperationReady(request)) return false;
+  const errorNode = request.errorNode || dom.composeError;
   const subjectId = request.targetAssetId || state.currentInputId;
   const subject = subjectId ? state.assets.get(subjectId) : null;
   if (!subject) return false;
@@ -3156,6 +3251,13 @@ async function startPreviewRequest(request) {
     onSuccess: async (data) => {
       const job = extractJobFromResponse(data);
       if (!job) throw new ApiError("预览任务响应缺少 job_id。", { status: 202 });
+      if (request.onJob) {
+        try {
+          request.onJob(job);
+        } catch (_) {
+          /* 界面回调失败不应影响预览任务。 */
+        }
+      }
       state.previewSession.attachJob(job.job_id);
       state.previewJobIds.add(job.job_id);
       state.submissionSnapshots.set(job.job_id, state.lastCommittedSnapshot || captureWorkspace());
@@ -3163,14 +3265,14 @@ async function startPreviewRequest(request) {
     },
     onError: (error) => {
       state.previewSession.fail(friendlyError(error));
-      setError(dom.composeError, "预览未创建：" + friendlyError(error));
+      setError(errorNode, "预览未创建：" + friendlyError(error));
       renderPreviewUi();
       updateActionState();
       showToast("预览未创建：" + friendlyError(error), "error", 6500);
     },
     onUnknown: () => {
       state.previewSession.fail("预览提交结果未知；页面不会自动重发。");
-      setError(dom.composeError, "预览提交结果未知。请用页面顶部的同一请求重试；不会自动应用。");
+      setError(errorNode, "预览提交结果未知。请用页面顶部的同一请求重试；不会自动应用。");
       renderPreviewUi();
       updateActionState();
     }
@@ -4337,6 +4439,15 @@ async function finishJobOnce(job) {
   const marker = job.job_id + ":" + String(job.state || "");
   if (state.completedJobs.has(marker)) return;
   state.completedJobs.add(marker);
+  const branchPipelineId = state.ai.branchJobs.get(job.job_id);
+  if (branchPipelineId) {
+    state.ai.branchJobs.delete(job.job_id);
+    window.setTimeout(() => {
+      if (state.ai.pipeline && aiPipelineId(state.ai.pipeline) === branchPipelineId) {
+        void refreshAiTraceNow();
+      }
+    }, 700);
+  }
   stopJobPolling(job.job_id);
   state.pollErrors.delete(job.job_id);
   state.pollStopped.delete(job.job_id);
@@ -4856,6 +4967,11 @@ function isAiWaiting(pipeline) {
   return String((pipeline && pipeline.state) || "").toLowerCase() === "waiting_user";
 }
 
+function aiLayerSelectionAvailable(pipeline) {
+  const pipelineState = String((pipeline && pipeline.state) || "").toLowerCase();
+  return pipelineState === "waiting_user" || pipelineState === "succeeded" || pipelineState === "failed";
+}
+
 function aiStateClass(stateName) {
   const value = String(stateName || "").toLowerCase();
   return "status-pill is-" + (value || "queued");
@@ -4912,7 +5028,7 @@ function renderAiService() {
     service.classList.add("is-warn");
     dom.aiServiceDot.classList.add("is-warn");
     setText(dom.aiServiceLabel, "AI 新生成暂不可用");
-    setText(dom.aiServiceNote, "服务端尚未开放新生成。你仍可复用归档候选或继续本地处理。");
+    setText(dom.aiServiceNote, "服务端尚未开放新生成。可在“设置”中检查 API Key、付费开关与预算，或复用归档候选。");
   }
 }
 
@@ -4975,6 +5091,8 @@ function renderAiPanel() {
   renderAiStart();
   renderAiVectorSummary();
   renderAiPipeline();
+  renderAiWorkflowTrace();
+  renderAiRerun();
   renderAiCandidates();
   setError(dom.aiError, state.ai.error || "");
 }
@@ -5019,7 +5137,7 @@ function renderAiPipeline() {
     ? (pipeline.error.message || "AI 流程失败。")
     : "";
   setError(dom.aiPipelineError, pipelineError);
-  setHidden(dom.aiRefreshPipeline, !state.ai.pollError);
+  setHidden(dom.aiRefreshPipeline, false);
 
   const stateName = String(pipeline.state || "").toLowerCase();
   const waiting = stateName === "waiting_user";
@@ -5056,6 +5174,323 @@ function renderAiPipeline() {
       }
     });
     dom.aiResultList.append(jump);
+  }
+}
+
+function renderAiWorkflowTrace() {
+  const pipeline = state.ai.pipeline;
+  setHidden(dom.aiTrace, !pipeline);
+  if (!pipeline) {
+    dom.aiRecovery.replaceChildren();
+    dom.aiBranches.replaceChildren();
+    dom.aiWorkflowPromptText.textContent = "";
+    setHidden(dom.aiWorkflowSnapshot, true);
+    return;
+  }
+  const trace = normalizeWorkflowTrace(pipeline);
+  setText(dom.aiTraceChip, trace.available ? "服务端记录" : "未提供");
+  setText(dom.aiWorkflowId, trace.workflow.id || "—");
+  setText(dom.aiWorkflowVersion, trace.workflow.version || "—");
+  const prompt = [trace.workflow.promptId, trace.workflow.promptVersion].filter(Boolean).join(" · ");
+  setText(dom.aiWorkflowPrompt, prompt || "—");
+  setText(dom.aiWorkflowModel, trace.workflow.model || "—");
+  setText(dom.aiWorkflowSelection, selectionPolicyLabel(trace.workflow.selectionPolicy) || "—");
+  setText(dom.aiWorkflowInput, trace.workflow.inputAssetId ? "#" + shortId(trace.workflow.inputAssetId) : "—");
+
+  if (trace.workflow.promptText) {
+    dom.aiWorkflowPromptText.textContent = trace.workflow.promptText;
+    setHidden(dom.aiWorkflowSnapshot, false);
+  } else {
+    dom.aiWorkflowPromptText.textContent = "";
+    setHidden(dom.aiWorkflowSnapshot, true);
+  }
+
+  const notes = [];
+  if (!trace.available) notes.push("服务端尚未返回 workflow 记录；现有流程仍可继续。");
+  if (trace.workflow.snapshotAvailable && !trace.workflow.promptText) {
+    notes.push("已记录运行快照，但未提供可展示的提示词文本。");
+  }
+  if (state.ai.traceError) notes.push(state.ai.traceError);
+  setHidden(dom.aiWorkflowNote, notes.length === 0);
+  setText(dom.aiWorkflowNote, notes.join(" "));
+
+  renderAiRecovery(trace);
+  renderAiBranches(trace);
+}
+
+function renderAiRecovery(trace) {
+  dom.aiRecovery.replaceChildren();
+  const recovery = trace.recovery;
+  if (!recovery) {
+    dom.aiRecovery.append(element("p", "ai-recovery-note",
+      "未提供恢复信息；失败时只可重跑本地步骤，页面不会自动重试云端请求。"));
+    return;
+  }
+  const bits = [];
+  if (recovery.state) {
+    bits.push("状态 " + (RECOVERY_STATE_LABELS[String(recovery.state).toLowerCase()] || recovery.state));
+  }
+  if (recovery.step) bits.push("步骤 " + recovery.step);
+  bits.push(recovery.retryable ? "服务端标记为可重试" : "不自动重试");
+  dom.aiRecovery.append(element("p", "ai-recovery-note", bits.join(" · ")));
+  if (recovery.uncertain) {
+    dom.aiRecovery.append(element("p", "ai-recovery-note",
+      "云端结果不确定：不能视为未计费，也不会自动重发。"));
+  }
+  if (recovery.needsReconcile) {
+    dom.aiRecovery.append(element("p", "ai-recovery-note",
+      "需要核对云端请求状态；页面不会自动重试，请先重新查询。"));
+  }
+  if (recovery.canCompose === true) {
+    dom.aiRecovery.append(element("p", "ai-recovery-note", "可复用已归档候选图层重跑本地合成。"));
+  } else if (recovery.canCompose === false) {
+    dom.aiRecovery.append(element("p", "ai-recovery-note", "当前没有可复用的已归档候选图层。"));
+  }
+  if (recovery.vectorInputAssetIds.length) {
+    dom.aiRecovery.append(element("p", "ai-recovery-note",
+      "可重跑矢量化的本流程 PNG：" + recovery.vectorInputAssetIds.length + " 个。"));
+  }
+  if (recovery.providerCallId) {
+    dom.aiRecovery.append(element("p", "ai-recovery-note",
+      "云端请求 #" + shortId(recovery.providerCallId) + "。"));
+  }
+  if (recovery.message) dom.aiRecovery.append(element("p", "ai-recovery-note", recovery.message));
+  if (recovery.action) {
+    const list = element("ul", "ai-recovery-list");
+    list.append(element("li", "", "建议下一步：" + recovery.action));
+    dom.aiRecovery.append(list);
+  }
+}
+
+function aiBranchLabel(branch) {
+  const action = String((branch && branch.action) || "").toLowerCase();
+  if (action === "compose") return "重跑合成";
+  if (action === "vectorize") return "重跑矢量化";
+  return jobLabel((branch && (branch.kind || branch.action)) || "局部重跑");
+}
+
+function renderAiBranches(trace) {
+  dom.aiBranches.replaceChildren();
+  if (!trace.branches.length) {
+    dom.aiBranches.append(element("p", "ai-recovery-note", "尚无局部重跑分支。"));
+    return;
+  }
+  for (const branch of trace.branches) {
+    const row = element("div", "ai-branch");
+    const copy = element("div", "ai-branch-copy");
+    copy.append(element("strong", "", aiBranchLabel(branch)));
+    const meta = [];
+    if (branch.jobId) meta.push("#" + shortId(branch.jobId));
+    if (branch.parentJobId) meta.push("父 #" + shortId(branch.parentJobId));
+    if (branch.state) meta.push(stateLabel(branch.state));
+    if (branch.createdAt) meta.push(formatTime(branch.createdAt));
+    copy.append(element("small", "", meta.filter(Boolean).join(" · ")));
+    row.append(copy);
+
+    const actions = element("div", "ai-branch-actions");
+    const restore = element("button", "btn btn-quiet btn-xs", "恢复");
+    restore.type = "button";
+    restore.title = "恢复此分支的输入、参数与成果";
+    restore.addEventListener("click", () => void restoreJob(branch.jobId));
+    actions.append(restore);
+    row.append(actions);
+    dom.aiBranches.append(row);
+  }
+}
+
+function setAiRerunError(message) {
+  setError(dom.aiRerunError, message || "");
+}
+
+function aiVectorCandidates(pipeline) {
+  if (!pipeline) return [];
+  // workflowPngCandidates treats recovery.vector_input_asset_ids as authoritative
+  // whenever the server provides recovery, so original cloud layers and repair
+  // candidates are never offered as vectorization inputs.
+  return workflowPngCandidates(pipeline, state.assets);
+}
+
+async function ensureRecoveryAssets(pipeline) {
+  const trace = normalizeWorkflowTrace(pipeline);
+  const ids = trace.recovery ? trace.recovery.vectorInputAssetIds : [];
+  if (!ids.length) return;
+  const missing = ids.filter((id) => !state.assets.has(String(id))).slice(0, 32);
+  if (!missing.length) return;
+  const pipelineId = aiPipelineId(pipeline);
+  try {
+    if (!state.ai.pipeline || aiPipelineId(state.ai.pipeline) !== pipelineId) return;
+    const assets = await registerAssets(missing.map((id) => ({ asset_id: id })), {
+      context: { origin: "workflow_recovery", aiPipelineId: pipelineId },
+      prepend: false
+    });
+    if (assets.length) {
+      renderVersions();
+      renderAiRerun();
+      updateActionState();
+    }
+  } catch (_) {
+    /* Recovery metadata is optional; rerun stays unavailable if it cannot be read. */
+  }
+}
+
+function renderAiRerun() {
+  const pipeline = state.ai.pipeline;
+  setHidden(dom.aiRerun, !pipeline);
+  if (!pipeline) {
+    dom.aiRerunInput.replaceChildren();
+    dom.aiRerunInput.dataset.signature = "";
+    setAiRerunError("");
+    return;
+  }
+
+  const trace = normalizeWorkflowTrace(pipeline);
+  const candidates = aiVectorCandidates(pipeline);
+  const signature = candidates.map((asset) => assetIdOf(asset)).join("|");
+  if (dom.aiRerunInput.dataset.signature !== signature) {
+    dom.aiRerunInput.replaceChildren();
+    dom.aiRerunInput.dataset.signature = signature;
+    if (!candidates.length) {
+      const option = element("option", "", "没有本流程产生的 PNG");
+      option.value = "";
+      dom.aiRerunInput.append(option);
+    } else {
+      for (const asset of candidates) {
+        const id = assetIdOf(asset);
+        const option = element("option", "", assetDisplayName(asset) + " · #" + shortId(id));
+        option.value = id;
+        dom.aiRerunInput.append(option);
+      }
+    }
+  }
+  const available = new Set(candidates.map((asset) => assetIdOf(asset)));
+  if (!available.has(state.ai.rerunAssetId)) {
+    state.ai.rerunAssetId = candidates.length ? assetIdOf(candidates[0]) : "";
+  }
+  if (state.ai.rerunAssetId && dom.aiRerunInput.value !== state.ai.rerunAssetId) {
+    dom.aiRerunInput.value = state.ai.rerunAssetId;
+  }
+
+  const layers = state.ai.layers && Array.isArray(state.ai.layers.layers) ? state.ai.layers.layers : [];
+  const selectedCount = state.ai.selectedLayerIds.size;
+  const canCompose = !trace.recovery || trace.recovery.canCompose !== false;
+  const notes = [];
+  if (!canCompose) notes.push("服务端没有可复用的已归档图层；合成重跑暂不可用。");
+  else if (!layers.length) notes.push("尚无已归档候选图层；合成重跑暂不可用。");
+  else if (!selectedCount) notes.push("请先在候选图层中勾选要保留的图层。");
+  if (!candidates.length) notes.push("尚未找到本流程产生的 PNG；矢量化重跑暂不可用。");
+  if (state.ai.traceError) notes.push(state.ai.traceError);
+  setText(dom.aiRerunNote, notes.length
+    ? notes.join(" ")
+    : "可在候选图层中调整勾选后重跑合成；重跑会创建新的本地任务，旧结果保留。");
+  setButtonLabel(dom.aiRerunCompose, selectedCount
+    ? "用所选图层重跑合成（" + selectedCount + "）"
+    : "用所选图层重跑合成");
+  setDisabled(dom.aiRerunCompose, !(canCompose && layers.length && selectedCount));
+  setDisabled(dom.aiRerunVectorize, !state.ai.rerunAssetId);
+}
+
+async function refreshAiTraceNow() {
+  const pipeline = state.ai.pipeline;
+  if (!pipeline) return false;
+  const id = aiPipelineId(pipeline);
+  try {
+    const result = await requestJson("/pipelines/" + encodeURIComponent(id));
+    if (!state.ai.pipeline || aiPipelineId(state.ai.pipeline) !== id) return false;
+    const next = normalizeAiPipeline(result.data && result.data.pipeline ? result.data.pipeline : result.data);
+    if (!next) return false;
+    state.ai.pipeline = next;
+    state.ai.traceError = "";
+    void ensureRecoveryAssets(next);
+    renderAiPanel();
+    updateActionState();
+    return true;
+  } catch (error) {
+    state.ai.traceError = "刷新流程记录失败：" + friendlyError(error);
+    renderAiWorkflowTrace();
+    updateActionState();
+    return false;
+  }
+}
+
+async function handleAiRerun(action) {
+  const pipeline = state.ai.pipeline;
+  if (!pipeline) return;
+  if (isAiActive(pipeline)) {
+    setAiRerunError("流程仍在生成中，完成后再局部重跑。");
+    return;
+  }
+  const revision = Number(pipeline.revision);
+  if (!Number.isInteger(revision) || revision < 1) {
+    setAiRerunError("流程修订号无效，请先刷新流程。");
+    return;
+  }
+  const vector = readVectorParams();
+  if (!vector.ok) {
+    setAiRerunError(vector.error);
+    return;
+  }
+  const path = "/pipelines/" + encodeURIComponent(aiPipelineId(pipeline)) + "/rerun";
+  const trace = normalizeWorkflowTrace(pipeline);
+  let built;
+  let label;
+  let kind;
+  let targetAssetId;
+  if (action === "compose") {
+    if (trace.recovery && trace.recovery.canCompose === false) {
+      setAiRerunError("服务端没有可复用的已归档图层；合成重跑暂不可用。");
+      return;
+    }
+    const layerIds = Array.from(state.ai.selectedLayerIds);
+    built = composeRerunPayload({ revision, layerIds, vector: vectorPayloadFrom(vector) });
+    label = "局部重跑合成";
+    kind = "compose_layers";
+    const pipelineInput = pipeline.input_asset_id ? String(pipeline.input_asset_id) : "";
+    targetAssetId = pipelineInput && state.assets.has(pipelineInput) ? pipelineInput : state.currentInputId;
+  } else {
+    const allowedInputs = new Set(aiVectorCandidates(pipeline).map((asset) => assetIdOf(asset)));
+    if (!allowedInputs.has(dom.aiRerunInput.value)) {
+      setAiRerunError("请选择本流程产生的 PNG；可刷新流程后重试。");
+      return;
+    }
+    built = vectorizeRerunPayload({
+      revision,
+      inputAssetId: dom.aiRerunInput.value,
+      vector: vectorPayloadFrom(vector)
+    });
+    label = "局部重跑矢量化";
+    kind = "vectorize";
+    targetAssetId = dom.aiRerunInput.value;
+  }
+  if (!built.ok) {
+    setAiRerunError(built.error);
+    return;
+  }
+  setAiRerunError("");
+  const pipelineId = aiPipelineId(pipeline);
+  const started = await runLocalRequest({
+    ok: true,
+    path: path,
+    label: label,
+    kind: kind,
+    targetAssetId: targetAssetId,
+    errorNode: dom.aiRerunError,
+    payload: built.payload,
+    onJob: (job) => {
+      job.ai_pipeline_id = pipelineId;
+      state.ai.branchJobs.set(job.job_id, pipelineId);
+      if (state.ai.pipeline && aiPipelineId(state.ai.pipeline) === pipelineId) {
+        state.ai.pipeline = Object.assign({}, state.ai.pipeline, { revision: revision + 1 });
+      }
+      window.setTimeout(() => {
+        if (state.ai.pipeline && aiPipelineId(state.ai.pipeline) === pipelineId) {
+          void refreshAiTraceNow();
+        }
+      }, 350);
+      showToast(label + "已提交，只执行本地步骤，不产生云端费用。", "info", 4500);
+    }
+  });
+  if (!started && !state.requestInFlight) {
+    setAiRerunError("局部重跑未创建；请检查当前任务状态后重试。");
   }
 }
 
@@ -5135,7 +5570,7 @@ function buildAiLayerCard(layer, asset) {
   const layerId = String(layer.layer_id || asset.asset_id);
   const selected = state.ai.selectedLayerIds.has(layerId);
   const pipeline = state.ai.pipeline;
-  const waiting = pipeline && String(pipeline.state || "").toLowerCase() === "waiting_user";
+  const selectable = aiLayerSelectionAvailable(pipeline);
   const card = element("article", "ai-layer-card" + (selected ? " is-selected" : ""));
   const visual = element("div", "ai-layer-visual");
   const image = element("img");
@@ -5152,7 +5587,7 @@ function buildAiLayerCard(layer, asset) {
   const checkbox = element("input");
   checkbox.type = "checkbox";
   checkbox.checked = selected;
-  checkbox.disabled = !waiting;
+  checkbox.disabled = !selectable;
   checkbox.dataset.aiLayerId = layerId;
   checkbox.setAttribute("aria-label", "选择候选图层 " + (zIndex));
   checkbox.addEventListener("change", () => {
@@ -5204,12 +5639,13 @@ function loadThumb(image, asset) {
 
 function updateAiSelectionActions() {
   const pipeline = state.ai.pipeline;
-  const waiting = pipeline && String(pipeline.state || "").toLowerCase() === "waiting_user";
+  const selectable = aiLayerSelectionAvailable(pipeline);
   const count = state.ai.selectedLayerIds.size;
   setText(dom.aiSelectionNote, count
     ? "已选 " + count + " 个候选图层"
-    : (waiting ? "尚未选择图层；底图不参与合成" : "当前候选不可选择"));
+    : (selectable ? "尚未选择图层；底图不参与合成" : "当前候选不可选择"));
   setButtonLabel(dom.aiCompose, count ? "合成所选图层（" + count + "）" : "合成所选图层");
+  renderAiRerun();
   updateActionState();
 }
 
@@ -5274,6 +5710,7 @@ async function pollAiPipeline(id) {
     state.ai.pipeline = next;
     state.ai.pollFailures = 0;
     state.ai.pollError = "";
+    void ensureRecoveryAssets(next);
     renderAiPanel();
     updateActionState();
     if (isAiActive(next)) {
@@ -5281,6 +5718,10 @@ async function pollAiPipeline(id) {
     } else if (isAiWaiting(next)) {
       await loadAiLayers(false);
     } else if (["succeeded", "failed"].includes(String(next.state || "").toLowerCase())) {
+      if (next.decomposition_job_id && !state.ai.layers &&
+          (!next.recovery || next.recovery.can_compose !== false)) {
+        await loadAiLayers(false);
+      }
       syncAiSelectedLayers(next);
       await processAiResult(next);
     }
@@ -5316,6 +5757,7 @@ async function adoptAiPipeline(raw, options) {
   state.ai.pollFailures = 0;
   state.ai.pollError = "";
   state.ai.error = "";
+  void ensureRecoveryAssets(pipeline);
   renderAiPanel();
   updateActionState();
 
@@ -5324,7 +5766,8 @@ async function adoptAiPipeline(raw, options) {
   } else if (isAiWaiting(pipeline)) {
     await loadAiLayers(false);
   } else if (["succeeded", "failed"].includes(String(pipeline.state || "").toLowerCase())) {
-    if (pipeline.state === "succeeded" && pipeline.decomposition_job_id && !state.ai.layers) {
+    if (pipeline.decomposition_job_id && !state.ai.layers &&
+        (!pipeline.recovery || pipeline.recovery.can_compose !== false)) {
       await loadAiLayers(false);
     }
     syncAiSelectedLayers(pipeline);
@@ -5420,6 +5863,9 @@ async function loadAiLayers(force) {
 function syncAiSelectedLayers(pipeline) {
   if (!pipeline || !Array.isArray(pipeline.selected_layer_ids)) return;
   state.ai.selectedLayerIds = new Set(pipeline.selected_layer_ids.map((id) => String(id)));
+  renderAiCandidates();
+  renderAiRerun();
+  updateActionState();
 }
 
 async function processAiResult(pipeline) {
@@ -5472,6 +5918,12 @@ function resetAiState() {
   state.ai.pollError = "";
   state.ai.error = "";
   state.ai.processingKey = "";
+  state.ai.branchJobs.clear();
+  state.ai.rerunAssetId = "";
+  state.ai.traceError = "";
+  dom.aiRerunInput.replaceChildren();
+  dom.aiRerunInput.dataset.signature = "";
+  setError(dom.aiRerunError, "");
 }
 
 async function startAiPipeline() {
@@ -5540,6 +5992,7 @@ async function refreshAiPipelineNow(forceLayers) {
     state.ai.pipeline = next;
     state.ai.pollFailures = 0;
     state.ai.pollError = "";
+    void ensureRecoveryAssets(next);
     renderAiPanel();
     updateActionState();
     if (isAiActive(next)) {
@@ -5547,7 +6000,10 @@ async function refreshAiPipelineNow(forceLayers) {
     } else if (isAiWaiting(next)) {
       await loadAiLayers(Boolean(forceLayers));
     } else if (["succeeded", "failed"].includes(String(next.state || "").toLowerCase())) {
-      if (next.state === "succeeded" && next.decomposition_job_id && !state.ai.layers) await loadAiLayers(Boolean(forceLayers));
+      if (next.decomposition_job_id && !state.ai.layers &&
+          (!next.recovery || next.recovery.can_compose !== false)) {
+        await loadAiLayers(Boolean(forceLayers));
+      }
       syncAiSelectedLayers(next);
       await processAiResult(next);
     }
@@ -8778,14 +9234,27 @@ function updateActionState() {
   const aiStateName = String((aiPipeline && aiPipeline.state) || "").toLowerCase();
   const aiWaiting = aiStateName === "waiting_user";
   const aiFailed = aiStateName === "failed";
+  const aiSelectable = aiWaiting || aiFailed || aiStateName === "succeeded";
   setDisabled(dom.refreshAiStatus, state.ai.statusLoading);
   setDisabled(dom.aiRefreshPipeline, Boolean(writeReason));
   setDisabled(dom.aiCompose, Boolean(writeReason) || !aiWaiting || state.ai.selectedLayerIds.size === 0);
   setDisabled(dom.aiUseLocal, Boolean(writeReason) || !(aiWaiting || aiFailed));
   setDisabled(dom.aiReject, Boolean(writeReason) || !aiWaiting);
+  const aiRevision = Number(aiPipeline && aiPipeline.revision);
+  const aiRerunBlocked = Boolean(writeReason) || !aiPipeline || isAiActive(aiPipeline) ||
+    !Number.isInteger(aiRevision) || aiRevision < 1;
+  const aiTrace = aiPipeline ? normalizeWorkflowTrace(aiPipeline) : null;
+  const aiCanCompose = !aiTrace || !aiTrace.recovery || aiTrace.recovery.canCompose !== false;
+  const aiRerunCandidates = aiPipeline ? aiVectorCandidates(aiPipeline) : [];
+  const aiRerunAssetReady = aiRerunCandidates.some((asset) => assetIdOf(asset) === dom.aiRerunInput.value);
+  const aiLayerCount = state.ai.layers && Array.isArray(state.ai.layers.layers) ? state.ai.layers.layers.length : 0;
+  const aiSelectedCount = state.ai.selectedLayerIds.size;
+  setDisabled(dom.aiRerunCompose, aiRerunBlocked || !(aiCanCompose && aiLayerCount && aiSelectedCount));
+  setDisabled(dom.aiRerunVectorize, aiRerunBlocked || !aiRerunAssetReady);
+  setDisabled(dom.aiRerunInput, Boolean(writeReason) || !aiPipeline);
   const layerCheckboxes = dom.aiLayerList.querySelectorAll("input[data-ai-layer-id]");
   layerCheckboxes.forEach((node) => {
-    node.disabled = Boolean(writeReason) || !aiWaiting;
+    node.disabled = Boolean(writeReason) || !aiSelectable;
   });
   setDisabled(dom.maskOpen,
     state.brush.pairs.length === 0 || state.brush.open || Boolean(writeReason));
@@ -8852,6 +9321,228 @@ function feedbackCanSubmit() {
   if (state.feedbackResponses.has(job.job_id)) return false;
   const rating = dom.feedbackForm.querySelector('input[name="rating"]:checked');
   return Boolean(rating);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Settings dialog                                                           */
+/* -------------------------------------------------------------------------- */
+
+let settingsClientInstance = null;
+
+function getSettingsClient() {
+  if (!settingsClientInstance) {
+    settingsClientInstance = createSettingsClient({ request: requestJson });
+  }
+  return settingsClientInstance;
+}
+
+function clearSettingsKeyInput() {
+  dom.settingsKeyInput.value = "";
+}
+
+function updateSettingsKeyUi() {
+  const action = SETTINGS_API_KEY_ACTIONS.includes(dom.settingsKeyAction.value)
+    ? dom.settingsKeyAction.value
+    : "keep";
+  state.settings.keyAction = action;
+  setHidden(dom.settingsKeyField, action !== "replace");
+  dom.settingsKeyInput.disabled = action !== "replace" || state.settings.saving;
+  if (action !== "replace") clearSettingsKeyInput();
+  setText(dom.settingsKeyNote, action === "replace"
+    ? "密钥只随本次保存发送；提交后立即清空，服务端不会回显。"
+    : action === "clear"
+      ? "清除后新的云端请求会因缺少密钥被阻止；本地处理与已开始请求不受影响。"
+      : "保留当前密钥；请求中不会携带密钥字段。");
+}
+
+function fillSettingsForm(settings) {
+  if (!settings) return;
+  dom.settingsModel.value = settings.model;
+  dom.settingsBaseUrl.value = settings.baseUrl;
+  dom.settingsPaid.checked = settings.paidCallsEnabled;
+  dom.settingsPricing.checked = settings.pricingConfirmed;
+  dom.settingsBudget.value = centsToYuan(settings.budgetCents);
+  dom.settingsReservation.value = centsToYuan(settings.reservationCents);
+  dom.settingsMaxCalls.value = String(settings.maxCalls);
+  dom.settingsKeyAction.value = "keep";
+  clearSettingsKeyInput();
+}
+
+function renderSettings() {
+  const settings = state.settings;
+  const value = settings.value;
+  setText(dom.settingsState, settings.saving
+    ? "保存中…"
+    : settings.loading ? "读取中…" : settings.loaded ? "已读取" : "尚未读取");
+  setText(dom.settingsRevision, "revision " + (value ? value.revision : "—"));
+
+  if (value) {
+    const effective = settingsEffective(value);
+    setText(dom.settingsEffectiveChip, effective.ready ? "云端可用" : "云端不可用");
+    dom.settingsEffectiveChip.className = "chip " + (effective.ready ? "chip-fill" : "chip-mark");
+    setText(dom.settingsEffectiveNote, effective.effectiveText);
+    dom.settingsBlockers.replaceChildren();
+    setHidden(dom.settingsBlockers, effective.labels.length === 0);
+    for (const label of effective.labels) dom.settingsBlockers.append(element("li", "", label));
+    setText(dom.settingsKeyState, value.apiKeyConfigured
+      ? "已配置 API Key（不会回显）。"
+      : "尚未配置 API Key。");
+  } else {
+    setText(dom.settingsEffectiveChip, "—");
+    dom.settingsEffectiveChip.className = "chip";
+    setText(dom.settingsEffectiveNote, "保存后对新任务生效；正在执行的云端请求保持提交时配置。");
+    dom.settingsBlockers.replaceChildren();
+    setHidden(dom.settingsBlockers, true);
+    setText(dom.settingsKeyState, "尚未读取。");
+  }
+
+  setDisabled(dom.settingsSave, settings.loading || settings.saving || !value);
+  setDisabled(dom.settingsReload, settings.loading || settings.saving);
+  setDisabled(dom.settingsKeyAction, settings.loading || settings.saving || !value);
+  setDisabled(dom.settingsModel, settings.loading || settings.saving || !value);
+  setDisabled(dom.settingsBaseUrl, settings.loading || settings.saving || !value);
+  setDisabled(dom.settingsPaid, settings.loading || settings.saving || !value);
+  setDisabled(dom.settingsPricing, settings.loading || settings.saving || !value);
+  setDisabled(dom.settingsBudget, settings.loading || settings.saving || !value);
+  setDisabled(dom.settingsReservation, settings.loading || settings.saving || !value);
+  setDisabled(dom.settingsMaxCalls, settings.loading || settings.saving || !value);
+  setError(dom.settingsError, settings.error);
+  setHidden(dom.settingsMessage, !settings.message);
+  setText(dom.settingsMessage, settings.message);
+  updateSettingsKeyUi();
+}
+
+async function loadSettings(options) {
+  const opts = options || {};
+  if (state.settings.loading || state.settings.saving) return false;
+  state.settings.loading = true;
+  if (!opts.keepError) state.settings.error = "";
+  if (!opts.keepMessage) state.settings.message = "";
+  renderSettings();
+  try {
+    const settings = await getSettingsClient().load();
+    state.settings.value = settings;
+    state.settings.revision = settings.revision;
+    state.settings.loaded = true;
+    state.settings.keyAction = "keep";
+    dom.settingsKeyAction.value = "keep";
+    clearSettingsKeyInput();
+    fillSettingsForm(settings);
+    return true;
+  } catch (error) {
+    state.settings.error = "无法读取设置：" + friendlyError(error);
+    return false;
+  } finally {
+    state.settings.loading = false;
+    renderSettings();
+  }
+}
+
+function openSettingsDialog() {
+  if (!dom.settingsDialog) return;
+  if (dom.settingsDialog.open) return;
+  try {
+    dom.settingsDialog.showModal();
+  } catch (_) {
+    showToast("当前浏览器无法打开设置面板。", "error");
+    return;
+  }
+  clearSettingsKeyInput();
+  dom.settingsKeyAction.value = "keep";
+  state.settings.keyAction = "keep";
+  state.settings.error = "";
+  state.settings.message = "";
+  renderSettings();
+  void loadSettings({ keepMessage: true });
+}
+
+function closeSettingsDialog() {
+  clearSettingsKeyInput();
+  dom.settingsKeyAction.value = "keep";
+  state.settings.keyAction = "keep";
+  if (dom.settingsDialog.open) dom.settingsDialog.close();
+}
+
+async function handleSettingsSave(event) {
+  if (event) event.preventDefault();
+  const current = state.settings.value;
+  if (!current || state.settings.loading || state.settings.saving) return;
+  state.settings.error = "";
+  state.settings.message = "";
+  const action = SETTINGS_API_KEY_ACTIONS.includes(dom.settingsKeyAction.value)
+    ? dom.settingsKeyAction.value
+    : "keep";
+  if (action === "clear") {
+    const ok = await confirmAction({
+      title: "清除 API Key？",
+      message: "清除后新的云端请求会因缺少密钥被阻止；本地处理与已经开始的请求不受影响。",
+      confirmLabel: "清除密钥",
+      cancelLabel: "保留密钥",
+      tone: "danger"
+    });
+    if (!ok) return;
+  }
+  const built = buildSettingsUpdate({
+    revision: current.revision,
+    apiKeyAction: action,
+    apiKey: dom.settingsKeyInput.value,
+    model: dom.settingsModel.value,
+    baseUrl: dom.settingsBaseUrl.value,
+    paidCallsEnabled: dom.settingsPaid.checked,
+    pricingConfirmed: dom.settingsPricing.checked,
+    budgetYuan: dom.settingsBudget.value,
+    reservationYuan: dom.settingsReservation.value,
+    maxCalls: dom.settingsMaxCalls.value
+  });
+  if (!built.ok) {
+    state.settings.error = built.error;
+    renderSettings();
+    return;
+  }
+
+  state.settings.saving = true;
+  state.settings.message = "正在保存…";
+  // The one-shot payload already holds the replacement key; clear the visible
+  // field before waiting for the server so a submitted secret is not retained.
+  clearSettingsKeyInput();
+  dom.settingsKeyAction.value = "keep";
+  state.settings.keyAction = "keep";
+  renderSettings();
+  try {
+    const next = await getSettingsClient().save(built.payload);
+    state.settings.value = next;
+    state.settings.revision = next.revision;
+    state.settings.loaded = true;
+    state.settings.message = "设置已保存；新任务使用新配置，进行中的云端请求保持提交时配置。保存没有发起云端测试。";
+    fillSettingsForm(next);
+    void refreshAiStatus(false);
+    showToast("设置已保存；未发起任何云端测试。", "success", 5000);
+  } catch (error) {
+    state.settings.saving = false;
+    state.settings.message = "";
+    clearSettingsKeyInput();
+    dom.settingsKeyAction.value = "keep";
+    state.settings.keyAction = "keep";
+    if (error.status === 409) {
+      const loaded = await loadSettings({ keepMessage: true, keepError: true });
+      state.settings.error = loaded
+        ? "设置已在其他页面更新（修订冲突），本次未保存。已重新读取最新设置，请复核后再次保存。"
+        : "设置已在其他页面更新（修订冲突），本次未保存；重新读取也失败，请稍后再试。";
+    } else if (error.network || (error.status && error.status >= 500)) {
+      state.settings.error = "保存结果未知。请点击“重新读取”确认当前配置后再决定是否重试；页面不会自动重发。";
+    } else {
+      state.settings.error = "设置未保存：" + friendlyError(error);
+    }
+  } finally {
+    state.settings.saving = false;
+    if (built.payload && typeof built.payload === "object") {
+      delete built.payload.api_key;
+    }
+    clearSettingsKeyInput();
+    dom.settingsKeyAction.value = "keep";
+    state.settings.keyAction = "keep";
+    renderSettings();
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -8922,6 +9613,20 @@ function wireEvents() {
   dom.openHistory.addEventListener("click", openHistory);
   dom.closeHistory.addEventListener("click", () => closeHistory({}));
   dom.historyScrim.addEventListener("click", () => closeHistory({}));
+  dom.openSettings.addEventListener("click", openSettingsDialog);
+  dom.settingsClose.addEventListener("click", closeSettingsDialog);
+  dom.settingsReload.addEventListener("click", () => void loadSettings({}));
+  dom.settingsForm.addEventListener("submit", (event) => void handleSettingsSave(event));
+  dom.settingsKeyAction.addEventListener("change", () => {
+    updateSettingsKeyUi();
+    updateActionState();
+    if (state.settings.keyAction === "replace") dom.settingsKeyInput.focus();
+  });
+  dom.settingsDialog.addEventListener("close", () => {
+    clearSettingsKeyInput();
+    dom.settingsKeyAction.value = "keep";
+    state.settings.keyAction = "keep";
+  });
   dom.refreshHistory.addEventListener("click", () => void loadHistory(true));
   dom.historyMore.addEventListener("click", () => void loadHistory(false));
   dom.historyList.addEventListener("click", async (event) => {
@@ -9132,6 +9837,13 @@ function wireEvents() {
   dom.aiUseLocal.addEventListener("click", () => void continueAi("use_local"));
   dom.aiReject.addEventListener("click", () => void continueAi("reject"));
   dom.aiRefreshPipeline.addEventListener("click", () => void refreshAiPipelineNow(false));
+  dom.aiRerunInput.addEventListener("change", () => {
+    state.ai.rerunAssetId = dom.aiRerunInput.value;
+    setAiRerunError("");
+    updateActionState();
+  });
+  dom.aiRerunCompose.addEventListener("click", () => void handleAiRerun("compose"));
+  dom.aiRerunVectorize.addEventListener("click", () => void handleAiRerun("vectorize"));
 
   dom.repairCallId.addEventListener("input", () => {
     if (dom.repairCallId.value.trim()) {

@@ -148,9 +148,12 @@ class LocalWorker:
                 "memory_limit_mib": 1024, "concurrency": 1}
 
     def _loop(self):
+        from app.services.workflow import WorkflowCoordinator
+        workflows = WorkflowCoordinator(self.store)
         while not self.stop_event.is_set():
             self.last_heartbeat = time.time()
             try:
+                workflows.advance()
                 claimed = self.store.claim()
                 self.last_error = None
                 if claimed:
@@ -178,8 +181,9 @@ class LocalWorker:
         provider_task = job["kind"] == "decompose-layers" or job["kind"] == "repair" and not job["parameters"].get("provider_call_id")
         deadline_seconds = max(180, self.timeout_seconds) if provider_task else self.timeout_seconds
         try:
-            if provider_task and self.provider_settings is None:
-                raise RuntimeError("Provider configuration unavailable")
+            current_settings = self.provider_settings() if callable(self.provider_settings) else self.provider_settings
+            if provider_task and (current_settings is None or current_settings.blockers()):
+                raise ServiceError("PROVIDER_DISABLED", "The queued cloud task was blocked by current settings; no new provider request was sent", 503)
             child = subprocess.Popen(command, cwd=backend.parent, env=env, stdin=subprocess.PIPE if provider_task else subprocess.DEVNULL,
                                      stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                                      creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
@@ -187,10 +191,10 @@ class LocalWorker:
             if provider_task:
                 from dataclasses import fields
                 config = {}
-                for field in fields(self.provider_settings):
+                for field in fields(current_settings):
                     if field.name == "storage_root":
                         continue
-                    value = getattr(self.provider_settings, field.name)
+                    value = getattr(current_settings, field.name)
                     config[field.name] = value.get_secret_value() if hasattr(value, "get_secret_value") else value
                 # Credentials travel once through the owned child's private pipe;
                 # never through argv, environment, a temporary file or the browser.
@@ -220,6 +224,8 @@ class LocalWorker:
             if error is None and child.poll() not in (None, 0):
                 error = {"code": "WORKER_LIMIT_UNAVAILABLE" if child.returncode == 4 else "WORKER_EXITED",
                          "message": "The bounded local worker could not complete; use a smaller working copy and retry explicitly"}
+        except ServiceError as failure:
+            error = {"code": failure.code, "message": str(failure)}
         except Exception:
             error = {"code": "WORKER_START_FAILED", "message": "The local worker could not start in the current Python environment"}
         finally:

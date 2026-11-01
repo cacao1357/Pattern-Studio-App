@@ -17,9 +17,10 @@ from app.schemas.contracts import BoundingBox, DEFAULT_LIMITS, ProcessingError
 from app.schemas.provider import ValidationRequest
 from app.services.imaging import normalize_image
 from app.storage import ServiceError
+from app.providers.prompts import DEFAULT_PROMPT_VERSION, decomposition_prompt
 
 
-PROMPT_VERSION = "s0-seedream-v1"
+PROMPT_VERSION = DEFAULT_PROMPT_VERSION
 
 
 class ProviderFailure(ValueError):
@@ -86,7 +87,7 @@ def prepare_payload(request: ValidationRequest, source_png: bytes, settings: Set
     if not 262_144 <= pixels <= 25_000_000 or not 1 / 16 <= size[0] / size[1] <= 16:
         raise ServiceError("PROVIDER_INPUT_DIMENSIONS", "Seedream input requires 262144..25000000 pixels and an aspect ratio in 1/16..16; create an explicit working copy if needed")
     if request.operation == "decompose":
-        prompt = "将图片中的纹样主体与背景拆分为独立图层，保留纹样结构与颜色，避免将整个底图当作纹样主体。"
+        prompt = decomposition_prompt(request.prompt_version)
     else:
         coordinates = edit_prompt_bbox(request.bbox, size)
         instruction = {"restore_small_gap": "补全小面积缺口，延续邻近纹样线条、颜色和粗细，不新增主体或改变整体结构",

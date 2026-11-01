@@ -28,6 +28,8 @@ from app.services.assisted_workbench import AssistedWorkbench
 from app.services.local_workbench import LocalWorkbench
 from app.workbench_store import WorkbenchStore
 from app.worker import LocalWorker
+from app.schemas.settings import SettingsUpdate
+from app.services.runtime_settings import RuntimeSettings, RuntimeSettingsConflict
 
 
 class ApiAlreadyRunningError(RuntimeError):
@@ -141,6 +143,7 @@ class LocalApiBoundary:
 
 def create_app(settings: Settings | None = None, *, transport: httpx.BaseTransport | None = None) -> FastAPI:
     settings = settings or load_settings()
+    runtime_settings = RuntimeSettings(settings)
     store = None
     service = None
     local_service = None
@@ -155,7 +158,8 @@ def create_app(settings: Settings | None = None, *, transport: httpx.BaseTranspo
     def current_service() -> ProviderValidationService:
         if service is None:
             raise ServiceError("API_NOT_STARTED", "Start the API with its single-process lifecycle enabled", 503)
-        return service
+        current = runtime_settings.current()
+        return ProviderValidationService(current, current_store(), SeedreamClient(current, transport=transport))
 
     def current_local_service():
         if local_service is None:
@@ -170,7 +174,7 @@ def create_app(settings: Settings | None = None, *, transport: httpx.BaseTranspo
     def current_assisted_service():
         if assisted_service is None:
             raise ServiceError("API_NOT_STARTED", "The assisted workbench has not started", 503)
-        return assisted_service
+        return AssistedWorkbench(current_store(), runtime_settings.current(), current_local_service())
 
     @asynccontextmanager
     async def lifespan(app):
@@ -179,11 +183,11 @@ def create_app(settings: Settings | None = None, *, transport: httpx.BaseTranspo
         with exclusive_process(settings.storage_root):
             store = WorkbenchStore(settings.storage_root)
             service = ProviderValidationService(settings, store, SeedreamClient(settings, transport=transport))
-            local_service = LocalWorkbench(store, (settings.api_token.get_secret_value(), settings.ark_api_key.get_secret_value()))
+            local_service = LocalWorkbench(store, runtime_settings.secrets)
             assisted_service = AssistedWorkbench(store, settings, local_service)
             store.recover_interrupted_calls()
             store.recover_jobs()
-            worker = LocalWorker(store, provider_settings=settings)
+            worker = LocalWorker(store, provider_settings=runtime_settings.current)
             worker.start()
             try:
                 yield
@@ -213,6 +217,24 @@ def create_app(settings: Settings | None = None, *, transport: httpx.BaseTranspo
         # FastAPI's default includes rejected input, which could contain a pasted secret.
         return JSONResponse({"error": {"code": "INVALID_REQUEST", "message": "Check the documented fields, types and operation constraints"}}, 422)
 
+    @app.exception_handler(ConfigurationError)
+    async def configuration_error(request, error):
+        return JSONResponse({"error": {"code": "INVALID_SETTINGS", "message": str(error)}}, 422)
+
+    @app.exception_handler(RuntimeSettingsConflict)
+    async def settings_conflict(request, error):
+        return JSONResponse({"error": {"code": "STALE_SETTINGS", "message": str(error)}}, 409)
+
+    @app.get("/api/v1/settings")
+    def get_settings():
+        current_store()
+        return runtime_settings.public()
+
+    @app.put("/api/v1/settings")
+    def update_settings(payload: SettingsUpdate):
+        current_store()
+        return runtime_settings.update(payload)
+
     @app.exception_handler(HTTPException)
     async def http_error(request, error):
         return JSONResponse({"error": {"code": "HTTP_ERROR", "message": "This method or resource is unavailable"}}, error.status_code)
@@ -220,16 +242,17 @@ def create_app(settings: Settings | None = None, *, transport: httpx.BaseTranspo
     mount_workbench(app, current_store, current_local_service, current_worker)
     mount_svg_edit(app, current_store)
     mount_assisted(app, current_assisted_service)
-    mount_finishing(app, lambda: FinishingWorkbench(current_store(), settings, current_local_service()))
+    mount_finishing(app, lambda: FinishingWorkbench(current_store(), runtime_settings.current(), current_local_service()))
 
     @app.get("/api/v1/seedream/status")
     def provider_status():
-        blockers = settings.blockers()
-        return {"configured": bool(settings.ark_api_key.get_secret_value()), "enabled": not blockers,
-                "blockers": blockers, "model": settings.model, "automatic_retries": False,
-                "budget": current_store().budget(settings.budget_cents, settings.max_calls),
-                "limits": {"upload_bytes": DEFAULT_LIMITS.max_upload_bytes, "response_bytes": settings.response_limit_bytes,
-                           "aggregate_output_pixels": settings.output_pixel_limit, "single_concurrent_call": True}}
+        current = runtime_settings.current()
+        blockers = current.blockers()
+        return {"configured": bool(current.ark_api_key.get_secret_value()), "enabled": not blockers,
+                "blockers": blockers, "model": current.model, "automatic_retries": False,
+                "budget": current_store().budget(current.budget_cents, current.max_calls),
+                "limits": {"upload_bytes": DEFAULT_LIMITS.max_upload_bytes, "response_bytes": current.response_limit_bytes,
+                           "aggregate_output_pixels": current.output_pixel_limit, "single_concurrent_call": True}}
 
     @app.post("/api/v1/seedream/inputs", status_code=201)
     async def upload_input(request: Request, filename: str = Query(min_length=1, max_length=200)):
@@ -254,7 +277,7 @@ def create_app(settings: Settings | None = None, *, transport: httpx.BaseTranspo
 
     @app.post("/api/v1/seedream/validations/{call_id}/settlement")
     def settlement(call_id: UUID, payload: CostSettlement):
-        if any(secret and secret in payload.billing_reference for secret in (settings.api_token.get_secret_value(), settings.ark_api_key.get_secret_value())):
+        if any(secret in payload.billing_reference for secret in runtime_settings.secrets()):
             raise ServiceError("INVALID_BILLING_REFERENCE", "Use an independent account billing reference")
         try:
             cents = money_cents(payload.actual_cost_cny, "actual_cost_cny")
@@ -277,7 +300,7 @@ def create_app(settings: Settings | None = None, *, transport: httpx.BaseTranspo
         }
         keyed_paths = {"/api/v1/images", "/api/v1/pipelines", "/api/v1/exports", "/api/v1/feedback", "/api/v1/seedream/validations", "/api/v1/pipelines/ai"}
         for path, methods in schema["paths"].items():
-            if "post" in methods and (path in keyed_paths or path.startswith("/api/v1/jobs/") or path.endswith(("/continue", "/decision"))):
+            if "post" in methods and (path in keyed_paths or path.startswith("/api/v1/jobs/") or path.endswith(("/continue", "/decision", "/rerun"))):
                 parameter = {"$ref": "#/components/parameters/IdempotencyKey"}
                 parameters = methods["post"].setdefault("parameters", [])
                 if parameter not in parameters:

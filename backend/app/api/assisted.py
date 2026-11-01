@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-from app.schemas.assisted import AiPipelineRequest, ComposeLayersRequest, ContinueRequest, RefineMaskRequest
+from app.schemas.assisted import AiPipelineRequest, ComposeLayersRequest, ContinueRequest, RefineMaskRequest, RerunRequest
 
 
 def mount_assisted(app, current_service):
@@ -35,3 +35,7 @@ def mount_assisted(app, current_service):
     def continue_pipeline(pipeline_id: UUID, payload: ContinueRequest, request: Request):
         result = current_service().continue_pipeline(str(pipeline_id), payload, key(request))
         return JSONResponse(result, status_code=200 if payload.action == "reject" else 202)
+
+    @app.post("/api/v1/pipelines/{pipeline_id}/rerun", status_code=202)
+    def rerun(pipeline_id: UUID, payload: RerunRequest, request: Request):
+        return JSONResponse(current_service().rerun(str(pipeline_id), payload, key(request)), status_code=202)

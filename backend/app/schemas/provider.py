@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.contracts import BoundingBox
+from app.providers.prompts import DEFAULT_PROMPT_VERSION
 
 
 class ValidationRequest(BaseModel):
@@ -14,6 +15,7 @@ class ValidationRequest(BaseModel):
     operation: Literal["decompose", "edit"]
     intent: Literal["separate_pattern", "restore_small_gap", "reconnect_lines"]
     size: Literal["1K", "1.5K", "2K", "auto"] = "1K"
+    prompt_version: str = Field(default=DEFAULT_PROMPT_VERSION, min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_.-]+$")
     bbox: BoundingBox | None = None
     # Neither knowing the local API token nor uploading an image authorizes a charge.
     consent_to_upload: bool = Field(strict=True, description="Must explicitly be true for this request")
@@ -28,6 +30,8 @@ class ValidationRequest(BaseModel):
                 raise ValueError("Decomposition requires separate_pattern and no edit rectangle")
         elif self.intent == "separate_pattern" or self.bbox is None or self.size == "auto":
             raise ValueError("Editing requires a repair intent, rectangle and explicit resolution tier")
+        elif self.prompt_version != DEFAULT_PROMPT_VERSION:
+            raise ValueError("Editing uses the fixed repair prompt version")
         return self
 
 

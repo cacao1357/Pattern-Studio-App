@@ -28,10 +28,10 @@ MAX_EXPORT_BYTES = 128 * 1024 * 1024
 
 class LocalWorkbench:
     def __init__(self, store, secrets=()):
-        self.store, self.secrets = store, tuple(s for s in secrets if s)
+        self.store, self.secrets = store, secrets if callable(secrets) else tuple(s for s in secrets if s)
 
     def safe_text(self, value):
-        if any(secret in value for secret in self.secrets):
+        if any(secret in value for secret in (self.secrets() if callable(self.secrets) else self.secrets)):
             raise ServiceError("CREDENTIAL_IN_INPUT", "Do not put credentials in filenames, notes, feedback or idempotency keys", 422)
 
     def upload(self, data, filename, source_note, key):

@@ -7,6 +7,7 @@ from uuid import uuid4
 from PIL import Image
 
 from app.config import Settings
+from app.providers.base import ImageProvider
 from app.providers.seedream import PROMPT_VERSION, ProviderFailure, SeedreamClient, prepare_payload
 from app.schemas.contracts import DEFAULT_LIMITS
 from app.schemas.provider import ValidationRequest
@@ -15,7 +16,7 @@ from app.storage import ServiceError, Store, png_bytes
 
 
 class ProviderValidationService:
-    def __init__(self, settings: Settings, store: Store, client: SeedreamClient):
+    def __init__(self, settings: Settings, store: Store, client: ImageProvider):
         self.settings, self.store, self.client = settings, store, client
 
     def upload(self, data: bytes, filename: str) -> dict:
@@ -33,7 +34,7 @@ class ProviderValidationService:
         })
         return {"original": original, "normalized": asset}
 
-    def submit(self, request: ValidationRequest, key: str) -> tuple[dict, bool]:
+    def submit(self, request: ValidationRequest, key: str, *, prompt_text: str | None = None) -> tuple[dict, bool]:
         if not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", key):
             raise ServiceError("IDEMPOTENCY_KEY_INVALID", "Idempotency-Key requires 16..128 ASCII letters, digits, underscores or hyphens")
         if any(secret and secret in key for secret in (self.settings.api_token.get_secret_value(), self.settings.ark_api_key.get_secret_value())):
@@ -44,10 +45,17 @@ class ProviderValidationService:
         if metadata.get("kind") != "normalized_input":
             raise ServiceError("PROVIDER_INPUT_KIND", "Select a registered normalized input asset")
         payload = prepare_payload(request, source_png, self.settings)
+        if prompt_text is not None:
+            if request.operation != "decompose" or not isinstance(prompt_text, str) or not 1 <= len(prompt_text) <= 2000:
+                raise ServiceError("PROMPT_SNAPSHOT_INVALID", "The stored decomposition prompt is unavailable", 409)
+            payload["prompt"] = prompt_text
         snapshot = {**request.model_dump(mode="json"), "model": self.settings.model,
-                    "prompt_version": PROMPT_VERSION, "coordinate_space_id": metadata["coordinate_space_id"],
+                    "prompt_version": request.prompt_version if request.operation == "decompose" else PROMPT_VERSION,
+                    "prompt_text": payload["prompt"], "base_url": self.settings.base_url,
+                    "coordinate_space_id": metadata["coordinate_space_id"],
                     "input_size": [metadata["width"], metadata["height"]], "watermark": True,
-                    "pricing_confirmed": True}
+                    "pricing_confirmed": True, "budget_limit_cents": self.settings.budget_cents,
+                    "reservation_cents": self.settings.reservation_cents, "max_calls": self.settings.max_calls}
         call, created = self.store.reserve(key, snapshot, metadata["sha256"],
                                           reservation=self.settings.reservation_cents, budget=self.settings.budget_cents,
                                           max_calls=self.settings.max_calls)

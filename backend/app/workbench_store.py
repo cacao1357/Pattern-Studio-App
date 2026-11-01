@@ -71,6 +71,14 @@ class WorkbenchStore(Store):
                     job_id TEXT PRIMARY KEY REFERENCES local_jobs(id),
                     decision_json TEXT NOT NULL, created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS workflow_branches (
+                    job_id TEXT PRIMARY KEY REFERENCES local_jobs(id),
+                    flow_id TEXT NOT NULL REFERENCES ai_flows(id),
+                    parent_job_id TEXT REFERENCES local_jobs(id), action TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS workflow_selections (
+                    flow_id TEXT PRIMARY KEY REFERENCES ai_flows(id), assessment TEXT NOT NULL
+                );
             """)
 
     @staticmethod
@@ -171,6 +179,9 @@ class WorkbenchStore(Store):
             record["pipeline_id"] = row["id"]
         if record["parameters"].get("ai_pipeline_id"):
             record["ai_pipeline_id"] = record["parameters"]["ai_pipeline_id"]
+        if "branch_flow_id" in row.keys() and row["branch_flow_id"]:
+            record.update(ai_pipeline_id=row["branch_flow_id"], parent_job_id=row["branch_parent_job_id"],
+                          workflow_action=row["branch_action"])
         return record
 
     @staticmethod
@@ -187,7 +198,7 @@ class WorkbenchStore(Store):
             db.execute("INSERT INTO local_pipelines VALUES (?,?)", (job_id, canonical_json(parameters)))
         return job_id
 
-    def create_ai_flow(self, input_id, parameters, key, *, archived_result=None):
+    def create_ai_flow(self, input_id, parameters, key, *, archived_result=None, snapshot=None):
         scope = "pipelines/ai"
         request_hash = digest(canonical_json({"input": input_id, "parameters": parameters}).encode())
         flow_id, timestamp = str(uuid4()), now()
@@ -196,10 +207,10 @@ class WorkbenchStore(Store):
             existing = self._existing(db, scope, key, request_hash)
             if not existing:
                 job_id = self._enqueue(db, "decompose-layers", input_id,
-                    {**parameters, "ai_pipeline_id": flow_id},
+                    {**parameters, "ai_pipeline_id": flow_id, "execution_snapshot": snapshot["snapshot"] if snapshot else None},
                     state="succeeded" if archived_result else "queued", result=archived_result)
                 db.execute("INSERT INTO ai_flows VALUES (?,?,?,NULL,'decomposing',1,?,'[]',NULL,?,?)",
-                    (flow_id, input_id, job_id, canonical_json(parameters), timestamp, timestamp))
+                    (flow_id, input_id, job_id, canonical_json({**parameters, "workflow": snapshot}), timestamp, timestamp))
                 db.execute("INSERT INTO local_keys VALUES (?,?,?,?)", (scope, key, request_hash, flow_id))
             db.commit()
         return self.get_ai_flow(existing or flow_id)
@@ -225,14 +236,63 @@ class WorkbenchStore(Store):
                   "succeeded" if decision else "waiting_user" if state == "waiting_user" else "blocked" if state == "failed" else "pending"}]
         if continuation:
             steps.extend(continuation["result"]["steps"])
+        configuration = json.loads(row["configuration"])
+        with self.connection() as db:
+            branch_rows = db.execute("SELECT * FROM workflow_branches WHERE flow_id=? ORDER BY rowid", (flow_id,)).fetchall()
+            assessment = db.execute("SELECT assessment FROM workflow_selections WHERE flow_id=?", (flow_id,)).fetchone()
+        branches = [{**self.get_job(b["job_id"]), "parent_job_id": b["parent_job_id"], "action": b["action"]} for b in branch_rows]
+        call_id = decomposition["result"].get("provider_call_id")
+        call = self.get_call(call_id) if call_id else None
+        candidates = [a for job in ([continuation] if continuation else []) + branches
+                      for a in job["result"]["assets"] if a["kind"] in {"composed_candidate", "transparent_png"}]
+        candidate_ids = {a["asset_id"] for a in candidates}
+        if candidate_ids:
+            with self.connection() as db:
+                placeholders = ",".join("?" for _ in candidate_ids)
+                descendants = db.execute(f"""WITH RECURSIVE descendants(id) AS (
+                    SELECT id FROM assets WHERE id IN ({placeholders})
+                    UNION SELECT r.child_id FROM asset_relations r JOIN descendants d ON r.parent_id=d.id
+                ) SELECT a.metadata FROM assets a JOIN descendants d ON a.id=d.id""", tuple(candidate_ids)).fetchall()
+            candidate_ids.update(a["asset_id"] for a in (json.loads(r[0]) for r in descendants)
+                                 if a["kind"] in {"transparent_png", "composed_candidate", "working_copy", "cropped", "prepared", "enhanced"})
         return {"pipeline_id": row["id"], "kind": "ai_pipeline", "input_asset_id": row["input_id"],
             "state": state, "revision": row["revision"], "decomposition_job_id": decomposition["job_id"],
             "continuation_job_id": row["continuation_job_id"], "selected_layer_ids": json.loads(row["selected_layers"]),
-            "decision": decision, "vector": json.loads(row["configuration"])["vector"],
+            "decision": decision, "vector": configuration["vector"],
+            "workflow": configuration.get("workflow"),
+            "selection": json.loads(assessment[0]) if assessment else None,
+            "branches": branches,
+            "recovery": {"can_compose": decomposition["state"] == "succeeded",
+                         "vector_input_asset_ids": sorted(candidate_ids),
+                         "needs_reconcile": bool(call and call["state"] in {"running", "outcome_unknown", "output_invalid"}),
+                         "provider_call_id": call_id, "automatic_provider_retry": False},
             "result": {"assets": continuation["result"]["assets"] if continuation else [], "steps": steps},
             "error": active["error"], "created_at": row["created_at"], "updated_at": max(row["updated_at"], active["updated_at"])}
 
-    def continue_ai_flow(self, flow_id, values, key, *, kind=None, parameters=None):
+    def submit_workflow_branch(self, flow_id, values, key, kind, input_id, parameters):
+        """CAS and idempotency cover both the queued job and its lineage."""
+        scope = "rerun/" + flow_id
+        request_hash = digest(canonical_json(values).encode())
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            existing = self._existing(db, scope, key, request_hash)
+            if not existing:
+                row = db.execute("SELECT * FROM ai_flows WHERE id=?", (flow_id,)).fetchone()
+                if row is None or row["revision"] != values["revision"]:
+                    raise ServiceError("STALE_REVISION", "Reload the workflow before creating a local branch", 409)
+                parent = row["continuation_job_id"] or row["decomposition_job_id"]
+                if values["action"] == "vectorize":
+                    asset = db.execute("SELECT metadata FROM assets WHERE id=?", (input_id,)).fetchone()
+                    if asset:
+                        parent = json.loads(asset[0]).get("generated_by_job_id") or parent
+                job_id = self._enqueue(db, kind, input_id, parameters)
+                db.execute("INSERT INTO workflow_branches VALUES (?,?,?,?)", (job_id, flow_id, parent, values["action"]))
+                db.execute("UPDATE ai_flows SET revision=revision+1,updated_at=? WHERE id=?", (now(), flow_id))
+                db.execute("INSERT INTO local_keys VALUES (?,?,?,?)", (scope, key, request_hash, job_id))
+            db.commit()
+        return self.get_job(existing or job_id)
+
+    def continue_ai_flow(self, flow_id, values, key, *, kind=None, parameters=None, actor="human"):
         scope = "continue/" + flow_id
         request_hash = digest(canonical_json(values).encode())
         with self.connection() as db:
@@ -245,7 +305,7 @@ class WorkbenchStore(Store):
                 if row["revision"] != values["revision"] or row["state"] != "decomposing":
                     raise ServiceError("STALE_REVISION", "This workflow already has a decision; reload its current version", 409)
                 job_id = self._enqueue(db, kind, row["input_id"], {**parameters, "ai_pipeline_id": flow_id}) if kind else None
-                decision = {"action": values["action"], "revision": values["revision"],
+                decision = {"action": values["action"], "revision": values["revision"], "actor": actor,
                             "layer_ids": values["layer_ids"], "decided_at": now()}
                 db.execute("""UPDATE ai_flows SET revision=revision+1,continuation_job_id=?,state=?,
                     selected_layers=?,decision_json=?,updated_at=? WHERE id=?""",
@@ -311,7 +371,8 @@ class WorkbenchStore(Store):
 
     def get_job(self, job_id):
         with self.connection() as db:
-            row = db.execute("SELECT * FROM local_jobs WHERE id=?", (job_id,)).fetchone()
+            row = db.execute("""SELECT j.*, b.flow_id AS branch_flow_id, b.parent_job_id AS branch_parent_job_id,
+                b.action AS branch_action FROM local_jobs j LEFT JOIN workflow_branches b ON j.id=b.job_id WHERE j.id=?""", (job_id,)).fetchone()
         if row is None:
             raise ServiceError("JOB_NOT_FOUND", "Local job not found", 404)
         return self._job(row)
@@ -354,7 +415,7 @@ class WorkbenchStore(Store):
             rows = db.execute(f"SELECT rowid AS sequence,* FROM {table} WHERE rowid<? ORDER BY rowid DESC LIMIT ?",
                               (int(cursor) if cursor else 9223372036854775807, limit + 1)).fetchall()
         selected = rows[:limit]
-        return {"items": [self.get_image(r["id"]) if table == "images" else self._job(r) for r in selected],
+        return {"items": [self.get_image(r["id"]) if table == "images" else self.get_job(r["id"]) for r in selected],
                 "next_cursor": str(selected[-1]["sequence"]) if len(rows) > limit else None}
 
     def submit(self, kind, input_id, parameters, key, *, retry_of=None):
@@ -374,6 +435,12 @@ class WorkbenchStore(Store):
                      canonical_json({"assets": [], "steps": []})))
                 if kind == "pipeline":
                     db.execute("INSERT INTO local_pipelines VALUES (?,?)", (job_id, canonical_json(parameters)))
+                if retry_of:
+                    owner = db.execute("""SELECT flow_id FROM workflow_branches WHERE job_id=?
+                        UNION SELECT id FROM ai_flows WHERE continuation_job_id=? LIMIT 1""", (retry_of, retry_of)).fetchone()
+                    if owner:
+                        db.execute("INSERT INTO workflow_branches VALUES (?,?,?,'retry')", (job_id, owner[0], retry_of))
+                        db.execute("UPDATE ai_flows SET revision=revision+1,updated_at=? WHERE id=?", (now(), owner[0]))
                 db.execute("INSERT INTO local_keys VALUES (?,?,?,?)", (scope, key, request_hash, job_id))
             db.commit()
         return self.get_job(existing or job_id)
