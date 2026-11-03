@@ -147,3 +147,14 @@ GET /api/v1/images/{image_id}       # 读取记录，供“使用已有版本”
 
 覆盖：分级边界、aHash/NCC、pattern_score、来源字段校验、`image_meta`、
 上传/重复/导出闸门、旧库兼容、manifest v2。
+
+### 2026-11-03：zgx 分支修复验证
+
+- 普通矢量化及本地一键流程生成的 SVG 继承来源、授权、内容标识和分级字段，并记录矢量化算法版本；AI 合成后的 SVG 使用矢量化版本，不再继承合成算法版本。
+- 浏览器验收夹具已适配上传函数的三项返回值；隔离初始化检查通过，能够生成模拟云端归档并到达服务启动入口。
+- 使用现有 `D:/CondaEnvs/pattern-studio/python.exe` 执行 `python -B -m pytest -q -p no:cacheprovider tests/test_api_p0.py backend/tests/test_a_workflow.py`：19 项通过，另有 2 个子场景通过；没有真实云端调用。
+- 本次 Edge 验收持续无输出，手动中止，未产生新的结果记录，不能视为通过；旧的 `storage/validation/a/` 记录不代表本次验证。
+- DSH 恢复连接后已修复前端：重复图切换加入忙碌状态、未应用预览及未保存画笔/框选保护，并防止异步读取覆盖变化后的工作区；平铺 ZIP 复用来源授权确认，取消不提交，确认后携带 `license_acknowledged`，提交前复查任务和所选资产。
+- 前端定向回归 `node frontend/tests/workbench-regressions.test.mjs`：15 项通过；现有设置模块测试：8 项通过；工作台模块语法检查和 `git diff --check` 通过。本轮未重跑浏览器，交互验收仍未完成。
+- 合并前补充检查 `tests/test_quality.py`、`tests/test_provenance.py` 和 `tests/test_store_meta.py`：20 项通过。
+- 前端委派：Harness `wb/cn:deepseek-v4.1-flash`，runId `4b86c873-572d-4cba-a591-1f7b78f0f92a`，sessionId `session-5f412772-79a0-4b85-bf60-5da7b3d04a23`；已完成，Codex 独立审查差异并复跑上述前端检查。

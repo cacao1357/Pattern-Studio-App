@@ -399,6 +399,8 @@ def execute_local(store: WorkbenchStore, job_id, token):
         options = VectorOptions.model_validate(params["vector"] if kind == "pipeline" else params)
         result = vectorize(image, options)
         publish("vectorize", [{"data": result.svg.encode("utf-8"), "suffix": ".svg", "metadata": {
+            **{key: source[key] for key in INHERITED_META_KEYS if source.get(key) not in (None, "")},
+            "algorithm_version": versions.algorithm_version("svg"),
             "kind": "svg", "width": image.width, "height": image.height,
             "coordinate_space_id": source["coordinate_space_id"], "source_asset_id": source["asset_id"],
             "original_width": source.get("original_width", source["width"]),

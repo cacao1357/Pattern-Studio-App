@@ -34,7 +34,7 @@ def main():
     local = LocalWorkbench(store)
     image = Image.new("RGBA", (512, 512), "white")
     ImageDraw.Draw(image).rectangle((120, 120, 380, 380), fill="#c02030")
-    record, _ = local.upload(png_bytes(image), "synthetic-pattern.png", "offline browser fixture", uuid4().hex)
+    record, _, _ = local.upload(png_bytes(image), "synthetic-pattern.png", "offline browser fixture", uuid4().hex)
     input_id = record["normalized"]["asset_id"]
 
     class FixtureProvider:
