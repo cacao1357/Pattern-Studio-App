@@ -223,6 +223,27 @@ const ISSUE_LABELS = {
   other: "其他"
 };
 
+const QUALITY_HEADLINES = {
+  A: "尺寸与清晰度适合本地处理",
+  B: "可用；细节一般，建议先预览",
+  C: "建议换更清晰的素材或先放大",
+  U: "质量指标未能计算，不影响继续处理"
+};
+
+const QUALITY_GRADE_HINTS = {
+  A: "短边达到 512，清晰度与对比度均达标。",
+  B: "未达到 A 级门槛，但仍可作为本地处理起点。",
+  C: "短边、清晰度或对比度偏低；仍可继续，但预览结果会更依赖人工检查。"
+};
+
+const PATTERN_WARNING_LABELS = {
+  CANDIDATE_MAY_BE_BACKGROUND: "覆盖范围偏大，可能选中背景",
+  CANDIDATE_TOO_SMALL: "候选面积过小，可能只是噪点",
+  CANDIDATE_TOUCHES_BORDER: "候选贴边较多，可能是画框或背景",
+  CANDIDATE_IS_SOLID_REGION: "接近实心区域，可能不是纹样轮廓",
+  CANDIDATE_TOO_ELONGATED: "过于狭长，可能是折痕或边线"
+};
+
 const $ = (id) => document.getElementById(id);
 
 const dom = {
@@ -271,6 +292,24 @@ const dom = {
   fileMeta: $("file-meta"),
   clearFile: $("clear-file"),
   sourceNote: $("source-note"),
+  sourceType: $("source-type"),
+  sourceName: $("source-name"),
+  sourceUrl: $("source-url"),
+  license: $("license"),
+  collectedAt: $("collected-at"),
+  batchId: $("batch-id"),
+  qualitySummary: $("quality-summary"),
+  qualityGrade: $("quality-grade"),
+  qualityHeadline: $("quality-headline"),
+  qualityMetrics: $("quality-metrics"),
+  duplicateBanner: $("duplicate-banner"),
+  duplicateTitle: $("duplicate-title"),
+  duplicateMessage: $("duplicate-message"),
+  duplicateList: $("duplicate-list"),
+  duplicateUse: $("duplicate-use"),
+  duplicateDismiss: $("duplicate-dismiss"),
+  gradeChip: $("grade-chip"),
+  qualityNote: $("quality-note"),
   uploadError: $("upload-error"),
   uploadSubmit: $("upload-submit"),
   versionCount: $("version-count"),
@@ -619,6 +658,8 @@ const state = {
   sourceNote: "",
   imageId: null,
   uploadFile: null,
+  uploadMeta: null,
+  uploadDuplicates: [],
   bbox: null,
   bboxDirty: false,
   bboxInputSuppressed: false,
@@ -635,6 +676,8 @@ const state = {
   feedbackResponses: new Map(),
   pendingSubmission: null,
   requestInFlight: false,
+  duplicateSwitching: false,
+  duplicateSwitchToken: 0,
   paramsRevision: 0,
   currentHasTransparency: false,
   extractModeTouched: false,
@@ -915,6 +958,9 @@ function formatTime(value) {
 
 function friendlyError(error) {
   if (!error) return "操作未完成，请重试。";
+  if (error.code === "LICENSE_REVIEW_REQUIRED") {
+    return "导出前需要确认来源授权：所选版本有未登记或“未确认”的授权。请回到版本区检查后再次导出。";
+  }
   let message = error.message || String(error);
   message = message.replace(/\s+/g, " ").trim();
   if (!message) message = "操作未完成，请重试。";
@@ -1177,6 +1223,10 @@ function startSubmission(config) {
     return false;
   }
   if (state.requestInFlight) return false;
+  if (state.duplicateSwitching) {
+    showToast("正在切换已有版本，请稍候。", "warning");
+    return false;
+  }
   const submission = {
     path: config.path,
     method: config.method || "POST",
@@ -1303,6 +1353,13 @@ function resetWorkspace(options) {
   state.sourceLabel = "";
   state.sourceNote = "";
   state.imageId = null;
+  state.uploadMeta = null;
+  state.uploadDuplicates = [];
+  setHidden(dom.qualitySummary, true);
+  setHidden(dom.duplicateBanner, true);
+  setHidden(dom.gradeChip, true);
+  setHidden(dom.qualityNote, true);
+  dom.duplicateList.replaceChildren();
   state.bbox = null;
   state.bboxDirty = false;
   state.drag = null;
@@ -1632,6 +1689,28 @@ function renderVersions() {
       badges.append(element("span", "mini-badge is-ai", "AI 候选"));
       if (!assetGeometryVerified(asset)) badges.append(element("span", "mini-badge is-unverified", "几何未核验"));
     }
+    const assetGrade = String(asset.grade || "").toUpperCase();
+    if (["original", "normalized_input"].includes(asset.kind) && ["A", "B", "C"].includes(assetGrade)) {
+      const gradeBadge = element("span", "mini-badge", assetGrade + " 级");
+      gradeBadge.title = "质量分级在 512 参考画布上测量；仅供参考";
+      badges.append(gradeBadge);
+    }
+    if (["original", "normalized_input"].includes(asset.kind)) {
+      const licenseName = String(asset.license || "未确认").trim() || "未确认";
+      if (licenseName === "未确认") {
+        badges.append(element("span", "mini-badge is-unverified", "授权未确认"));
+      }
+    }
+    const patternQuality = asset.quality_metrics && typeof asset.quality_metrics === "object"
+      ? asset.quality_metrics
+      : null;
+    if (patternQuality && Array.isArray(patternQuality.warnings) && patternQuality.warnings.length) {
+      const warningBadge = element("span", "mini-badge is-unverified", "候选存疑");
+      warningBadge.title = patternQuality.warnings
+        .map((code) => PATTERN_WARNING_LABELS[code] || code)
+        .join("；");
+      badges.append(warningBadge);
+    }
     if (asset._isNewUntil && Date.now() < asset._isNewUntil) badges.append(element("span", "mini-badge", "新"));
     if (badges.childNodes.length) titleRow.append(badges);
     copy.append(titleRow);
@@ -1641,6 +1720,9 @@ function renderVersions() {
     if (assetIsArchive(asset)) metaParts.push("压缩包");
     else if (assetIsMask(asset)) metaParts.push("蒙版");
     else if (assetIsSvg(asset)) metaParts.push("矢量");
+    if (patternQuality && patternQuality.pattern_score != null) {
+      metaParts.push("纹样性 " + Number(patternQuality.pattern_score).toFixed(2));
+    }
     metaParts.push("#" + shortId(id));
     copy.append(element("div", "version-meta", metaParts.join(" · ")));
     if (asset._metaError) {
@@ -1736,6 +1818,8 @@ function renderCurrentInfo() {
     setHidden(dom.largeWarning, true);
     setHidden(dom.previewModeBadge, true);
     setHidden(dom.previewWatermark, true);
+    setHidden(dom.gradeChip, true);
+    setHidden(dom.qualityNote, true);
     dom.selectionLayer.classList.add("is-disabled");
     dom.canvasHint.textContent = "上传后可拖拽框选；数值坐标始终使用当前输入的真实像素。";
     return;
@@ -1747,6 +1831,16 @@ function renderCurrentInfo() {
     kindText += " · AI 候选" + (assetGeometryVerified(asset) ? "" : " · 几何未核验");
   }
   setText(dom.currentKind, kindText);
+
+  const currentGrade = String(asset.grade || "").toUpperCase();
+  const hasGrade = ["A", "B", "C"].includes(currentGrade);
+  setHidden(dom.gradeChip, !hasGrade);
+  if (hasGrade) {
+    setText(dom.gradeChip, currentGrade + " 级");
+    dom.gradeChip.className = "chip grade-chip is-" + currentGrade.toLowerCase();
+    dom.gradeChip.title = QUALITY_GRADE_HINTS[currentGrade] || "质量参考";
+  }
+  renderQualityNote(asset);
 
   if (state.sourceOriginal && state.sourceOriginal.width && state.sourceOriginal.height) {
     setText(dom.originalDims, formatDimensions(state.sourceOriginal.width, state.sourceOriginal.height));
@@ -1826,7 +1920,7 @@ async function setPreview(assetId, options) {
   const opts = options || {};
   const asset = state.assets.get(assetId);
   if (!asset) return false;
-  if (!opts.skipGuard && (state.requestInFlight || state.taskRunning || state.pendingSubmission)) {
+  if (!opts.skipGuard && (state.requestInFlight || state.taskRunning || state.pendingSubmission || state.duplicateSwitching)) {
     showToast("当前有提交或任务正在处理，完成后才能切换画布。", "warning");
     return false;
   }
@@ -2152,7 +2246,8 @@ function renderBboxControls() {
 }
 
 function canEditBbox() {
-  return Boolean(currentAsset() && isPreviewCurrent() && !state.requestInFlight && !state.taskRunning && !state.pendingSubmission);
+  return Boolean(currentAsset() && isPreviewCurrent() && !state.requestInFlight && !state.taskRunning &&
+    !state.pendingSubmission && !state.duplicateSwitching);
 }
 
 function canDrawBbox() {
@@ -2316,6 +2411,8 @@ function setUploadFile(file) {
     updateActionState();
     return;
   }
+  state.uploadDuplicates = [];
+  renderDuplicateBanner();
   const name = String(file.name || "image");
   const extension = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
   const type = String(file.type || "").toLowerCase();
@@ -2355,8 +2452,20 @@ function renderFileSummary() {
   setText(dom.fileMeta, formatBytes(file.size) + (file.type ? " · " + file.type : ""));
 }
 
+function readProvenanceForm() {
+  const value = (node) => (node && typeof node.value === "string" ? node.value.trim() : "");
+  return {
+    source_type: value(dom.sourceType),
+    source_name: value(dom.sourceName),
+    source_url: value(dom.sourceUrl),
+    license: value(dom.license),
+    collected_at: value(dom.collectedAt),
+    batch_id: value(dom.batchId)
+  };
+}
+
 async function handleUploadSubmit() {
-  if (state.requestInFlight || state.pendingSubmission || state.taskRunning) {
+  if (state.requestInFlight || state.pendingSubmission || state.taskRunning || state.duplicateSwitching) {
     updateActionState();
     return;
   }
@@ -2366,6 +2475,7 @@ async function handleUploadSubmit() {
     return;
   }
   const note = dom.sourceNote.value.trim();
+  const provenance = readProvenanceForm();
   const fileName = file.name || "image";
   if (state.currentInputId) {
     const proceed = await confirmAction({
@@ -2391,6 +2501,9 @@ async function handleUploadSubmit() {
       const form = new FormData();
       form.append("file", file, fileName);
       if (note) form.append("source_note", note);
+      for (const [key, value] of Object.entries(provenance)) {
+        if (value) form.append(key, value);
+      }
       return form;
     },
     onSuccess: (data) => handleUploadSuccess(data, fileName, note),
@@ -2405,6 +2518,73 @@ async function handleUploadSubmit() {
 }
 
 async function handleUploadSuccess(data, fileName, note) {
+  const duplicates = Array.isArray(data && data.duplicates) ? data.duplicates : [];
+  await adoptImageRecord(data, { label: fileName, note, duplicates });
+}
+
+function renderQuality() {
+  const meta = state.uploadMeta;
+  const grade = meta && ["A", "B", "C", "U"].includes(String(meta.grade || "").toUpperCase())
+    ? String(meta.grade).toUpperCase()
+    : "";
+  setHidden(dom.qualitySummary, !grade);
+  if (!grade) return;
+  dom.qualityGrade.textContent = grade;
+  dom.qualityGrade.className = "grade-chip grade-large is-" + grade.toLowerCase();
+  setText(dom.qualityHeadline, QUALITY_HEADLINES[grade] || "质量参考");
+  const parts = [];
+  if (Number.isFinite(Number(meta.short_side))) parts.push("短边 " + meta.short_side + " px");
+  if (Number.isFinite(Number(meta.sharpness))) parts.push("清晰度 " + Number(meta.sharpness).toFixed(1));
+  if (Number.isFinite(Number(meta.contrast))) parts.push("对比度 " + Number(meta.contrast).toFixed(1));
+  parts.push("参考画布 " + (meta.ref_size || 512) + " px");
+  setText(dom.qualityMetrics, parts.join(" · "));
+}
+
+function renderDuplicateBanner() {
+  const list = Array.isArray(state.uploadDuplicates) ? state.uploadDuplicates : [];
+  setHidden(dom.duplicateBanner, list.length === 0);
+  dom.duplicateList.replaceChildren();
+  if (!list.length) return;
+  const confirmed = list.filter((item) => item.status === "confirmed").length;
+  setText(dom.duplicateTitle, confirmed ? "发现重复或高度相似版本" : "发现疑似重复版本");
+  setText(dom.duplicateMessage, "与 " + list.length + " 个已有样本相似；新上传已保留，可切换到已有版本继续。");
+  for (const item of list) {
+    const suffix = item.status === "confirmed" ? "确认重复" : "疑似";
+    const grade = item.grade ? " · " + item.grade + " 级" : "";
+    dom.duplicateList.append(element("li", "",
+      "#" + shortId(item.image_id) + " · NCC " + Number(item.ncc || 0).toFixed(3) + " · " + suffix + grade));
+  }
+  setDisabled(dom.duplicateUse, Boolean(duplicateSwitchBlockReason()));
+}
+
+function renderQualityNote(asset) {
+  const notes = [];
+  const grade = asset && String(asset.grade || "").toUpperCase();
+  if (grade && ["A", "B", "C"].includes(grade)) {
+    const parts = ["质量参考：" + grade + " 级"];
+    if (Number.isFinite(Number(asset.short_side))) parts.push("短边 " + asset.short_side + " px");
+    if (Number.isFinite(Number(asset.sharpness))) parts.push("清晰度 " + Number(asset.sharpness).toFixed(1));
+    if (Number.isFinite(Number(asset.contrast))) parts.push("对比度 " + Number(asset.contrast).toFixed(1));
+    notes.push(parts.join(" · "));
+  }
+  const metrics = asset && asset.quality_metrics && typeof asset.quality_metrics === "object"
+    ? asset.quality_metrics
+    : null;
+  if (metrics) {
+    if (metrics.pattern_score != null) {
+      notes.push("纹样性 " + Number(metrics.pattern_score).toFixed(2) +
+        "（面积 " + Math.round(Number(metrics.area_ratio || 0) * 100) + "%）");
+    }
+    if (Array.isArray(metrics.warnings) && metrics.warnings.length) {
+      notes.push("候选提示：" + metrics.warnings.map((code) => PATTERN_WARNING_LABELS[code] || code).join("；"));
+    }
+  }
+  setHidden(dom.qualityNote, notes.length === 0);
+  setText(dom.qualityNote, notes.join(" · "));
+}
+
+async function adoptImageRecord(data, options) {
+  const opts = options || {};
   if (!data || typeof data !== "object") {
     throw new ApiError("上传响应缺少图像信息。", { status: 200 });
   }
@@ -2414,13 +2594,16 @@ async function handleUploadSuccess(data, fileName, note) {
   }
   const imageId = String(data.image_id || data.imageId || "");
   const originalRaw = data.original || null;
-  const serverNote = typeof data.source_note === "string" ? data.source_note : note;
+  const serverNote = typeof data.source_note === "string" ? data.source_note : (opts.note || "");
+  const label = String(opts.label || data.original?.orig_name || data.source_note || "已载入图像");
 
   resetWorkspace({ clearUpload: true });
   state.imageId = imageId || null;
-  state.sourceLabel = fileName;
+  state.sourceLabel = label;
   state.sourceNote = serverNote || "";
   state.feedbackJobId = null;
+  state.uploadMeta = data.meta && typeof data.meta === "object" ? data.meta : null;
+  state.uploadDuplicates = Array.isArray(opts.duplicates) ? opts.duplicates : [];
 
   const raws = originalRaw ? [normalizedRaw, originalRaw] : [normalizedRaw];
   const assets = await registerAssets(raws, {
@@ -2470,7 +2653,93 @@ async function handleUploadSuccess(data, fileName, note) {
   renderAll();
   await loadPreview();
   setError(dom.uploadError, "");
-  showToast("图像已载入。原尺寸与当前处理尺寸分别显示。", "success", 4500);
+  showToast(opts.toast || "图像已载入。原尺寸与当前处理尺寸分别显示。", "success", 4500);
+}
+
+// Work that owns the current workspace and must finish before a switch.
+function workspaceBusyReason() {
+  if (state.requestInFlight) return "正在提交，请稍候。";
+  if (state.cancelBusy) return "正在请求取消，等待服务端终态。";
+  if (state.pendingSubmission) return "请先处理结果未知的提交。";
+  if (state.taskRunning) return "任务处理中，完成后再继续。";
+  return "";
+}
+
+function duplicateSwitchBlockReason() {
+  if (state.duplicateSwitching) return "正在切换已有版本，请稍候。";
+  return workspaceBusyReason();
+}
+
+async function useExistingDuplicate() {
+  const best = Array.isArray(state.uploadDuplicates) && state.uploadDuplicates.length
+    ? state.uploadDuplicates[0]
+    : null;
+  if (!best || !best.image_id) return;
+  const blocked = duplicateSwitchBlockReason();
+  if (blocked) {
+    showToast(blocked, "warning");
+    return;
+  }
+  const switchToken = state.duplicateSwitchToken + 1;
+  const initialInputId = state.currentInputId;
+  // The token makes late async results harmless if this switch loses the race.
+  state.duplicateSwitchToken = switchToken;
+  state.duplicateSwitching = true;
+  try {
+    updateActionState();
+    if (state.currentInputId) {
+      const proceed = await confirmAction({
+        title: "切换到已有版本？",
+        message: "当前画布与版本区会切换到这个已有版本；现有成果仍保留在本机历史中，本次新上传也会保留。",
+        confirmLabel: "切换工作区",
+        cancelLabel: "留在当前工作区",
+        tone: "primary"
+      });
+      if (!proceed) return;
+    }
+    const result = await requestJson("/images/" + encodeURIComponent(best.image_id));
+    if (state.duplicateSwitchToken !== switchToken) return;
+    const busy = workspaceBusyReason();
+    if (busy) {
+      showToast(busy, "warning");
+      return;
+    }
+    if (state.currentInputId !== initialInputId) {
+      showToast("工作区已变化，已取消切换到已有版本。", "warning");
+      return;
+    }
+    if (!Array.isArray(state.uploadDuplicates) || !state.uploadDuplicates.includes(best)) {
+      showToast("重复提示已更新，已取消切换到已有版本。", "warning");
+      return;
+    }
+    if (!(await guardPendingPreview("切换到已有版本"))) return;
+    if (!(await guardUnsavedBrush("切换到已有版本"))) return;
+    if (!(await guardUnsavedBBox("切换到已有版本"))) return;
+    if (state.duplicateSwitchToken !== switchToken) return;
+    const lateBusy = workspaceBusyReason();
+    if (lateBusy) {
+      showToast(lateBusy, "warning");
+      return;
+    }
+    if (state.currentInputId !== initialInputId) {
+      showToast("工作区已变化，已取消切换到已有版本。", "warning");
+      return;
+    }
+    const data = result && result.data ? result.data : null;
+    await adoptImageRecord(data, {
+      label: data?.original?.source_note || data?.source_note || "已有版本",
+      note: data?.source_note || "",
+      duplicates: [],
+      toast: "已切换到已有版本；本次新上传仍保留在历史中。"
+    });
+  } catch (error) {
+    showToast("读取已有版本失败：" + friendlyError(error), "error", 6000);
+  } finally {
+    if (state.duplicateSwitchToken === switchToken) {
+      state.duplicateSwitching = false;
+      updateActionState();
+    }
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -2666,6 +2935,7 @@ function readEnhanceParams() {
 
 function currentProcessBlock() {
   if (state.requestInFlight) return "正在提交，请稍候。";
+  if (state.duplicateSwitching) return "正在切换已有版本，请稍候。";
   if (state.cancelBusy) return "正在请求取消，等待服务端终态。";
   if (state.pendingSubmission) return "请先处理结果未知的提交。";
   if (state.taskRunning) return "任务处理中，完成后再继续。";
@@ -2720,6 +2990,7 @@ function previewBindingMatches(session) {
 
 function operationBlockReason(request) {
   if (state.requestInFlight) return "正在提交，请稍候。";
+  if (state.duplicateSwitching) return "正在切换已有版本，请稍候。";
   if (state.cancelBusy) return "正在请求取消，等待服务端终态。";
   if (state.pendingSubmission) return "请先处理结果未知的提交。";
   if (state.taskRunning) return "任务处理中，完成后再继续。";
@@ -3214,7 +3485,8 @@ async function runLocalRequest(request, options) {
 }
 
 async function startPreviewRequest(request) {
-  if (state.requestInFlight || state.pendingSubmission || state.taskRunning || state.cancelBusy) {
+  if (state.requestInFlight || state.pendingSubmission || state.taskRunning || state.cancelBusy ||
+      state.duplicateSwitching) {
     showToast("当前有提交或任务正在处理，完成后再预览。", "warning");
     return false;
   }
@@ -3408,7 +3680,7 @@ async function completePreviewJob(job) {
 }
 
 async function applyPreview() {
-  if (state.requestInFlight || state.pendingSubmission || state.taskRunning || state.cancelBusy) {
+  if (state.requestInFlight || state.pendingSubmission || state.taskRunning || state.cancelBusy || state.duplicateSwitching) {
     showToast("当前有提交或任务正在处理，稍后再应用预览。", "warning");
     return false;
   }
@@ -3642,12 +3914,13 @@ function renderPreviewUi() {
     setText(dom.previewBarDetail, revisionText);
   }
 
-  const busy = state.requestInFlight || state.pendingSubmission || state.taskRunning || state.cancelBusy;
+  const busy = state.requestInFlight || state.pendingSubmission || state.taskRunning || state.cancelBusy ||
+    state.duplicateSwitching;
   const revisionMatch = session.revision === state.paramsRevision;
   const inputMatch = previewBindingMatches(session);
   const canApply = stateName === "ready" && !busy && revisionMatch && inputMatch;
   setDisabled(dom.previewApply, !canApply);
-  setDisabled(dom.previewDiscard, state.requestInFlight || state.cancelBusy);
+  setDisabled(dom.previewDiscard, state.requestInFlight || state.cancelBusy || state.duplicateSwitching);
   let applyTitle = "应用此预览并写入版本";
   if (stateName === "pending") applyTitle = "预览仍在生成";
   else if (stateName === "stale") applyTitle = "参数或图片已变化，请重新预览";
@@ -3821,7 +4094,7 @@ async function restoreWorkspaceSnapshot(snapshot, options) {
 }
 
 async function undoWorkspace() {
-  if (state.requestInFlight || state.pendingSubmission || state.taskRunning || state.cancelBusy) {
+  if (state.requestInFlight || state.pendingSubmission || state.taskRunning || state.cancelBusy || state.duplicateSwitching) {
     showToast("当前有提交或任务正在处理，完成后再撤销。", "warning");
     return;
   }
@@ -3841,7 +4114,7 @@ async function undoWorkspace() {
 }
 
 async function redoWorkspace() {
-  if (state.requestInFlight || state.pendingSubmission || state.taskRunning || state.cancelBusy) {
+  if (state.requestInFlight || state.pendingSubmission || state.taskRunning || state.cancelBusy || state.duplicateSwitching) {
     showToast("当前有提交或任务正在处理，完成后再重做。", "warning");
     return;
   }
@@ -3861,7 +4134,8 @@ async function redoWorkspace() {
 }
 
 function renderUndoRedo() {
-  const busy = state.requestInFlight || state.pendingSubmission || state.taskRunning || state.cancelBusy;
+  const busy = state.requestInFlight || state.pendingSubmission || state.taskRunning || state.cancelBusy ||
+    state.duplicateSwitching;
   const canUndo = !busy && state.workspaceHistory.canUndo();
   const canRedo = !busy && state.workspaceHistory.canRedo();
   setDisabled(dom.undoButton, !canUndo);
@@ -3918,12 +4192,12 @@ function scheduleAutoPreview() {
   }
   if (!dom.autoPreviewEnhance.checked || !dom.previewMode.checked) return;
   if (!currentAsset()) return;
-  if (state.requestInFlight || state.pendingSubmission || state.taskRunning) return;
+  if (state.requestInFlight || state.pendingSubmission || state.taskRunning || state.duplicateSwitching) return;
   if (!isPreviewCurrent() && !state.previewSession.isActive()) return;
   if (isNeutralEnhance(readEnhanceDraft())) return;
   state.autoPreviewTimer = window.setTimeout(() => {
     state.autoPreviewTimer = null;
-    if (state.requestInFlight || state.pendingSubmission || state.taskRunning) return;
+    if (state.requestInFlight || state.pendingSubmission || state.taskRunning || state.duplicateSwitching) return;
     if (!dom.autoPreviewEnhance.checked || !dom.previewMode.checked) return;
     const request = buildEnhanceRequest();
     if (request.ok) void startPreviewRequest(request);
@@ -4237,7 +4511,7 @@ async function handleCrop() {
 }
 
 async function handleWorkingCopy() {
-  if (state.pendingSubmission || state.requestInFlight || state.taskRunning) return;
+  if (state.pendingSubmission || state.requestInFlight || state.taskRunning || state.duplicateSwitching) return;
   if (state.previewSession.current()) {
     if (!(await discardPreview({ silent: true }))) return;
   }
@@ -4298,15 +4572,38 @@ function handleOneClick() {
   void runLocalRequest(buildOneClickRequest(), {});
 }
 
-function handleExport() {
-  if (state.requestInFlight || state.pendingSubmission || state.taskRunning) return;
+function unconfirmedLicenseIds(ids) {
+  return (ids || []).filter((id) => {
+    const asset = state.assets.get(id);
+    const licenseName = String((asset && asset.license) || "").trim();
+    return !licenseName || licenseName === "未确认";
+  });
+}
+
+async function confirmExportLicense(unconfirmedCount) {
+  if (!unconfirmedCount) return { proceed: true, acknowledged: false };
+  const proceed = await confirmAction({
+    title: "导出前确认来源授权",
+    message: "所选版本中有 " + unconfirmedCount + " 个未登记授权或标记为“未确认”。ZIP 只在本机生成与使用；请确认你已核对来源和授权范围，导出不会改变授权状态。",
+    confirmLabel: "我确认，继续导出",
+    cancelLabel: "返回检查",
+    tone: "primary"
+  });
+  return { proceed: proceed, acknowledged: proceed };
+}
+
+async function handleExport() {
+  if (state.requestInFlight || state.pendingSubmission || state.taskRunning || state.duplicateSwitching) return;
   const ids = state.versionIds.filter((id) => state.selectedAssetIds.has(id));
   if (!ids.length) {
     setError(dom.exportError, "请先勾选至少一个版本。");
     return;
   }
   setError(dom.exportError, "");
-  const bodyText = JSON.stringify({ asset_ids: ids });
+  const unconfirmed = unconfirmedLicenseIds(ids);
+  const license = await confirmExportLicense(unconfirmed.length);
+  if (!license.proceed) return;
+  const bodyText = JSON.stringify({ asset_ids: ids, license_acknowledged: license.acknowledged });
   startSubmission({
     path: "/exports",
     method: "POST",
@@ -5034,6 +5331,7 @@ function renderAiService() {
 
 function aiStartBlockReason() {
   if (state.requestInFlight) return "正在提交，请稍候。";
+  if (state.duplicateSwitching) return "正在切换已有版本，请稍候。";
   if (state.pendingSubmission) return "请先重试或放弃上一次没有确定结果的提交。";
   if (state.taskRunning) return "本地任务处理中，完成后再开始新的 AI 尝试。";
   if (state.ai.layersLoading) return "正在读取候选图层…";
@@ -6020,7 +6318,7 @@ async function refreshAiPipelineNow(forceLayers) {
 async function continueAi(action) {
   const pipeline = state.ai.pipeline;
   if (!pipeline) return;
-  if (state.requestInFlight || state.pendingSubmission) return;
+  if (state.requestInFlight || state.pendingSubmission || state.duplicateSwitching) return;
   const stateName = String(pipeline.state || "").toLowerCase();
   if (action === "select_layers" && stateName !== "waiting_user") return;
   if (action === "use_local" && !["waiting_user", "failed"].includes(stateName)) return;
@@ -6345,6 +6643,10 @@ async function loadRepairRecord(jobId, options) {
 
 async function switchToAcceptedRepair(record, options) {
   const opts = options || {};
+  if (state.duplicateSwitching) {
+    showToast("正在切换已有版本，完成后再切换修复分支。", "warning");
+    return false;
+  }
   const acceptedId = record && record.decision && record.decision.accepted_asset_id
     ? String(record.decision.accepted_asset_id) : "";
   if (!acceptedId) return false;
@@ -6438,6 +6740,7 @@ function repairInputBlockReason() {
 
 function repairStartBlockReason() {
   if (state.requestInFlight) return "正在提交，请稍候。";
+  if (state.duplicateSwitching) return "正在切换已有版本，请稍候。";
   if (state.pendingSubmission) return "请先处理结果未知的上一次提交。";
   if (state.taskRunning) return "已有任务处理中，完成后再发起修复。";
   if (state.repair.loading) return "正在读取修复记录…";
@@ -6798,9 +7101,10 @@ function renderRepairRecord() {
     setButtonLabel(dom.repairAccept, fullSelected ? "接受整图候选" : "接受局部保护版");
     setDisabled(dom.repairAccept,
       state.repair.decisionBusy || state.requestInFlight || Boolean(state.pendingSubmission) || state.taskRunning ||
-      (!fullSelected && !localSelected) || (fullSelected && !state.repair.acceptFull));
+      state.duplicateSwitching || (!fullSelected && !localSelected) || (fullSelected && !state.repair.acceptFull));
     setDisabled(dom.repairReject,
-      state.repair.decisionBusy || state.requestInFlight || Boolean(state.pendingSubmission) || state.taskRunning);
+      state.repair.decisionBusy || state.requestInFlight || Boolean(state.pendingSubmission) || state.taskRunning ||
+      state.duplicateSwitching);
     setText(dom.repairDecisionNote,
       (!full && !local)
         ? "当前记录没有可接受候选，请等待任务完成或重新读取。"
@@ -6854,7 +7158,7 @@ function renderRepairRecord() {
 
   const canContinue = Boolean(accepted && accepted.asset_id === state.currentInputId);
   setHidden(dom.repairNext, !canContinue);
-  setDisabled(dom.repairNext, Boolean(state.requestInFlight || state.pendingSubmission));
+  setDisabled(dom.repairNext, Boolean(state.requestInFlight || state.pendingSubmission || state.duplicateSwitching));
   setText(dom.repairNext, canContinue ? "用已接受版本继续提取 / SVG" : "用已接受版本继续");
 }
 
@@ -6872,7 +7176,8 @@ function updateRepairActions() {
   renderRepairStart();
   const record = state.repair.record;
   const pending = Boolean(record && String(record.state || "").toLowerCase() === "waiting_user");
-  const busy = Boolean(state.requestInFlight || state.pendingSubmission || state.repair.decisionBusy || state.taskRunning);
+  const busy = Boolean(state.requestInFlight || state.pendingSubmission || state.repair.decisionBusy ||
+    state.taskRunning || state.duplicateSwitching);
   const fullId = repairAssetId(record, "candidate_asset");
   const localId = repairAssetId(record, "composited_asset");
   const selectedId = state.repair.selectedAssetId;
@@ -6937,7 +7242,7 @@ async function startRepair() {
     tone: reuse ? "primary" : "danger"
   });
   if (!ok) return;
-  if (state.requestInFlight || state.pendingSubmission || state.taskRunning) {
+  if (state.requestInFlight || state.pendingSubmission || state.taskRunning || state.duplicateSwitching) {
     setRepairError("当前有提交或任务尚未完成，请稍后再发起修复。");
     return;
   }
@@ -7029,7 +7334,7 @@ async function decideRepair(action) {
     tone: action === "reject" ? "danger" : fullSelected ? "danger" : "primary"
   });
   if (!ok) return;
-  if (state.requestInFlight || state.pendingSubmission) {
+  if (state.requestInFlight || state.pendingSubmission || state.duplicateSwitching) {
     setRepairError("当前还有提交尚未完成，请稍后再做修复决定。");
     return;
   }
@@ -7320,6 +7625,7 @@ function tileOutputSize() {
 }
 
 function tileBlockReason() {
+  if (state.duplicateSwitching) return "正在切换已有版本，请稍候。";
   if (state.requestInFlight) return "正在提交，请稍候。";
   if (state.pendingSubmission) return "请先处理结果未知的上一次提交。";
   if (state.taskRunning) return "已有任务处理中，完成后再生成平铺。";
@@ -7385,7 +7691,7 @@ function renderTilePanel() {
 
 function updateTileActions() {
   const unit = selectedTileUnit();
-  const busy = Boolean(state.requestInFlight || state.pendingSubmission || state.taskRunning);
+  const busy = Boolean(state.requestInFlight || state.pendingSubmission || state.taskRunning || state.duplicateSwitching);
   const reason = tileBlockReason();
   setDisabled(dom.tileGenerate, Boolean(reason));
   setDisabled(dom.tileCrop, busy || !currentAsset() || !isPreviewCurrent() ||
@@ -7492,7 +7798,7 @@ async function startTilePreview() {
 }
 
 async function handleTileZip() {
-  if (state.requestInFlight || state.pendingSubmission || state.taskRunning) return;
+  if (state.requestInFlight || state.pendingSubmission || state.taskRunning || state.duplicateSwitching) return;
   const unit = selectedTileUnit();
   const preview = state.tile.resultAssetId ? state.assets.get(state.tile.resultAssetId) : null;
   if (!unit || !preview) {
@@ -7501,7 +7807,19 @@ async function handleTileZip() {
   }
   const ids = [unit.asset_id, preview.asset_id];
   setError(dom.tileError, "");
-  const bodyText = JSON.stringify({ asset_ids: ids });
+  const unconfirmed = unconfirmedLicenseIds(ids);
+  const license = await confirmExportLicense(unconfirmed.length);
+  if (!license.proceed) return;
+  if (state.requestInFlight || state.pendingSubmission || state.taskRunning || state.duplicateSwitching) {
+    setError(dom.tileError, "当前有提交或任务正在处理，完成后再打包。");
+    return;
+  }
+  const currentUnit = selectedTileUnit();
+  if (state.tile.resultAssetId !== preview.asset_id || !currentUnit || currentUnit.asset_id !== unit.asset_id) {
+    setError(dom.tileError, "平铺预览或裁切单元已变化，请重新确认后再打包。");
+    return;
+  }
+  const bodyText = JSON.stringify({ asset_ids: ids, license_acknowledged: license.acknowledged });
   startSubmission({
     path: "/exports",
     method: "POST",
@@ -8199,11 +8517,11 @@ function updateBrushControls() {
     (brush.activeStroke ? brush.activeStroke.points.length : 0)) + " 点");
   setText(dom.brushStatus, brush.saving ? "正在提交…" : hasChanges ? "未保存" : "未修改");
   setDisabled(dom.brushSave,
-    !brush.open || brush.loading || brush.saving || !hasChanges || !brush.baseMask);
-  setDisabled(dom.brushCancel, brush.saving);
-  setDisabled(dom.brushClose, brush.saving);
-  const canUndo = brush.open && !brush.loading && !brush.saving && brush.history.canUndo();
-  const canRedo = brush.open && !brush.loading && !brush.saving && brush.history.canRedo();
+    !brush.open || brush.loading || brush.saving || state.duplicateSwitching || !hasChanges || !brush.baseMask);
+  setDisabled(dom.brushCancel, brush.saving || state.duplicateSwitching);
+  setDisabled(dom.brushClose, brush.saving || state.duplicateSwitching);
+  const canUndo = brush.open && !brush.loading && !brush.saving && !state.duplicateSwitching && brush.history.canUndo();
+  const canRedo = brush.open && !brush.loading && !brush.saving && !state.duplicateSwitching && brush.history.canRedo();
   setDisabled(dom.brushUndo, !canUndo);
   setDisabled(dom.brushRedo, !canRedo);
   dom.brushUndo.title = canUndo
@@ -8367,6 +8685,10 @@ function collectBrushPayload() {
 
 async function saveBrushMask() {
   const brush = state.brush;
+  if (state.duplicateSwitching) {
+    showToast("正在切换已有版本，请稍候。", "warning");
+    return;
+  }
   if (!brush.open || brush.saving || brush.loading || !brush.dirty || !brush.baseMask) return;
   if (brush.activeStroke) {
     showToast("请先松开画笔，再保存。", "warning");
@@ -8882,6 +9204,10 @@ function findHistoryJob(jobId) {
 
 async function restoreJob(jobId) {
   if (!jobId) return;
+  if (state.duplicateSwitching) {
+    showToast("正在切换已有版本，完成后再恢复历史。", "warning");
+    return;
+  }
   if (state.taskRunning) {
     showToast("当前有任务正在处理，完成后再恢复历史。", "warning");
     return;
@@ -9152,6 +9478,8 @@ function syncPairedControlValues() {
 
 function renderAll() {
   renderFileSummary();
+  renderQuality();
+  renderDuplicateBanner();
   renderVersions();
   renderCurrentInfo();
   renderBboxOverlay();
@@ -9175,15 +9503,17 @@ function assignFeedbackJob(jobId) {
 }
 
 function updateActionState() {
-  const writeReason = state.requestInFlight
-    ? "正在提交，请稍候。"
-    : state.cancelBusy
-      ? "正在请求取消，等待服务端终态。"
-      : state.pendingSubmission
-        ? "请先处理结果未知的提交。"
-        : state.taskRunning
-          ? "任务处理中，完成后再继续。"
-          : "";
+  const writeReason = state.duplicateSwitching
+    ? "正在切换已有版本，请稍候。"
+    : state.requestInFlight
+      ? "正在提交，请稍候。"
+      : state.cancelBusy
+        ? "正在请求取消，等待服务端终态。"
+        : state.pendingSubmission
+          ? "请先处理结果未知的提交。"
+          : state.taskRunning
+            ? "任务处理中，完成后再继续。"
+            : "";
   const processReason = currentProcessBlock();
   const asset = currentAsset();
   const previewCurrent = isPreviewCurrent();
@@ -9192,6 +9522,7 @@ function updateActionState() {
   const extractMode = checkedValue("extract-mode");
 
   setDisabled(dom.uploadSubmit, !state.uploadFile || Boolean(writeReason));
+  setDisabled(dom.duplicateUse, Boolean(duplicateSwitchBlockReason()));
 
   const oneClickGrabcutMissing = extractMode === "grabcut" && !hasBbox;
   setDisabled(dom.oneclickButton, Boolean(processReason) || oneClickGrabcutMissing);
@@ -9606,6 +9937,11 @@ function showToast(message, tone, duration) {
 
 function wireEvents() {
   dom.healthChip.addEventListener("click", () => void refreshHealth(false));
+  dom.duplicateUse.addEventListener("click", () => void useExistingDuplicate());
+  dom.duplicateDismiss.addEventListener("click", () => {
+    state.uploadDuplicates = [];
+    renderDuplicateBanner();
+  });
   dom.retryConnection.addEventListener("click", () => {
     void refreshHealth(false);
     if (state.ai.statusError) void refreshAiStatus(false);

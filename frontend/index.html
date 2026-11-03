@@ -194,6 +194,7 @@
           </h2>
           <div class="light-tools">
             <span class="chip" id="source-state" hidden>已载入</span>
+            <span class="chip grade-chip" id="grade-chip" hidden>—</span>
             <span class="chip chip-fill" id="preview-mode-badge" hidden>成果预览</span>
             <span class="chip chip-mark" id="pending-preview-badge" hidden>预览未应用</span>
             <button class="btn btn-quiet btn-sm" id="undo-button" type="button" disabled title="撤销当前图片的上一步编辑（Ctrl+Z）">撤销</button>
@@ -226,6 +227,7 @@
         </div>
 
         <p class="light-note" id="source-note-display" hidden></p>
+        <p class="light-note quality-note" id="quality-note" hidden></p>
 
         <div class="banner banner-warn light-warning" id="large-warning" hidden>
           <span class="banner-mark"><svg class="icon" aria-hidden="true"><use href="#i-alert"></use></svg></span>
@@ -319,8 +321,76 @@
               <textarea id="source-note" name="source-note" rows="2" maxlength="500" placeholder="馆藏编号、来源或授权范围"></textarea>
             </label>
             <p class="hint">备注仅作记录，不构成来源许可证明。</p>
+
+            <details class="group" id="provenance-group">
+              <summary>
+                <span class="group-label">来源与授权</span>
+                <span class="group-meta">可选 · 写入导出清单</span>
+                <svg class="icon group-chevron" aria-hidden="true"><use href="#i-chevron"></use></svg>
+              </summary>
+              <div class="group-body">
+                <div class="pair-fields">
+                  <div class="field">
+                    <label class="field-label" for="source-type">来源类型</label>
+                    <select id="source-type">
+                      <option value="未确认" selected>未确认</option>
+                      <option value="museum_photo">馆藏拍摄</option>
+                      <option value="catalog_scan">图录扫描</option>
+                      <option value="web_paste">网页保存</option>
+                      <option value="内部拍摄">内部拍摄</option>
+                      <option value="其他">其他</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label class="field-label" for="collected-at">采集日期</label>
+                    <input id="collected-at" type="date">
+                  </div>
+                </div>
+                <div class="field">
+                  <label class="field-label" for="source-name">来源名称 / 馆藏号</label>
+                  <input id="source-name" type="text" maxlength="200" autocomplete="off" placeholder="例如：馆藏编号、图录名 + 页码">
+                </div>
+                <div class="field">
+                  <label class="field-label" for="source-url">出处链接</label>
+                  <input id="source-url" type="url" maxlength="500" autocomplete="off" placeholder="https://…">
+                </div>
+                <div class="pair-fields">
+                  <div class="field">
+                    <label class="field-label" for="license">授权</label>
+                    <input id="license" type="text" maxlength="100" autocomplete="off" placeholder="CC-BY-4.0 / 内部使用 / 未确认">
+                  </div>
+                  <div class="field">
+                    <label class="field-label" for="batch-id">批次</label>
+                    <input id="batch-id" type="text" maxlength="64" autocomplete="off" placeholder="batch-20261101">
+                  </div>
+                </div>
+                <p class="hint">这些字段只作登记，不构成授权证明；未确认授权的版本导出前会再次确认。</p>
+              </div>
+            </details>
+
             <p class="field-error" id="upload-error" role="alert" hidden></p>
             <button class="btn btn-solid btn-wide" id="upload-submit" type="button" disabled>上传并进入工作区</button>
+
+            <div class="quality-summary" id="quality-summary" hidden aria-live="polite">
+              <span class="grade-chip grade-large" id="quality-grade">—</span>
+              <span class="quality-copy">
+                <strong id="quality-headline">—</strong>
+                <small id="quality-metrics">—</small>
+              </span>
+            </div>
+
+            <div class="banner banner-warn duplicate-banner" id="duplicate-banner" role="status" hidden>
+              <span class="banner-mark"><svg class="icon" aria-hidden="true"><use href="#i-alert"></use></svg></span>
+              <div class="banner-copy">
+                <strong id="duplicate-title">发现相似版本</strong>
+                <p id="duplicate-message">—</p>
+                <ul class="duplicate-list" id="duplicate-list"></ul>
+              </div>
+              <div class="banner-acts">
+                <button class="btn btn-quiet btn-sm" id="duplicate-dismiss" type="button">保留为新图</button>
+                <button class="btn btn-line btn-sm" id="duplicate-use" type="button">使用已有版本</button>
+              </div>
+            </div>
 
             <details class="group">
               <summary>

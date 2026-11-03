@@ -12,6 +12,14 @@ from app.storage import Store, ServiceError, canonical_json, digest, now
 TERMINAL = {"succeeded", "failed", "cancelled"}
 EXTERNAL_CALL_JOBS = {"decompose-layers"}
 
+# Image-level facts copied onto every derived asset so a manifest can be read
+# without walking the whole parent graph.
+ASSET_META_KEYS = (
+    "image_id", "content_id", "grade", "grade_version", "split",
+    "license", "source_type", "source_name", "source_url", "collected_at",
+    "batch_id", "provenance_status", "normalization_version",
+)
+
 
 def validate_key(key: str) -> str:
     if not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", key):
@@ -29,6 +37,30 @@ class WorkbenchStore(Store):
                     normalized_id TEXT NOT NULL REFERENCES assets(id),
                     source_note TEXT NOT NULL, created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS image_meta (
+                    image_id TEXT PRIMARY KEY REFERENCES images(id),
+                    content_id TEXT NOT NULL,
+                    grade TEXT NOT NULL,
+                    grade_version TEXT NOT NULL,
+                    short_side INTEGER,
+                    sharpness REAL,
+                    contrast REAL,
+                    ref_size INTEGER NOT NULL,
+                    ref_fit TEXT NOT NULL,
+                    ahash TEXT NOT NULL,
+                    fingerprint_version TEXT NOT NULL,
+                    split TEXT NOT NULL,
+                    source_type TEXT NOT NULL,
+                    source_name TEXT NOT NULL,
+                    source_url TEXT NOT NULL,
+                    license TEXT NOT NULL,
+                    collected_at TEXT NOT NULL,
+                    batch_id TEXT NOT NULL,
+                    provenance_status TEXT NOT NULL,
+                    normalization_version TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS image_meta_content ON image_meta(content_id);
                 CREATE TABLE IF NOT EXISTS local_jobs (
                     id TEXT PRIMARY KEY, kind TEXT NOT NULL, input_id TEXT REFERENCES assets(id),
                     parameters TEXT NOT NULL, state TEXT NOT NULL,
@@ -134,12 +166,21 @@ class WorkbenchStore(Store):
             for parent in record.get("parents", []):
                 db.execute("INSERT INTO asset_relations VALUES (?,?,?)", (record["asset_id"], parent["asset_id"], parent["role"]))
 
-    def add_image(self, outputs, source_note, key, request_hash):
+    def add_image(self, outputs, source_note, key, request_hash, *, meta=None):
         existing = self.existing("images", key, request_hash)
         if existing:
-            return self.get_image(existing), False
+            return self.get_image(existing), False, []
         staged = self._stage(outputs)
         image_id, created = str(uuid4()), now()
+        if meta:
+            for record, _, _, _ in staged:
+                record["image_id"] = image_id
+                for field in ASSET_META_KEYS:
+                    if field == "image_id":
+                        continue
+                    value = meta.get(field)
+                    if value not in (None, ""):
+                        record[field] = value
         try:
             with self.connection() as db:
                 db.execute("BEGIN IMMEDIATE")
@@ -149,6 +190,22 @@ class WorkbenchStore(Store):
                 else:
                     self._register(db, staged)
                     db.execute("INSERT INTO images VALUES (?,?,?,?,?)", (image_id, staged[0][0]["asset_id"], staged[1][0]["asset_id"], source_note, created))
+                    if meta:
+                        db.execute("""INSERT INTO image_meta
+                            (image_id,content_id,grade,grade_version,short_side,sharpness,contrast,
+                             ref_size,ref_fit,ahash,fingerprint_version,split,source_type,source_name,
+                             source_url,license,collected_at,batch_id,provenance_status,
+                             normalization_version,created_at)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                            (image_id, meta.get("content_id", ""), meta.get("grade", "U"),
+                             meta.get("grade_version", ""), meta.get("short_side"), meta.get("sharpness"),
+                             meta.get("contrast"), meta.get("ref_size", 512), meta.get("ref_fit", ""),
+                             meta.get("ahash", ""), meta.get("fingerprint_version", ""), meta.get("split", ""),
+                             meta.get("source_type", "未确认"), meta.get("source_name", ""),
+                             meta.get("source_url", ""), meta.get("license", "未确认"),
+                             meta.get("collected_at", ""), meta.get("batch_id", ""),
+                             meta.get("provenance_status", "unverified"),
+                             meta.get("normalization_version", ""), created))
                     db.execute("INSERT INTO local_keys VALUES (?,?,?,?)", ("images", key, request_hash, image_id))
                     db.commit()
         except BaseException:
@@ -156,16 +213,65 @@ class WorkbenchStore(Store):
             raise
         if existing:
             self._discard(staged)
-        return self.get_image(existing or image_id), not bool(existing)
+        candidates = []
+        if meta and meta.get("ahash"):
+            with self.connection() as db:
+                candidates = self._similar(db, meta["ahash"], image_id)
+        return self.get_image(existing or image_id), not bool(existing), candidates
+
+    @staticmethod
+    def _meta(row):
+        if row is None:
+            return None
+        return {key: row[key] for key in row.keys()}
+
+    @staticmethod
+    def _similar(db, ahash_value, exclude_image_id, threshold=4):
+        """Coarse duplicate candidates; NCC confirmation happens in the caller."""
+        try:
+            target = int(ahash_value)
+        except (TypeError, ValueError):
+            return []
+        rows = db.execute("""SELECT m.image_id,m.ahash,m.grade,m.split,i.original_id,i.normalized_id
+                             FROM image_meta m JOIN images i ON i.id=m.image_id
+                             WHERE m.image_id<>? AND m.ahash<>''""", (exclude_image_id,)).fetchall()
+        output = []
+        for row in rows:
+            try:
+                distance = int((target ^ int(row["ahash"])).bit_count())
+            except (TypeError, ValueError):
+                continue
+            if distance <= threshold:
+                output.append({
+                    "image_id": row["image_id"], "distance": distance,
+                    "grade": row["grade"], "split": row["split"],
+                    "original_id": row["original_id"], "normalized_id": row["normalized_id"],
+                })
+        output.sort(key=lambda item: item["distance"])
+        return output[:8]
+
+    def image_meta(self, image_id):
+        with self.connection() as db:
+            row = db.execute("SELECT * FROM image_meta WHERE image_id=?", (image_id,)).fetchone()
+        return self._meta(row)
+
+    def images_without_meta(self):
+        """Old images are readable but have no P0 measurements yet."""
+        with self.connection() as db:
+            return db.execute("""SELECT i.id,i.original_id,i.normalized_id
+                                 FROM images i LEFT JOIN image_meta m ON m.image_id=i.id
+                                 WHERE m.image_id IS NULL ORDER BY i.rowid""").fetchall()
 
     def get_image(self, image_id):
         with self.connection() as db:
             row = db.execute("SELECT * FROM images WHERE id=?", (image_id,)).fetchone()
+            meta_row = db.execute("SELECT * FROM image_meta WHERE image_id=?", (image_id,)).fetchone() if row else None
         if not row:
             raise ServiceError("IMAGE_NOT_FOUND", "Image history entry not found", 404)
         return {"image_id": row["id"], "original": self.get_asset(row["original_id"])[0],
                 "normalized": self.get_asset(row["normalized_id"])[0],
-                "source_note": row["source_note"], "created_at": row["created_at"]}
+                "source_note": row["source_note"], "created_at": row["created_at"],
+                "meta": self._meta(meta_row)}
 
     @staticmethod
     def _job(row):

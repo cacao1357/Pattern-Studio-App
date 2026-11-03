@@ -11,10 +11,13 @@ from PIL import Image, ImageEnhance, ImageFilter
 from app.schemas.contracts import BoundingBox, DEFAULT_LIMITS, VectorOptions
 from app.schemas.workbench import (CropRequest, PrepareRequest, WorkingCopyRequest, EnhanceRequest,
     ExtractRequest, VectorRequest, PipelineRequest, ExportRequest)
+from app.services import quality
 from app.services.imaging import normalize_image, crop_image, extract_foreground, contour_line_art
 from app.services.preparation import prepare_image, prepared_output_size
+from app.services.provenance import is_license_confirmed, normalize_provenance
 from app.services.vector import vectorize
 from app.storage import ServiceError, canonical_json, digest, png_bytes
+from app import versions
 from app.workbench_store import WorkbenchStore, validate_key
 
 
@@ -34,30 +37,92 @@ class LocalWorkbench:
         if any(secret in value for secret in (self.secrets() if callable(self.secrets) else self.secrets)):
             raise ServiceError("CREDENTIAL_IN_INPUT", "Do not put credentials in filenames, notes, feedback or idempotency keys", 422)
 
-    def upload(self, data, filename, source_note, key):
+    def upload(self, data, filename, source_note, key, *, provenance_values=None):
         validate_key(key)
         if len(source_note) > 1000 or not 1 <= len(filename) <= 200:
             raise ServiceError("INVALID_IMAGE_NOTE", "Use a filename up to 200 characters and a source note up to 1000 characters", 422)
-        self.safe_text(filename + source_note + key)
-        request_hash = digest(data + canonical_json([filename, source_note]).encode())
+        provenance = normalize_provenance(provenance_values)
+        self.safe_text(filename + source_note + key + canonical_json(provenance))
+        request_hash = digest(data + canonical_json([filename, source_note, provenance]).encode())
         existing = self.store.existing("images", key, request_hash)
         if existing:
-            return self.store.get_image(existing), False
+            return self.store.get_image(existing), False, []
         normalized = normalize_image(data, filename)
+        content_id = quality.content_id_of(data)
+        try:
+            measured = quality.analyze(normalized.image)
+        except Exception:
+            # Measurement is advisory: never reject an otherwise valid upload
+            # because the reference canvas could not be computed.
+            measured = {
+                "short_side": int(min(normalized.image.size)), "sharpness": None, "contrast": None,
+                "ahash": "", "ref_size": quality.REF_SIZE, "ref_fit": quality.REF_FIT,
+                "grade": "U", "grade_version": versions.GRADE_VERSION,
+                "fingerprint_version": versions.FINGERPRINT_VERSION,
+            }
+        meta = {
+            **provenance,
+            "content_id": content_id,
+            "grade": measured["grade"],
+            "grade_version": measured["grade_version"],
+            "short_side": measured["short_side"],
+            "sharpness": measured["sharpness"],
+            "contrast": measured["contrast"],
+            "ref_size": measured["ref_size"],
+            "ref_fit": measured["ref_fit"],
+            "ahash": measured["ahash"],
+            "fingerprint_version": measured["fingerprint_version"],
+            "split": quality.assign_split(content_id),
+            "normalization_version": versions.NORMALIZATION_VERSION,
+        }
         original_id, space = str(uuid4()), str(uuid4())
         original_size = normalized.metadata["input_size"]
         common = {"ai_inferred": False, "geometry_verified": True}
         original = {**common, "asset_id": original_id, "kind": "original", "width": original_size[0], "height": original_size[1],
                     "source_note": source_note, "source_evidence_status": "not_reviewed",
+                    "algorithm_version": versions.algorithm_version("original"),
                     "coordinate_space_id": str(uuid4()), "original_format": normalized.metadata["original_format"]}
         canonical = {**common, "kind": "normalized_input", "width": normalized.image.width, "height": normalized.image.height,
                      "source_note": source_note, "source_evidence_status": "not_reviewed",
+                     "algorithm_version": versions.algorithm_version("normalized_input"),
                      "original_width": original_size[0], "original_height": original_size[1], "original_asset_id": original_id,
                      "coordinate_space_id": space, "source_asset_id": original_id, "normalization": normalized.metadata,
                      "parents": [{"asset_id": original_id, "role": "original"}]}
         outputs = [{"data": data, "suffix": ".png" if normalized.metadata["original_format"] == "PNG" else ".jpg", "metadata": original},
                    {"data": png_bytes(normalized.image), "suffix": ".png", "metadata": canonical}]
-        return self.store.add_image(outputs, source_note, key, request_hash)
+        record, created, candidates = self.store.add_image(outputs, source_note, key, request_hash, meta=meta)
+        duplicates = self._duplicates(candidates, data) if created else []
+        return record, created, duplicates
+
+    def _duplicates(self, candidates, current_data):
+        """Second-stage NCC confirmation for the coarse aHash candidates."""
+        if not candidates:
+            return []
+        try:
+            current = quality.signature_from_bytes(current_data)
+        except Exception:
+            return []
+        output = []
+        for candidate in candidates:
+            try:
+                _, original_data = self.store.read_asset(candidate["original_id"])
+                score = quality.ncc(current, quality.signature_from_bytes(original_data))
+            except Exception:
+                continue
+            if score < quality.NCC_SUSPECT:
+                continue
+            output.append({
+                "image_id": candidate["image_id"],
+                "ncc": round(score, 4),
+                "status": "confirmed" if score >= quality.NCC_CONFIRM else "suspect",
+                "distance": candidate["distance"],
+                "grade": candidate["grade"],
+                "split": candidate["split"],
+                "original_asset_id": candidate["original_id"],
+                "normalized_asset_id": candidate["normalized_id"],
+            })
+        output.sort(key=lambda item: item["ncc"], reverse=True)
+        return output[:5]
 
     def submit(self, kind, payload, key, *, retry_of=None):
         validate_key(key)
@@ -66,11 +131,20 @@ class LocalWorkbench:
         input_id = values.pop("input_asset_id", None)
         if kind == "export":
             total = 0
+            unconfirmed = []
             for asset_id in values["asset_ids"]:
                 metadata, path = self.store.get_asset(asset_id)
                 if path.suffix == ".zip":
                     raise ServiceError("NESTED_EXPORT", "Select image or SVG versions instead of an existing ZIP", 422)
+                if not is_license_confirmed(metadata):
+                    unconfirmed.append(asset_id)
                 total += metadata["bytes"]
+            if unconfirmed and not values.get("license_acknowledged"):
+                raise ServiceError(
+                    "LICENSE_REVIEW_REQUIRED",
+                    f"{len(unconfirmed)} selected versions have unconfirmed source license; confirm the attribution before exporting",
+                    409,
+                )
             if total > MAX_EXPORT_BYTES:
                 raise ServiceError("EXPORT_SIZE_LIMIT", "Selected files exceed the 128 MiB export limit", 413)
         else:
@@ -147,7 +221,17 @@ def _read_image(store, asset_id):
         return metadata, image.convert("RGBA")
 
 
+INHERITED_META_KEYS = ("image_id", "content_id", "grade", "grade_version", "split", "license",
+                       "source_type", "source_name", "source_url", "collected_at", "batch_id",
+                       "provenance_status", "normalization_version")
+PATTERN_ASSET_KINDS = {"foreground_mask", "transparent_png", "composed_candidate"}
+
+
 def _output(image, kind, source, job_id, *, space=None, extra=None, asset_id=None, parents=None):
+    inherited = {key: source[key] for key in INHERITED_META_KEYS if source.get(key) not in (None, "")}
+    payload = dict(extra or {})
+    if kind in PATTERN_ASSET_KINDS:
+        payload.setdefault("quality_metrics", quality.pattern_metrics(image))
     return {"data": png_bytes(image), "suffix": ".png", "metadata": {
         "asset_id": asset_id or str(uuid4()), "kind": kind, "width": image.width, "height": image.height,
         "coordinate_space_id": space or source["coordinate_space_id"],
@@ -157,7 +241,8 @@ def _output(image, kind, source, job_id, *, space=None, extra=None, asset_id=Non
         "original_asset_id": source.get("original_asset_id"),
         "source_note": source.get("source_note", ""), "source_evidence_status": source.get("source_evidence_status", "not_reviewed"),
         "ai_inferred": source.get("ai_inferred", False), "geometry_verified": source.get("geometry_verified", False),
-        "parents": parents or [{"asset_id": source["asset_id"], "role": "source_rgb"}], **(extra or {})}}
+        "parents": parents or [{"asset_id": source["asset_id"], "role": "source_rgb"}],
+        **inherited, "algorithm_version": versions.algorithm_version(kind), **payload}}
 
 
 def execute_local(store: WorkbenchStore, job_id, token):
@@ -200,9 +285,24 @@ def execute_local(store: WorkbenchStore, job_id, token):
             metadata, _ = store.get_asset(parent)
             ancestors[parent] = metadata
             pending.extend(p["asset_id"] for p in metadata.get("parents", []))
-        manifest = {"schema_version": "local-s1-v1", "export_job_id": job_id, "selected_assets": selected,
-                    "referenced_ancestors": list(ancestors.values()), "files_are_selected_versions_only": True,
-                    "quality_review": "not_implied", "source_permission": "must_be_reviewed_separately"}
+        content_ids = sorted({a.get("content_id") for a in selected + list(ancestors.values()) if a.get("content_id")})
+        license_acknowledged = bool(params.get("license_acknowledged", False))
+        manifest = {
+            "schema_version": versions.MANIFEST_SCHEMA_VERSION,
+            "export_job_id": job_id,
+            "versions": versions.snapshot(),
+            "dataset": {
+                "content_id": "sha256(original file bytes)[:16]",
+                "split_policy": "sha256[:8] mod 100 -> 80/10/10",
+            },
+            "selected_assets": selected,
+            "referenced_ancestors": list(ancestors.values()),
+            "content_ids": content_ids,
+            "files_are_selected_versions_only": True,
+            "quality_review": "not_implied",
+            "source_permission": "must_be_reviewed_separately",
+            "license_acknowledged": license_acknowledged,
+        }
         buffer = BytesIO()
         with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=3) as archive:
             archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
@@ -211,6 +311,9 @@ def execute_local(store: WorkbenchStore, job_id, token):
         store.publish(job_id, token, "export", [{"data": buffer.getvalue(), "suffix": ".zip", "metadata": {
             "kind": "zip", "generated_by_job_id": job_id, "ai_inferred": any(a.get("ai_inferred") for a in selected),
             "geometry_verified": all(a.get("geometry_verified", False) for a in selected),
+            "algorithm_version": versions.algorithm_version("zip"),
+            "manifest_schema_version": versions.MANIFEST_SCHEMA_VERSION,
+            "selected_content_ids": content_ids, "license_acknowledged": license_acknowledged,
             "selected_asset_ids": params["asset_ids"], "parents": [{"asset_id": a, "role": "selected_version"} for a in params["asset_ids"]]}}])
         return
 
@@ -296,6 +399,8 @@ def execute_local(store: WorkbenchStore, job_id, token):
         options = VectorOptions.model_validate(params["vector"] if kind == "pipeline" else params)
         result = vectorize(image, options)
         publish("vectorize", [{"data": result.svg.encode("utf-8"), "suffix": ".svg", "metadata": {
+            **{key: source[key] for key in INHERITED_META_KEYS if source.get(key) not in (None, "")},
+            "algorithm_version": versions.algorithm_version("svg"),
             "kind": "svg", "width": image.width, "height": image.height,
             "coordinate_space_id": source["coordinate_space_id"], "source_asset_id": source["asset_id"],
             "original_width": source.get("original_width", source["width"]),

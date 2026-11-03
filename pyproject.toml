@@ -23,3 +23,6 @@ dependencies = [
 [tool.setuptools.packages.find]
 where = ["backend"]
 include = ["app*"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]

@@ -7,6 +7,7 @@ from uuid import uuid4
 import numpy as np
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps
 
+from app import versions
 from app.schemas.assisted import ComposeLayersRequest, RefineMaskRequest
 from app.schemas.contracts import DEFAULT_LIMITS, VectorOptions, ProcessingError
 from app.schemas.provider import ValidationRequest
@@ -296,6 +297,7 @@ def execute_assisted(store, job, token):
         store.publish(job_id, token, "vectorize", [{"data": result.svg.encode(), "suffix": ".svg", "metadata": {
             **{key: value for key, value in candidate.items() if key not in {"asset_id", "sha256", "bytes", "created_at", "parents", "kind"}},
             "kind": "svg", "source_asset_id": candidate_id, "parents": [{"asset_id": candidate_id, "role": "vector_input"}],
+            "algorithm_version": versions.algorithm_version("svg"),
             "parameters": result.metadata}}])
 
 

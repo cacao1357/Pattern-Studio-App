@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 from pydantic import SecretStr
 
+from app import versions
 from app.config import DEFAULT_MODEL, Settings
 from app.main import create_app
 from app.schemas.contracts import ProcessingError
@@ -158,12 +159,34 @@ class AWorkflowTests(unittest.TestCase):
         completed = self.run_next()
         self.assertEqual(completed["state"], "succeeded", completed)
         svg = next(a for a in completed["result"]["assets"] if a["kind"] == "svg")
+        self.assertEqual(svg["algorithm_version"], versions.algorithm_version("svg"))
         self.assertIn(b"<path", self.store.read_asset(svg["asset_id"])[1])
         self.assertEqual(len(self.calls), 1)
         self.assertEqual(self.store.get_ai_flow(flow["pipeline_id"])["branches"][0]["parent_job_id"], job["job_id"])
         restored = self.client.get("/api/v1/jobs/" + first.json()["job_id"]).json()
         self.assertEqual(restored["ai_pipeline_id"], flow["pipeline_id"])
         self.assertEqual(restored["parent_job_id"], job["job_id"])
+
+    def test_local_svg_preserves_provenance_and_exports_without_extra_acknowledgement(self):
+        image = Image.new("RGBA", (64, 64))
+        ImageDraw.Draw(image).ellipse((10, 10, 54, 54), fill=(200, 30, 40, 255))
+        uploaded = self.post("/images", files={"file": ("licensed.png", png_bytes(image), "image/png")},
+                             data={"license": "CC-BY-4.0", "source_name": "regression sample"}).json()
+        source = uploaded["normalized"]
+        for endpoint, extra in (("/jobs/vectorize", {}), ("/pipelines", {"extract": {"mode": "alpha"}})):
+            with self.subTest(endpoint=endpoint):
+                response = self.post(endpoint, json={"input_asset_id": source["asset_id"], **extra})
+                self.assertEqual(response.status_code, 202, response.text)
+                job = self.run_next()
+                self.assertEqual(job["state"], "succeeded", job)
+                svg = next(a for a in job["result"]["assets"] if a["kind"] == "svg")
+                for field in ("image_id", "content_id", "grade", "grade_version", "split", "license", "source_name"):
+                    self.assertEqual(svg[field], source[field], field)
+                self.assertEqual(svg["algorithm_version"], versions.algorithm_version("svg"))
+                exported = self.post("/exports", json={"asset_ids": [svg["asset_id"]]})
+                self.assertEqual(exported.status_code, 202, exported.text)
+                self.assertEqual(self.run_next()["state"], "succeeded")
+        self.assertEqual(self.calls, [])
 
     def test_local_composition_branch_is_idempotent_and_preserves_old_assets(self):
         flow = self.select(self.flow())
@@ -242,6 +265,9 @@ class AWorkflowTests(unittest.TestCase):
         completed = self.run_next()
         self.assertEqual(completed["state"], "succeeded")
         candidate = next(a for a in completed["result"]["assets"] if a["kind"] == "composed_candidate")
+        svg = next(a for a in completed["result"]["assets"] if a["kind"] == "svg")
+        self.assertEqual(svg["algorithm_version"], versions.algorithm_version("svg"))
+        self.assertEqual(svg["content_id"], candidate["content_id"])
         self.assertEqual(candidate["selection_origin"], "automatic")
         self.assertIsNone(candidate["human_decision"])
         self.assertIsNone(self.store.claim())

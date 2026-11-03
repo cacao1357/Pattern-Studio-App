@@ -88,6 +88,7 @@ class PipelineRequest(InputRequest):
 
 class ExportRequest(StrictModel):
     asset_ids: list[UUID] = Field(min_length=1, max_length=24)
+    license_acknowledged: bool = Field(default=False, strict=True)
 
     @model_validator(mode="after")
     def unique_versions(self):
