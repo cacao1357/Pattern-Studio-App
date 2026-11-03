@@ -9,6 +9,7 @@ from fastapi import File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 
 from app.schemas.contracts import DEFAULT_LIMITS
+from app import versions
 from app.schemas.workbench import (CropRequest, PrepareRequest, WorkingCopyRequest, EnhanceRequest, ExtractRequest,
     VectorRequest, PipelineRequest, ExportRequest, FeedbackRequest)
 from app.storage import ServiceError
@@ -40,16 +41,36 @@ def mount_workbench(app, current_store, current_service, current_worker):
         worker = current_worker().status()
         ready = database and storage and worker["alive"] and not worker["error"]
         return JSONResponse({"status": "ok" if ready else "degraded", "scope": "s1_local_workbench",
-            "database": database, "storage": storage, "worker": worker,
+            "database": database, "storage": storage, "worker": worker, "versions": versions.snapshot(),
             "limits": {"upload_bytes": DEFAULT_LIMITS.max_upload_bytes, "decode_pixels": DEFAULT_LIMITS.max_decode_pixels,
                        "working_pixels": DEFAULT_LIMITS.max_vector_pixels, "tile_pixels": DEFAULT_LIMITS.max_tile_pixels,
                        "provisional": True}}, status_code=200 if ready else 503)
 
     @app.post("/api/v1/images", status_code=201, responses={200: {"description": "Identical idempotent upload reused"}})
-    def upload_image(request: Request, file: UploadFile = File(...), source_note: str = Form(default="", max_length=1000)):
+    def upload_image(
+        request: Request,
+        file: UploadFile = File(...),
+        source_note: str = Form(default="", max_length=1000),
+        source_type: str = Form(default="", max_length=32),
+        source_name: str = Form(default="", max_length=200),
+        source_url: str = Form(default="", max_length=500),
+        license: str = Form(default="", max_length=100),
+        collected_at: str = Form(default="", max_length=10),
+        batch_id: str = Form(default="", max_length=64),
+    ):
         data = file.file.read(DEFAULT_LIMITS.max_upload_bytes + 1)
-        result, created = current_service().upload(data, file.filename or "", source_note, request.headers.get("idempotency-key", ""))
-        return JSONResponse(result, status_code=201 if created else 200)
+        result, created, duplicates = current_service().upload(
+            data, file.filename or "", source_note, request.headers.get("idempotency-key", ""),
+            provenance_values={
+                "source_type": source_type, "source_name": source_name, "source_url": source_url,
+                "license": license, "collected_at": collected_at, "batch_id": batch_id,
+            },
+        )
+        return JSONResponse({**result, "duplicates": duplicates}, status_code=201 if created else 200)
+
+    @app.get("/api/v1/images/{image_id}")
+    def image_record(image_id: UUID):
+        return current_store().get_image(str(image_id))
 
     @app.get("/api/v1/images")
     def images(limit: int = Query(default=20, ge=1, le=50), cursor: str | None = Query(default=None, max_length=18)):

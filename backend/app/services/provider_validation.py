@@ -8,11 +8,17 @@ from PIL import Image
 
 from app.config import Settings
 from app.providers.base import ImageProvider
+from app import versions
 from app.providers.seedream import PROMPT_VERSION, ProviderFailure, SeedreamClient, prepare_payload
 from app.schemas.contracts import DEFAULT_LIMITS
 from app.schemas.provider import ValidationRequest
+from app.services import quality
 from app.services.imaging import normalize_image
 from app.storage import ServiceError, Store, png_bytes
+
+INHERITED_META_KEYS = ("image_id", "content_id", "grade", "grade_version", "split", "license",
+                       "source_type", "source_name", "source_url", "collected_at", "batch_id",
+                       "provenance_status", "normalization_version")
 
 
 class ProviderValidationService:
@@ -26,10 +32,12 @@ class ProviderValidationService:
             raise ServiceError("NORMALIZED_TOO_LARGE", "The normalized PNG exceeds the input byte limit; create an explicit smaller working copy", 413)
         space = str(uuid4())
         original = self.store.put_asset(data, ".png" if normalized.metadata["original_format"] == "PNG" else ".jpg",
-                                       {"kind": "original", "ai_inferred": False, "original_format": normalized.metadata["original_format"]})
+                                       {"kind": "original", "ai_inferred": False, "original_format": normalized.metadata["original_format"],
+                                        "algorithm_version": versions.algorithm_version("original")})
         asset = self.store.put_asset(normalized_png, ".png", {
             "kind": "normalized_input", "width": normalized.image.width, "height": normalized.image.height,
             "coordinate_space_id": space, "ai_inferred": False, "geometry_verified": True,
+            "algorithm_version": versions.algorithm_version("normalized_input"),
             "source_asset_id": original["asset_id"], "normalization": normalized.metadata,
         })
         return {"original": original, "normalized": asset}
@@ -44,6 +52,7 @@ class ProviderValidationService:
         metadata, source_png = self.store.read_asset(str(request.input_asset_id))
         if metadata.get("kind") != "normalized_input":
             raise ServiceError("PROVIDER_INPUT_KIND", "Select a registered normalized input asset")
+        inherited = {key: metadata.get(key) for key in INHERITED_META_KEYS if metadata.get(key) not in (None, "")}
         payload = prepare_payload(request, source_png, self.settings)
         if prompt_text is not None:
             if request.operation != "decompose" or not isinstance(prompt_text, str) or not 1 <= len(prompt_text) <= 2000:
@@ -70,11 +79,15 @@ class ProviderValidationService:
             for output in generated.outputs:
                 layer_space = basemap_space if output.z_index == 0 else str(uuid4())
                 kind = "generated_basemap" if request.operation == "decompose" and output.z_index == 0 else "generated_layer" if request.operation == "decompose" else "edit_candidate"
-                asset = self.store.put_asset(png_bytes(output.image), ".png", {
-                    "kind": kind, "width": output.image.width, "height": output.image.height,
+                asset_meta = {
+                    **inherited, "kind": kind, "width": output.image.width, "height": output.image.height,
                     "coordinate_space_id": layer_space, "ai_inferred": True, "geometry_verified": False,
                     "source_asset_id": str(request.input_asset_id), "provider_call_id": call_id,
-                })
+                    "algorithm_version": versions.algorithm_version(kind),
+                }
+                if kind == "generated_layer":
+                    asset_meta["quality_metrics"] = quality.pattern_metrics(output.image)
+                asset = self.store.put_asset(png_bytes(output.image), ".png", asset_meta)
                 item = {"asset": asset, "z_index": output.z_index, "bbox": output.bbox.model_dump() if output.bbox else None,
                         "bbox_source": output.bbox_source, "basemap_coordinate_space_id": basemap_space}
                 if output.z_index == 0:
@@ -86,10 +99,12 @@ class ProviderValidationService:
                     canvas = Image.new("RGBA", generated.outputs[0].image.size, (0, 0, 0, 0))
                     canvas.paste(resized, (box.left, box.top))
                     item["placed_asset"] = self.store.put_asset(png_bytes(canvas), ".png", {
+                        **inherited,
                         "kind": "placed_generated_layer", "width": canvas.width, "height": canvas.height,
                         "coordinate_space_id": basemap_space, "ai_inferred": True, "geometry_verified": False,
                         "source_asset_id": asset["asset_id"], "provider_call_id": call_id,
                         "basemap_asset_id": basemap["asset_id"], "placement": box.model_dump(),
+                        "algorithm_version": versions.algorithm_version("placed_generated_layer"),
                         "resampling": "premultiplied_rgba_lanczos",
                     })
                 outputs.append(item)

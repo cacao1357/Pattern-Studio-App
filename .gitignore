@@ -6,6 +6,7 @@ __pycache__/
 .env.*
 !.env.example
 storage/
+_qa/
 node_modules/
 frontend/dist/
 build/
