@@ -296,6 +296,7 @@ def execute_assisted(store, job, token):
         store.publish(job_id, token, "vectorize", [{"data": result.svg.encode(), "suffix": ".svg", "metadata": {
             **{key: value for key, value in candidate.items() if key not in {"asset_id", "sha256", "bytes", "created_at", "parents", "kind"}},
             "kind": "svg", "source_asset_id": candidate_id, "parents": [{"asset_id": candidate_id, "role": "vector_input"}],
+            "algorithm_version": result.metadata["adapter_version"],
             "parameters": result.metadata}}])
 
 

@@ -36,5 +36,6 @@ def execute_recolor(store, job, token):
                  if key not in {"asset_id", "sha256", "bytes", "created_at", "parents", "parameters"}}
     store.publish(job["job_id"], token, "recolor-svg", [{"data": svg.encode("utf-8"), "suffix": ".svg",
         "metadata": {**inherited, "kind": "svg", "source_asset_id": source["asset_id"],
+            "algorithm_version": "safe-svg-palette-v1",
             "generated_by_job_id": job["job_id"], "parents": [{"asset_id": source["asset_id"], "role": "palette_source"}],
             "parameters": {"algorithm": "safe-svg-palette-v1", "mapping": job["parameters"]["mapping"], **metadata}}}])
