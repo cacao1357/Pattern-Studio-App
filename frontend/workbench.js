@@ -78,6 +78,7 @@ const KIND_LABELS = {
   transparent_png: "透明 PNG",
   contour: "轮廓线稿",
   contour_line_art: "轮廓线稿",
+  lineart: "线稿",
   outline: "轮廓线稿",
   svg: "SVG",
   monochrome_svg: "黑白 SVG",
@@ -112,6 +113,7 @@ const JOB_LABELS = {
   workingcopy: "工作副本",
   enhance: "轻增强",
   extract: "提取",
+  lineart: "线稿",
   vectorize: "矢量化",
   recolor_svg: "SVG 颜色替换",
   pipeline: "本地一键",
@@ -251,6 +253,14 @@ const dom = {
   healthChip: $("health-chip"),
   healthLabel: $("health-label"),
   openHistory: $("open-history"),
+  openDataset: $("open-dataset"),
+  datasetDialog: $("dataset-dialog"),
+  datasetClose: $("dataset-close"),
+  datasetRefresh: $("dataset-refresh"),
+  datasetSummary: $("dataset-summary"),
+  datasetDownload: $("dataset-download"),
+  datasetNote: $("dataset-note"),
+  datasetError: $("dataset-error"),
   openSettings: $("open-settings"),
   settingsDialog: $("settings-dialog"),
   settingsForm: $("settings-form"),
@@ -446,6 +456,8 @@ const dom = {
   maxHoleArea: $("max-hole-area"),
   previewMode: $("preview-mode"),
   autoPreviewEnhance: $("auto-preview-enhance"),
+  lineartButton: $("lineart-button"),
+  lineartError: $("lineart-error"),
   vectorButton: $("vector-button"),
   vectorLength: $("vector-length"),
   vectorCorner: $("vector-corner"),
@@ -1499,8 +1511,8 @@ function assetIsInputCapable(asset) {
   if (repairRole && repairRole !== "accepted") return false;
   if (context.jobKind === "repair" && normalizeKind(asset.kind) === "edit_candidate") return false;
   const allowed = ["normalized_input", "cropped", "working_copy", "prepared", "enhanced", "transparent_png",
-    "edit_candidate", "placed_generated_layer", "generated_basemap", "generated_layer", "composed_candidate",
-    "accepted_repair"];
+    "lineart", "edit_candidate", "placed_generated_layer", "generated_basemap", "generated_layer",
+    "composed_candidate", "accepted_repair"];
   if (!allowed.includes(normalizeKind(asset.kind))) return false;
   const mime = assetMime(asset);
   if (mime && !["image/png", "image/jpeg", "image/jpg"].includes(mime)) return false;
@@ -2833,7 +2845,7 @@ function updateComposeSummary() {
   const vectorMode = checkedValue("vector-mode") || "color";
   const maxColors = checkedValue("max-colors") || "8";
   const detail = checkedValue("vector-detail") || "medium";
-  const vectorLabels = { monochrome: "黑白", color: "彩色" };
+  const vectorLabels = { monochrome: "黑白", color: "彩色", contour: "轮廓单线" };
   const detailLabels = { low: "低细节", medium: "中细节", high: "高细节" };
   if (draft.threshold !== null) setText(dom.thresholdReadout, draft.threshold);
   if (draft.window_size !== null) setText(dom.windowReadout, draft.window_size);
@@ -2847,8 +2859,9 @@ function updateComposeSummary() {
   updatePrepareProjection();
 
   const extractPart = describeExtractParams(draft);
-  const vectorPart =
-    (vectorLabels[vectorMode] || vectorMode) + " · " + maxColors + " 色 · " + (detailLabels[detail] || detail);
+  const vectorPart = vectorMode === "contour"
+    ? "轮廓单线 · " + (detailLabels[detail] || detail)
+    : (vectorLabels[vectorMode] || vectorMode) + " · " + maxColors + " 色 · " + (detailLabels[detail] || detail);
   const enhancePart = dom.includeEnhance.checked
     ? (isNeutralEnhance(enhanceDraft) ? " + 轻增强（中性）" : " + " + describeEnhanceParams(enhanceDraft))
     : "";
@@ -2896,8 +2909,8 @@ function readVectorParams() {
   const mode = checkedValue("vector-mode");
   const maxColors = Number(checkedValue("max-colors"));
   const detail = checkedValue("vector-detail");
-  if (!["monochrome", "color"].includes(mode)) {
-    return { ok: false, error: "请选择黑白或彩色 SVG。" };
+  if (!["monochrome", "color", "contour"].includes(mode)) {
+    return { ok: false, error: "请选择黑白、彩色或轮廓单线 SVG。" };
   }
   if (![2, 4, 8, 16].includes(maxColors)) {
     return { ok: false, error: "颜色上限必须是 2、4、8 或 16。" };
@@ -3209,6 +3222,20 @@ function buildExtractRequest() {
     kind: "extract",
     markBboxClean: Boolean(extract.payload.bbox),
     payload: Object.assign({ input_asset_id: asset.asset_id }, extract.payload)
+  };
+}
+
+function buildLineartRequest() {
+  if (!requireProcessReady()) return { ok: false, handled: true };
+  const asset = currentAsset();
+  if (!asset) return { ok: false, error: "请先选择当前输入。" };
+  return {
+    ok: true,
+    path: "/jobs/lineart",
+    label: "线稿",
+    kind: "lineart",
+    errorNode: dom.lineartError,
+    payload: { input_asset_id: asset.asset_id, local: true }
   };
 }
 
@@ -3976,7 +4003,7 @@ function applyParamsSnapshot(snapshot) {
   if (Number.isInteger(extract.max_hole_area)) dom.maxHoleArea.value = String(extract.max_hole_area);
 
   const vector = params.vector && typeof params.vector === "object" ? params.vector : {};
-  if (["monochrome", "color"].includes(vector.mode)) setRadio("vector-mode", vector.mode);
+  if (["monochrome", "color", "contour"].includes(vector.mode)) setRadio("vector-mode", vector.mode);
   if ([2, 4, 8, 16].includes(Number(vector.maxColors))) setRadio("max-colors", String(vector.maxColors));
   if (["low", "medium", "high"].includes(vector.detail)) setRadio("vector-detail", vector.detail);
   dom.vectorLength.value = Number.isFinite(vector.length) ? String(vector.length) : "";
@@ -4216,6 +4243,7 @@ function syncActionLabels() {
   setButtonLabel(dom.oneclickButton, previewFirst ? "预览本地一键" : "开始本地一键");
   setButtonLabel(dom.extractButton, previewFirst ? "预览提取" : "仅执行提取");
   setButtonLabel(dom.vectorButton, previewFirst ? "预览矢量化" : "仅重新矢量化");
+  setButtonLabel(dom.lineartButton, previewFirst ? "预览线稿" : "生成线稿");
   setButtonLabel(dom.enhanceButton, previewFirst ? "预览轻增强" : "仅执行轻增强");
   setButtonLabel(dom.prepareButton, previewFirst ? "预览准备版本" : "生成准备版本");
 }
@@ -4573,6 +4601,10 @@ function handleExtract() {
 
 function handleVectorize() {
   void runLocalRequest(buildVectorRequest(), {});
+}
+
+function handleLineart() {
+  void runLocalRequest(buildLineartRequest(), {});
 }
 
 function handleOneClick() {
@@ -5378,11 +5410,12 @@ function renderAiVectorSummary() {
   const mode = checkedValue("vector-mode");
   const colors = checkedValue("max-colors");
   const detail = checkedValue("vector-detail");
-  const modeLabels = { monochrome: "黑白", color: "彩色" };
+  const modeLabels = { monochrome: "黑白", color: "彩色", contour: "轮廓单线" };
   const detailLabels = { low: "低细节", medium: "中细节", high: "高细节" };
   if (dom.aiVectorSummary) {
-    setText(dom.aiVectorSummary,
-      (modeLabels[mode] || "彩色") + " · " + (colors || "8") + " 色 · " + (detailLabels[detail] || "中细节"));
+    setText(dom.aiVectorSummary, mode === "contour"
+      ? "轮廓单线 · " + (detailLabels[detail] || "中细节")
+      : (modeLabels[mode] || "彩色") + " · " + (colors || "8") + " 色 · " + (detailLabels[detail] || "中细节"));
   }
 }
 
@@ -9013,6 +9046,56 @@ async function fillComparePane(pane, asset) {
 /* History drawer                                                             */
 /* -------------------------------------------------------------------------- */
 
+function datasetStat(label, value, detail) {
+  const item = element("div", "dataset-stat");
+  item.append(element("strong", "", String(value)));
+  item.append(element("span", "", label + (detail ? " · " + detail : "")));
+  return item;
+}
+
+function renderDatasetAudit(data) {
+  const audit = data && typeof data === "object" ? data : {};
+  dom.datasetSummary.replaceChildren();
+  const grades = audit.grades || {};
+  const splits = audit.splits || {};
+  dom.datasetSummary.append(
+    datasetStat("总图片", audit.total_images || 0),
+    datasetStat("可用 A/B", audit.usable_ab || 0, "A " + (grades.A || 0) + " · B " + (grades.B || 0)),
+    datasetStat("授权已确认", audit.license_confirmed || 0,
+      "覆盖 " + Math.round(Number(audit.license_coverage || 0) * 100) + "%"),
+    datasetStat("授权未确认", audit.license_unconfirmed || 0),
+    datasetStat("缺失指标", audit.missing_meta || 0, "旧图片"),
+    datasetStat("重复内容", audit.duplicate_images || 0, "按 content_id"),
+    datasetStat("划分", (splits.train || 0) + " / " + (splits.val || 0) + " / " + (splits.test || 0), "train / val / test"),
+    datasetStat("批次", (audit.batches || []).length),
+    datasetStat("内容 ID", audit.content_ids || 0),
+    datasetStat("C 级", grades.C || 0, "建议替换"),
+    datasetStat("未分级", (grades.U || 0) + (grades.missing || 0), "U / missing"),
+    datasetStat("未审核", (audit.label_status && audit.label_status.not_reviewed) || 0, "label_status")
+  );
+  const version = audit.versions && audit.versions.manifest ? audit.versions.manifest : "local-s1-v2";
+  setText(dom.datasetNote,
+    "清单口径 " + version + "；生成时间 " + (audit.generated_at ? formatTime(audit.generated_at) : "—") +
+    "。清单从现有图像与 P0 元数据派生，不重新读取像素。");
+}
+
+async function loadDatasetAudit() {
+  setError(dom.datasetError, "");
+  dom.datasetSummary.replaceChildren(element("p", "hint", "正在读取数据集汇总…"));
+  try {
+    const result = await requestJson("/datasets/audit");
+    renderDatasetAudit(result && result.data ? result.data : null);
+  } catch (error) {
+    dom.datasetSummary.replaceChildren();
+    setError(dom.datasetError, "数据集汇总读取失败：" + friendlyError(error));
+  }
+}
+
+function openDatasetDialog() {
+  if (!dom.datasetDialog.open) dom.datasetDialog.showModal();
+  void loadDatasetAudit();
+}
+
 function openHistory() {
   if (state.historyOpen) return;
   state.historyOpen = true;
@@ -9277,11 +9360,11 @@ function formatBbox(bbox) {
 }
 
 function vectorSummary(params) {
-  const modeLabels = { monochrome: "黑白", color: "彩色" };
+  const modeLabels = { monochrome: "黑白", color: "彩色", contour: "轮廓单线" };
   const detailLabels = { low: "低", medium: "中", high: "高" };
   const bits = [
     modeLabels[params.mode] || params.mode || "SVG",
-    params.max_colors !== undefined ? params.max_colors + " 色" : "",
+    params.mode !== "contour" && params.max_colors !== undefined ? params.max_colors + " 色" : "",
     params.detail ? detailLabels[params.detail] || params.detail : ""
   ];
   if (Number.isFinite(params.length_threshold)) bits.push("长度 " + params.length_threshold);
@@ -9484,7 +9567,7 @@ function restoreParameters(job) {
     if (Number.isInteger(extract.max_hole_area)) dom.maxHoleArea.value = String(extract.max_hole_area);
   }
   if (vector) {
-    if (["monochrome", "color"].includes(vector.mode)) setRadio("vector-mode", vector.mode);
+    if (["monochrome", "color", "contour"].includes(vector.mode)) setRadio("vector-mode", vector.mode);
     if ([2, 4, 8, 16].includes(Number(vector.max_colors))) setRadio("max-colors", String(vector.max_colors));
     if (["low", "medium", "high"].includes(vector.detail)) setRadio("vector-detail", vector.detail);
     dom.vectorLength.value = Number.isFinite(vector.length_threshold) ? String(vector.length_threshold) : "";
@@ -9620,6 +9703,7 @@ function updateActionState() {
   setDisabled(dom.oneclickButton, Boolean(processReason) || oneClickGrabcutMissing);
   setDisabled(dom.extractButton, Boolean(processReason) || oneClickGrabcutMissing);
   setDisabled(dom.vectorButton, Boolean(processReason));
+  setDisabled(dom.lineartButton, Boolean(processReason));
   setDisabled(dom.enhanceButton, Boolean(processReason));
   const prepareOutput = preparePrediction();
   const prepareBlocked = Boolean(asset) && (!prepareOutput || prepareOutput.overLimit);
@@ -10039,6 +10123,12 @@ function wireEvents() {
     if (state.ai.statusError) void refreshAiStatus(false);
   });
   dom.openHistory.addEventListener("click", openHistory);
+  dom.openDataset.addEventListener("click", openDatasetDialog);
+  dom.datasetClose.addEventListener("click", () => dom.datasetDialog.close());
+  dom.datasetRefresh.addEventListener("click", () => void loadDatasetAudit());
+  dom.datasetDialog.addEventListener("click", (event) => {
+    if (event.target === dom.datasetDialog) dom.datasetDialog.close();
+  });
   dom.closeHistory.addEventListener("click", () => closeHistory({}));
   dom.historyScrim.addEventListener("click", () => closeHistory({}));
   dom.openSettings.addEventListener("click", openSettingsDialog);
@@ -10169,6 +10259,7 @@ function wireEvents() {
   dom.oneclickButton.addEventListener("click", handleOneClick);
   dom.extractButton.addEventListener("click", handleExtract);
   dom.vectorButton.addEventListener("click", handleVectorize);
+  dom.lineartButton.addEventListener("click", handleLineart);
   dom.enhanceButton.addEventListener("click", handleEnhance);
   dom.includeEnhance.addEventListener("change", () => handleParamsChanged({ autoEnhance: true }));
   dom.iterations.addEventListener("input", handleParamsChanged);

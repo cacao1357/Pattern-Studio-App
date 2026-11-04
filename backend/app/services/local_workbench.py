@@ -10,9 +10,10 @@ from PIL import Image, ImageEnhance, ImageFilter
 
 from app.schemas.contracts import BoundingBox, DEFAULT_LIMITS, VectorOptions
 from app.schemas.workbench import (CropRequest, PrepareRequest, WorkingCopyRequest, EnhanceRequest,
-    ExtractRequest, VectorRequest, PipelineRequest, ExportRequest)
+    ExtractRequest, VectorRequest, PipelineRequest, ExportRequest, LineartRequest)
 from app.services import quality
 from app.services.imaging import normalize_image, crop_image, extract_foreground, contour_line_art
+from app.services.lineart import extract_lineart
 from app.services.preparation import prepare_image, prepared_output_size
 from app.services.provenance import is_license_confirmed, normalize_provenance
 from app.services.vector import vectorize
@@ -22,9 +23,11 @@ from app.workbench_store import WorkbenchStore, validate_key
 
 
 RGB_KINDS = {"normalized_input", "cropped", "working_copy", "prepared", "enhanced", "transparent_png",
-             "edit_candidate", "placed_generated_layer", "generated_basemap", "generated_layer", "composed_candidate", "accepted_repair"}
+             "lineart", "edit_candidate", "placed_generated_layer", "generated_basemap", "generated_layer",
+             "composed_candidate", "accepted_repair"}
 REQUESTS = {"crop": CropRequest, "prepare": PrepareRequest, "working-copy": WorkingCopyRequest, "enhance": EnhanceRequest,
-            "extract": ExtractRequest, "vectorize": VectorRequest, "pipeline": PipelineRequest,
+            "extract": ExtractRequest, "lineart": LineartRequest,
+            "vectorize": VectorRequest, "pipeline": PipelineRequest,
             "export": ExportRequest}
 MAX_EXPORT_BYTES = 128 * 1024 * 1024
 
@@ -315,6 +318,18 @@ def execute_local(store: WorkbenchStore, job_id, token):
             "manifest_schema_version": versions.MANIFEST_SCHEMA_VERSION,
             "selected_content_ids": content_ids, "license_acknowledged": license_acknowledged,
             "selected_asset_ids": params["asset_ids"], "parents": [{"asset_id": a, "role": "selected_version"} for a in params["asset_ids"]]}}])
+        return
+
+    if kind == "lineart":
+        store.step(job_id, token, "lineart", "running")
+        source, image = _read_image(store, job["input_asset_id"])
+        result = extract_lineart(image, **params)
+        store.publish(job_id, token, "lineart", [
+            _output(result.image, "lineart", source, job_id, extra={
+                "parameters": result.metadata,
+                "parents": [{"asset_id": source["asset_id"], "role": "lineart_rgb"}],
+            })
+        ])
         return
 
     source, image = _read_image(store, job["input_asset_id"])

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import re
 import xml.etree.ElementTree as ET
 
+import cv2
 import numpy as np
 from PIL import Image
 import vtracer
@@ -68,6 +69,67 @@ def validate_svg(svg: str, size: tuple[int, int], *, limits: ResourceLimits = DE
             "svg_fill_colors": sorted({p.get("fill") for p in paths if p.get("fill") not in {None, "none"}})}
 
 
+def _contour_vectorize(pixels: np.ndarray, options: VectorOptions, limits: ResourceLimits) -> VectorResult:
+    """Trace alpha boundaries as simplified, even-odd filled paths.
+
+    This is the mask -> contour -> simplified closed curve route recommended by
+    the CV experiments. It keeps holes instead of relying on RETR_EXTERNAL.
+    """
+    mask = (pixels[:, :, 3] >= 128).astype(np.uint8) * 255
+    contours, hierarchy = cv2.findContours(mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
+    if not contours or hierarchy is None:
+        raise ProcessingError("EMPTY_SVG", "No visible contour reaches the alpha threshold")
+    hierarchy = hierarchy[0]
+    base_epsilon = {"low": 2.0, "medium": 1.0, "high": 0.5}[options.detail]
+    epsilon = base_epsilon * max(1.0, min(mask.shape) / 512.0)
+    min_area = max(2.0, mask.shape[0] * mask.shape[1] * 0.00002)
+    paths = []
+    holes = 0
+    outer_count = 0
+    for index, contour in enumerate(contours):
+        if hierarchy[index][3] != -1:
+            continue
+        if cv2.contourArea(contour) < min_area:
+            continue
+        outer_count += 1
+        rings = [contour]
+        child = hierarchy[index][2]
+        while child != -1:
+            if cv2.contourArea(contours[child]) >= min_area:
+                rings.append(contours[child])
+                holes += 1
+            child = hierarchy[child][0]
+        data = []
+        for ring in rings:
+            approx = cv2.approxPolyDP(ring, epsilon, True).reshape(-1, 2)
+            if len(approx) < 3:
+                continue
+            data.append("M " + f"{int(approx[0][0])},{int(approx[0][1])} " +
+                        " ".join(f"L {int(x)},{int(y)}" for x, y in approx[1:]) + " Z")
+        if data:
+            paths.append({"d": "".join(data), "fill": "#1B2B54"})
+    if not paths:
+        raise ProcessingError("EMPTY_SVG", "No contour survived area or simplification thresholds")
+    if len(paths) > limits.max_svg_paths:
+        raise ProcessingError("SVG_PATH_LIMIT", "Contour tracing exceeds the path limit; reduce detail")
+    root = ET.Element(f"{{{SVG_NS}}}svg", {
+        "width": str(mask.shape[1]), "height": str(mask.shape[0]),
+        "viewBox": f"0 0 {mask.shape[1]} {mask.shape[0]}",
+    })
+    group = ET.SubElement(root, f"{{{SVG_NS}}}g", {"fill": "#1B2B54", "fill-rule": "evenodd"})
+    for path in paths:
+        ET.SubElement(group, f"{{{SVG_NS}}}path", {"d": path["d"]})
+    svg = ET.tostring(root, encoding="unicode")
+    metadata = validate_svg(svg, (mask.shape[1], mask.shape[0]), limits=limits)
+    metadata.update({
+        "options": options.model_dump(), "mode": "contour", "contours": outer_count,
+        "holes": holes, "epsilon": round(epsilon, 3), "min_area": round(min_area, 2),
+        "alpha_threshold": 128, "alpha_policy": "binary_threshold_for_vector_only",
+        "adapter_version": "contour-evenodd-v1", "fill_policy": "solid_ink",
+    })
+    return VectorResult(svg, metadata)
+
+
 def vectorize(
     image: Image.Image, options: VectorOptions | None = None, *, limits: ResourceLimits = DEFAULT_LIMITS
 ) -> VectorResult:
@@ -78,6 +140,8 @@ def vectorize(
     visible = pixels[:, :, 3] >= 128
     if not visible.any():
         raise ProcessingError("EMPTY_MASK", "No foreground reaches the vector alpha threshold")
+    if options.mode == "contour":
+        return _contour_vectorize(pixels, options, limits)
     prepared = np.zeros(pixels.shape, np.uint8)
     if options.mode == "monochrome":
         prepared[visible] = (0, 0, 0, 255)

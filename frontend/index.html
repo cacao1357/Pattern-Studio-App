@@ -109,6 +109,10 @@
           <span class="status-dot" aria-hidden="true"></span>
           <span id="health-label">检查连接</span>
         </button>
+        <button class="btn btn-quiet btn-sm" id="open-dataset" type="button" aria-haspopup="dialog">
+          <svg class="icon" aria-hidden="true"><use href="#i-grid"></use></svg>
+          <span>数据集</span>
+        </button>
         <button class="btn btn-quiet btn-sm" id="open-history" type="button">
           <svg class="icon" aria-hidden="true"><use href="#i-history"></use></svg>
           <span>历史</span>
@@ -593,6 +597,19 @@
               </div>
             </details>
 
+            <details class="group" id="lineart-group">
+              <summary>
+                <span class="group-label">线稿</span>
+                <span class="group-meta">结构线 · 本地</span>
+                <svg class="icon group-chevron" aria-hidden="true"><use href="#i-chevron"></use></svg>
+              </summary>
+              <div class="group-body">
+                <p class="hint">从当前输入生成透明底黑线结构稿；局部对比路径补亮区，中值核与面积门槛随尺寸自动缩放。结果可继续矢量化。</p>
+                <button class="btn btn-line btn-wide" id="lineart-button" type="button" disabled>生成线稿</button>
+                <p class="field-error" id="lineart-error" role="alert" hidden></p>
+              </div>
+            </details>
+
             <details class="group" open>
               <summary>
                 <span class="group-label">矢量</span>
@@ -605,7 +622,9 @@
                   <div class="segmented">
                     <label><input type="radio" name="vector-mode" value="monochrome"><span>黑白 SVG</span></label>
                     <label><input type="radio" name="vector-mode" value="color" checked><span>彩色 SVG</span></label>
+                    <label><input type="radio" name="vector-mode" value="contour"><span>轮廓单线</span></label>
                   </div>
+                  <p class="hint">轮廓单线适合透明蒙版或线稿，按 alpha 边界生成单色闭合路径，不按颜色上限量化。</p>
                 </fieldset>
                 <fieldset class="fieldset">
                   <legend class="field-label">颜色上限</legend>
@@ -1271,6 +1290,27 @@
         <button class="btn btn-solid" id="settings-save" type="submit">保存设置</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog class="dialog" id="dataset-dialog" aria-labelledby="dataset-title">
+    <div class="dialog-card is-wide">
+      <header class="dialog-head">
+        <div>
+          <h2 id="dataset-title">数据集审计</h2>
+          <p>本地登记 · 只读汇总</p>
+        </div>
+        <button class="icon-btn" id="dataset-close" type="button" aria-label="关闭数据集审计" title="关闭">
+          <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
+        </button>
+      </header>
+      <div class="dataset-grid" id="dataset-summary" aria-live="polite"></div>
+      <p class="hint" id="dataset-note">清单从现有图像与 P0 元数据派生；未登记指标的旧图片会标记为 missing_meta。</p>
+      <p class="field-error" id="dataset-error" role="alert" hidden></p>
+      <div class="dialog-acts">
+        <button class="btn btn-quiet btn-sm" id="dataset-refresh" type="button">重新读取</button>
+        <a class="btn btn-solid btn-sm" id="dataset-download" href="/api/v1/datasets/manifest.csv" download>下载 manifest.csv</a>
+      </div>
+    </div>
   </dialog>
 
   <dialog class="dialog" id="confirm-dialog" aria-labelledby="confirm-title">

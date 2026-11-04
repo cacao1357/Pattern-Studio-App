@@ -4,6 +4,7 @@ import json
 import os
 import re
 import time
+from collections import Counter
 from uuid import uuid4
 
 from app.storage import Store, ServiceError, canonical_json, digest, now
@@ -261,6 +262,81 @@ class WorkbenchStore(Store):
             return db.execute("""SELECT i.id,i.original_id,i.normalized_id
                                  FROM images i LEFT JOIN image_meta m ON m.image_id=i.id
                                  WHERE m.image_id IS NULL ORDER BY i.rowid""").fetchall()
+
+    def dataset_rows(self):
+        """One row per registered image, joined with P0 metadata and the original asset."""
+        with self.connection() as db:
+            rows = db.execute("""SELECT i.id AS image_id,i.original_id,i.normalized_id,
+                                        i.source_note,i.created_at,i.rowid AS position,
+                                        m.content_id,m.grade,m.grade_version,m.split,m.license,
+                                        m.provenance_status,m.source_type,m.source_name,m.source_url,
+                                        m.collected_at,m.batch_id,a.metadata AS original_metadata
+                                 FROM images i
+                                 LEFT JOIN image_meta m ON m.image_id=i.id
+                                 JOIN assets a ON a.id=i.original_id
+                                 ORDER BY i.rowid""").fetchall()
+        output = []
+        for row in rows:
+            try:
+                original = json.loads(row["original_metadata"])
+            except (TypeError, ValueError):
+                original = {}
+            missing = row["content_id"] is None
+            output.append({
+                "image_id": row["image_id"],
+                "content_id": row["content_id"] or "",
+                "grade": row["grade"] or "",
+                "grade_version": row["grade_version"] or "",
+                "split": row["split"] or "",
+                "license": row["license"] or "未确认",
+                "provenance_status": row["provenance_status"] or "unverified",
+                "source_type": row["source_type"] or "",
+                "source_name": row["source_name"] or "",
+                "source_url": row["source_url"] or "",
+                "collected_at": row["collected_at"] or "",
+                "batch_id": row["batch_id"] or "",
+                "width": original.get("width", ""),
+                "height": original.get("height", ""),
+                "sha256": original.get("sha256", ""),
+                "original_asset_id": row["original_id"],
+                "normalized_asset_id": row["normalized_id"],
+                "source_note": row["source_note"],
+                "created_at": row["created_at"],
+                "label_status": "not_reviewed",
+                "missing_meta": missing,
+            })
+        return output
+
+    def dataset_audit(self):
+        """Aggregate the same rows used by the CSV manifest; no pixel work here."""
+        rows = self.dataset_rows()
+        total = len(rows)
+        grades = Counter((row["grade"] or "missing").upper() for row in rows)
+        splits = Counter(row["split"] or "unassigned" for row in rows)
+        licenses = [row["license"] for row in rows]
+        confirmed = sum(1 for value in licenses if value not in ("", "未确认"))
+        provenance = Counter(row["provenance_status"] for row in rows)
+        content_counts = Counter(row["content_id"] for row in rows if row["content_id"])
+        duplicate_content = {key: count for key, count in content_counts.items() if count > 1}
+        return {
+            "total_images": total,
+            "images_with_meta": sum(1 for row in rows if not row["missing_meta"]),
+            "missing_meta": sum(1 for row in rows if row["missing_meta"]),
+            "usable_ab": sum(1 for row in rows if row["grade"] in {"A", "B"}),
+            "grades": {key: grades.get(key, 0) for key in ("A", "B", "C", "U", "missing")},
+            "splits": {key: splits.get(key, 0) for key in ("train", "val", "test", "unassigned")},
+            "license_confirmed": confirmed,
+            "license_unconfirmed": total - confirmed,
+            "license_coverage": round(confirmed / total, 4) if total else 0.0,
+            "provenance_declared": provenance.get("declared", 0),
+            "provenance_unverified": provenance.get("unverified", 0),
+            "source_types": dict(Counter(row["source_type"] or "未确认" for row in rows)),
+            "batches": sorted({row["batch_id"] for row in rows if row["batch_id"]}),
+            "content_ids": len(content_counts),
+            "duplicate_content_ids": len(duplicate_content),
+            "duplicate_images": sum(duplicate_content.values()),
+            "label_status": {"not_reviewed": total},
+        }
 
     def get_image(self, image_id):
         with self.connection() as db:
