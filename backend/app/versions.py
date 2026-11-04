@@ -11,6 +11,7 @@ FINGERPRINT_VERSION = "p0-v1"
 PATTERN_SCORE_VERSION = "p0-v1"
 NORMALIZATION_VERSION = "normalize-image-v1"
 PROVENANCE_VERSION = "p0-v1"
+VECTOR_VERSION = "vtracer-0.6-rgba-v4"
 
 ALGORITHM_BY_KIND = {
     "original": "upload-original-v1",
@@ -22,7 +23,7 @@ ALGORITHM_BY_KIND = {
     "foreground_mask": "local-extraction-v2",
     "transparent_png": "local-extraction-v2",
     "contour_line_art": "opencv-findContours-RETR_LIST-v1",
-    "svg": "vtracer-0.6-rgba-v3",
+    "svg": VECTOR_VERSION,
     "tile_preview": "integer-repeat-v1",
     "edge_candidate": "classic-region-candidate-v1",
     "region_candidate": "classic-region-candidate-v1",

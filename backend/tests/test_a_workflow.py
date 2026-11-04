@@ -191,6 +191,12 @@ class AWorkflowTests(unittest.TestCase):
     def test_local_composition_branch_is_idempotent_and_preserves_old_assets(self):
         flow = self.select(self.flow())
         original = self.run_next()
+        from app.versions import VECTOR_VERSION
+        original_svg = next(a for a in original["result"]["assets"] if a["kind"] == "svg")
+        self.assertEqual(original_svg["algorithm_version"], VECTOR_VERSION)
+        parent = self.store.read_asset(original_svg["source_asset_id"])[0]
+        for field in ("image_id", "content_id", "license"):
+            self.assertEqual(original_svg[field], parent[field])
         flow = self.store.get_ai_flow(flow["pipeline_id"])
         result = self.post("/pipelines/" + flow["pipeline_id"] + "/rerun", json={"revision": flow["revision"],
                            "action": "compose", "layer_ids": flow["selected_layer_ids"], "vector": None})

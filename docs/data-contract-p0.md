@@ -107,7 +107,7 @@ GET /api/v1/images/{image_id}       # 读取记录，供“使用已有版本”
     "manifest": "local-s1-v2", "grade": "p0-v1", "fingerprint": "p0-v1",
     "pattern_score": "p0-v1", "normalization": "normalize-image-v1",
     "provenance": "p0-v1", "extraction": "local-extraction-v2",
-    "vector": "vtracer-0.6-rgba-v3"
+    "vector": "vtracer-0.6-rgba-v4"
   },
   "dataset": {
     "content_id": "sha256(original file bytes)[:16]",

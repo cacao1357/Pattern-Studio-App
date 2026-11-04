@@ -400,7 +400,9 @@ def execute_local(store: WorkbenchStore, job_id, token):
         result = vectorize(image, options)
         publish("vectorize", [{"data": result.svg.encode("utf-8"), "suffix": ".svg", "metadata": {
             **{key: source[key] for key in INHERITED_META_KEYS if source.get(key) not in (None, "")},
-            "algorithm_version": versions.algorithm_version("svg"),
+            "algorithm_version": result.metadata["adapter_version"],
+            "source_note": source.get("source_note", ""),
+            "source_evidence_status": source.get("source_evidence_status", "not_reviewed"),
             "kind": "svg", "width": image.width, "height": image.height,
             "coordinate_space_id": source["coordinate_space_id"], "source_asset_id": source["asset_id"],
             "original_width": source.get("original_width", source["width"]),
