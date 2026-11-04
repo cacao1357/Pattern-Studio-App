@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse, Response
 from app.schemas.contracts import DEFAULT_LIMITS
 from app import versions
 from app.schemas.workbench import (CropRequest, PrepareRequest, WorkingCopyRequest, EnhanceRequest, ExtractRequest,
-    VectorRequest, PipelineRequest, ExportRequest, FeedbackRequest)
+    LineartRequest, VectorRequest, PipelineRequest, ExportRequest, FeedbackRequest)
 from app.storage import ServiceError
 
 
@@ -111,6 +111,10 @@ def mount_workbench(app, current_store, current_service, current_worker):
     @app.post("/api/v1/jobs/extract", status_code=202)
     def extract(payload: ExtractRequest, request: Request):
         return submit("extract", payload, request)
+
+    @app.post("/api/v1/jobs/lineart", status_code=202)
+    def lineart(payload: LineartRequest, request: Request):
+        return submit("lineart", payload, request)
 
     @app.post("/api/v1/jobs/vectorize", status_code=202)
     def vector(payload: VectorRequest, request: Request):

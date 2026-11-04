@@ -23,6 +23,7 @@ ALGORITHM_BY_KIND = {
     "foreground_mask": "local-extraction-v2",
     "transparent_png": "local-extraction-v2",
     "contour_line_art": "opencv-findContours-RETR_LIST-v1",
+    "lineart": "lineart-global-local-v2",
     "svg": VECTOR_VERSION,
     "tile_preview": "integer-repeat-v1",
     "edge_candidate": "classic-region-candidate-v1",

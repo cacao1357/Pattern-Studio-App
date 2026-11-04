@@ -21,6 +21,7 @@ from app.services.provider_validation import ProviderValidationService
 from app.storage import ServiceError, Store
 from app.api.workbench import mount_workbench, FRONTEND_MODULES
 from app.api.assisted import mount_assisted
+from app.api.datasets import mount_datasets
 from app.api.finishing import mount_finishing
 from app.api.svg_edit import mount_svg_edit
 from app.services.finishing_workbench import FinishingWorkbench
@@ -241,6 +242,7 @@ def create_app(settings: Settings | None = None, *, transport: httpx.BaseTranspo
 
     mount_workbench(app, current_store, current_local_service, current_worker)
     mount_svg_edit(app, current_store)
+    mount_datasets(app, current_store)
     mount_assisted(app, current_assisted_service)
     mount_finishing(app, lambda: FinishingWorkbench(current_store(), runtime_settings.current(), current_local_service()))
 

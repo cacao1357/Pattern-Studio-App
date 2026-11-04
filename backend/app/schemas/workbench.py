@@ -79,6 +79,25 @@ class VectorRequest(InputRequest, VectorOptions):
     pass
 
 
+class LineartOptions(StrictModel):
+    local: bool = Field(default=True, strict=True)
+    med: int | None = Field(default=None, ge=0, le=15, strict=True)
+    min_area: int | None = Field(default=None, ge=0, le=10000, strict=True)
+    hi_pct: float = Field(default=88.0, ge=50, le=99.5)
+    tile_pct: float = Field(default=92.0, ge=50, le=99.5)
+    sd_thr: float = Field(default=12.0, ge=0, le=64)
+
+    @model_validator(mode="after")
+    def odd_median(self):
+        if self.med not in (None, 0, 3, 5, 7, 9, 11, 13, 15):
+            raise ValueError("med must be 0 or an odd kernel from 3 to 15")
+        return self
+
+
+class LineartRequest(InputRequest, LineartOptions):
+    pass
+
+
 class PipelineRequest(InputRequest):
     extract: ExtractOptions = Field(default_factory=ExtractOptions)
     vector: VectorOptions = Field(default_factory=VectorOptions)

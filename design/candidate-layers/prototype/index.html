@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>候选图层 · Pattern Studio 原型</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@300;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  window.tailwind = window.tailwind || {};
+  window.tailwind.config = {
+    theme: {
+      screens: { wide: "1181px" },
+      extend: {
+        colors: {
+          ink: { DEFAULT: "#1b2b54", 85: "#33406b", 60: "#4f587b", 40: "#838aa6", 25: "#bfc2ce", 12: "#dcdde3" },
+          paper: { DEFAULT: "#edede7", hi: "#f6f6f1", 2: "#e4e4dc" }
+        },
+        fontFamily: {
+          display: ['"Noto Serif SC"', '"Source Han Serif SC"', '"Songti SC"', "SimSun", "serif"],
+          sans: ['"Noto Sans SC"', '"PingFang SC"', '"Microsoft YaHei UI"', '"Hiragino Sans GB"', "sans-serif"]
+        },
+        borderRadius: { none: "0" }
+      }
+    }
+  };
+</script>
+<style>
+  html, body { height: 100%; }
+  body { margin: 0; }
+  :where(button, a, input, select, summary, [tabindex]):focus-visible {
+    outline: 2px solid #1b2b54;
+    outline-offset: 2px;
+  }
+  .checker {
+    background-color: #f6f6f1;
+    background-image: repeating-conic-gradient(#dcdde3 0% 25%, #f6f6f1 0% 50%);
+    background-size: 16px 16px;
+  }
+  .scroll-thin::-webkit-scrollbar { width: 10px; height: 10px; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: #bfc2ce; border: 2px solid #edede7; }
+  .scroll-thin::-webkit-scrollbar-track { background: transparent; }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+  }
+</style>
+</head>
+<body class="bg-paper text-ink font-sans text-[14px] leading-[1.65]">
+
+<svg class="absolute w-0 h-0 overflow-hidden" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+  <symbol id="i-mark" viewBox="0 0 32 32">
+    <path d="M16 3.5c4.2 4.2 8 8 12.5 12.5C24 20.5 20.2 24.3 16 28.5 11.8 24.3 8 20.5 3.5 16 8 11.5 11.8 7.7 16 3.5Z" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <path d="M16 9.6c2.3 2.3 4.1 4.1 6.4 6.4-2.3 2.3-4.1 4.1-6.4 6.4-2.3-2.3-4.1-4.1-6.4-6.4 2.3-2.3 4.1-4.1 6.4-6.4Z" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <circle cx="16" cy="16" r="1.6" fill="currentColor"/>
+  </symbol>
+  <symbol id="i-history" viewBox="0 0 24 24">
+    <path d="M4.5 9.2A8.2 8.2 0 1 1 4 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+    <path d="M4.2 5.5v4.2h4.2M12 7.7V12l3 2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="3.1" fill="none" stroke="currentColor" stroke-width="1.6"/>
+    <path d="M12 2.8v2.3M12 18.9v2.3M2.8 12h2.3M18.9 12h2.3M5.5 5.5l1.6 1.6M16.9 16.9l1.6 1.6M18.5 5.5l-1.6 1.6M7.1 16.9l-1.6 1.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-image" viewBox="0 0 24 24">
+    <rect x="3.5" y="4.5" width="17" height="15" rx="2.3" fill="none" stroke="currentColor" stroke-width="1.7"/>
+    <circle cx="9" cy="9.5" r="1.5" fill="currentColor"/>
+    <path d="m5.5 17 4.4-4.5 3.1 3 2.5-2.4 3 3.9" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-check" viewBox="0 0 24 24">
+    <path d="m5 12.5 4.3 4.3L19.5 6.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24">
+    <path d="M12 4.2 21 20H3L12 4.2Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+    <path d="M12 9.5v4.7M12 17.2v.2" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-crop" viewBox="0 0 24 24">
+    <path d="M7 3.5V17h13.5M17 20.5V7H3.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-brush" viewBox="0 0 24 24">
+    <path d="M14.6 4.2 19.8 9.4 10 19.2H4.8v-5.2L14.6 4.2Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+    <path d="m12.7 6.1 5.2 5.2M4.8 19.2 8 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24">
+    <rect x="3.5" y="3.5" width="7" height="7" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/>
+    <rect x="13.5" y="3.5" width="7" height="7" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/>
+    <rect x="3.5" y="13.5" width="7" height="7" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/>
+    <rect x="13.5" y="13.5" width="7" height="7" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/>
+  </symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24">
+    <path d="M12 3.5c.5 4.5 2 6 6.5 6.5-4.5.5-6 2-6.5 6.5-.5-4.5-2-6-6.5-6.5 4.5-.5 6-2 6.5-6.5ZM18.5 15c.2 2 .9 2.8 3 3-2.1.2-2.8 1-3 3-.2-2-.9-2.8-3-3 2.1-.2 2.8-1 3-3Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24">
+    <path d="M3.5 12s3.1-5.2 8.5-5.2 8.5 5.2 8.5 5.2-3.1 5.2-8.5 5.2S3.5 12 3.5 12Z" fill="none" stroke="currentColor" stroke-width="1.7"/>
+    <circle cx="12" cy="12" r="2.4" fill="none" stroke="currentColor" stroke-width="1.7"/>
+  </symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24">
+    <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24">
+    <path d="M5 12h14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-fit" viewBox="0 0 24 24">
+    <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+</svg>
+
+<div class="h-screen flex flex-col overflow-hidden">
+
+  <!-- 顶条 52px -->
+  <header class="h-[52px] flex-none flex items-center justify-between gap-4 px-6 border-b border-ink-12">
+    <a href="#" class="flex items-baseline gap-2 text-ink no-underline" aria-label="回到工作台顶部">
+      <svg class="w-[17px] h-[17px] self-center" aria-hidden="true"><use href="#i-mark"></use></svg>
+      <span class="font-display text-[15.5px] font-medium tracking-wide">Pattern Studio</span>
+      <span class="text-[12px] text-ink-60 tracking-wider hidden wide:inline">本地纹样工作台</span>
+    </a>
+    <div class="flex items-center gap-2">
+      <span class="inline-flex items-center gap-[7px] h-[26px] px-2 border border-ink-25 text-[12px] text-ink-60">
+        <span class="w-[6px] h-[6px] bg-ink border border-ink" aria-hidden="true"></span>本机就绪
+      </span>
+      <button type="button" class="inline-flex items-center gap-[5px] h-[28px] px-2 text-[12px] text-ink-60 hover:text-ink hover:bg-paper-2 transition-colors duration-[120ms]" aria-label="打开历史任务">
+        <svg class="w-4 h-4" aria-hidden="true"><use href="#i-history"></use></svg><span>历史</span>
+      </button>
+      <button type="button" class="inline-flex items-center gap-[5px] h-[28px] px-2 text-[12px] text-ink-60 hover:text-ink hover:bg-paper-2 transition-colors duration-[120ms]" aria-label="打开设置">
+        <svg class="w-4 h-4" aria-hidden="true"><use href="#i-settings"></use></svg><span>设置</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- 阶段导航 46px -->
+  <nav class="h-[46px] flex-none grid grid-cols-7 border-b-2 border-ink bg-paper-2" aria-label="工序导航" id="stage-nav"></nav>
+
+  <!-- 工作面：左版本栏 / 中画布 / 右候选区 -->
+  <main class="flex-1 min-h-0 grid grid-rows-[minmax(0,1fr)] grid-cols-[64px_minmax(0,1fr)_320px] wide:grid-cols-[248px_minmax(0,1fr)_380px]">
+
+    <!-- 左：版本栏 -->
+    <aside class="min-h-0 flex flex-col border-r border-ink-25 bg-paper" aria-labelledby="vr-title" id="version-rail">
+      <div class="flex items-baseline justify-between gap-2 px-3 py-[9px] border-b border-ink-25">
+        <h2 class="font-display text-[15px] font-medium tracking-wider hidden wide:block" id="vr-title">版本</h2>
+        <span class="font-display text-[13px] text-ink-60 tabular-nums hidden wide:inline" id="vr-count">5</span>
+        <span class="wide:hidden mx-auto font-display text-[13px] text-ink-60" aria-hidden="true">版</span>
+      </div>
+      <div class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden scroll-thin" role="list" aria-label="图像与成果版本" id="vr-list"></div>
+      <div class="flex-none px-3 py-2 border-t border-ink-25 bg-paper-2 text-[12px] text-ink-60 hidden wide:block">候选阶段 · 只读记录</div>
+    </aside>
+
+    <!-- 中：输入画布 -->
+    <section class="min-w-0 min-h-0 flex flex-col bg-paper" aria-labelledby="cv-name">
+      <div class="flex items-center justify-between gap-3 px-4 pt-[10px] pb-2">
+        <h2 class="flex items-baseline gap-2 min-w-0 text-[14px] font-normal">
+          <strong class="font-display text-[16px] font-medium truncate max-w-[38ch]" id="cv-name">real_02d686e2797d30619ddb1ea4de055056.png</strong>
+          <span class="flex-none text-[12px] text-ink-60">规范输入</span>
+        </h2>
+        <div class="flex items-center gap-1 flex-none" role="group" aria-label="缩放控制">
+          <button type="button" id="zoom-out" class="w-[26px] h-[26px] inline-flex items-center justify-center border border-transparent text-ink-60 hover:text-ink hover:border-ink-25 hover:bg-paper-2 transition-colors duration-[120ms]" aria-label="缩小画布">
+            <svg class="w-4 h-4" aria-hidden="true"><use href="#i-minus"></use></svg>
+          </button>
+          <span class="w-[44px] text-center text-[12px] tabular-nums text-ink-60" id="zoom-readout" aria-live="polite">100%</span>
+          <button type="button" id="zoom-in" class="w-[26px] h-[26px] inline-flex items-center justify-center border border-transparent text-ink-60 hover:text-ink hover:border-ink-25 hover:bg-paper-2 transition-colors duration-[120ms]" aria-label="放大画布">
+            <svg class="w-4 h-4" aria-hidden="true"><use href="#i-plus"></use></svg>
+          </button>
+          <button type="button" id="zoom-fit" class="h-[26px] px-2 inline-flex items-center gap-1 border border-transparent text-[12px] text-ink-60 hover:text-ink hover:border-ink-25 hover:bg-paper-2 transition-colors duration-[120ms]" aria-label="适应窗口">
+            <svg class="w-4 h-4" aria-hidden="true"><use href="#i-fit"></use></svg>适应
+          </button>
+        </div>
+      </div>
+      <dl class="flex flex-wrap gap-x-6 gap-y-1 px-4 pb-2 border-b border-ink-12 text-[12px]">
+        <div class="flex items-baseline gap-[6px]"><dt class="text-ink-60">尺寸</dt><dd class="tabular-nums" id="cv-dims">542 × 666</dd></div>
+        <div class="flex items-baseline gap-[6px]"><dt class="text-ink-60">坐标空间</dt><dd class="tabular-nums" id="cv-coord">fb26af99-a50</dd></div>
+        <div class="flex items-baseline gap-[6px]"><dt class="text-ink-60">质量参考</dt><dd><span class="inline-flex items-center h-[19px] px-[6px] border-2 border-ink text-[12px] font-semibold">B 级</span></dd></div>
+      </dl>
+      <div class="relative flex-1 min-h-0 grid place-items-center p-4 overflow-hidden">
+        <div class="absolute z-10 top-4 left-4 flex items-center gap-2 px-[9px] py-[6px] border border-ink bg-paper-hi text-[12px] leading-[1.4]">
+          <svg class="w-4 h-4 flex-none" aria-hidden="true"><use href="#i-eye"></use></svg>
+          <span>只读预览 · 坐标为当前输入像素</span>
+        </div>
+        <div class="checker border border-ink-25 leading-[0] max-w-full max-h-full overflow-hidden" id="cv-frame">
+          <div id="cv-thumb" class="transition-[width] duration-[120ms]"></div>
+        </div>
+      </div>
+      <p class="flex-none px-4 pt-[6px] pb-[9px] border-t border-ink-12 text-[12px] text-ink-60">候选阶段画布为只读；选择图层在右侧候选区完成。</p>
+    </section>
+
+    <!-- 右：候选工作区 -->
+    <aside class="min-w-0 min-h-0 flex flex-col overflow-hidden border-l border-ink-25 bg-paper" aria-label="候选图层工作区" id="workspace"></aside>
+  </main>
+
+  <!-- 状态条 37px -->
+  <footer class="h-[37px] flex-none flex items-center gap-[10px] px-4 border-t border-ink bg-paper-2" aria-label="当前任务状态" id="status-bar"></footer>
+</div>
+
+<script>
+/* ------------------------------------------------------------------ *
+ * 候选图层页 · 静态原型（stage 04）
+ * 仅演示纯 UI 状态：?state=empty|loading|ready|selected|error
+ * 不包含任何业务请求、上传或 AI 调用。
+ * ------------------------------------------------------------------ */
+
+const WARNING_LABELS = {
+  CANDIDATE_MAY_BE_BACKGROUND: "覆盖范围偏大，可能选中背景",
+  CANDIDATE_TOO_SMALL: "候选面积过小，可能只是噪点",
+  CANDIDATE_TOUCHES_BORDER: "候选贴边较多，可能是画框或背景",
+  CANDIDATE_IS_SOLID_REGION: "接近实心区域，可能不是纹样轮廓",
+  CANDIDATE_TOO_ELONGATED: "过于狭长，可能是折痕或边线"
+};
+
+const MOCK = {
+  input: {
+    id: "input-demo",
+    name: "real_02d686e2797d30619ddb1ea4de055056.png",
+    width: 542,
+    height: 666,
+    coordinateSpace: "fb26af99-a50",
+    grade: "B"
+  },
+  basemap: { id: "basemap", note: "仅作坐标参考，不可选" },
+  versions: [
+    { id: "v-original",  label: "原始文件", icon: "image",  meta: "542 × 666", current: false },
+    { id: "v-normalized", label: "规范输入", icon: "crop",   meta: "542 × 666 · B 级", current: true },
+    { id: "v-mask",      label: "前景蒙版", icon: "brush",  meta: "542 × 666 · 蒙版", current: false },
+    { id: "v-png",       label: "透明 PNG", icon: "grid",   meta: "542 × 666 · 透明", current: false },
+    { id: "v-composed",  label: "候选合成", icon: "spark",  meta: "待选择图层", current: false }
+  ],
+  stages: [
+    { n: "01", label: "来源" }, { n: "02", label: "裁切" }, { n: "03", label: "处理" },
+    { n: "04", label: "候选" }, { n: "05", label: "蒙版" }, { n: "06", label: "修复" },
+    { n: "07", label: "平铺" }
+  ],
+  candidates: [
+    { id: "cand-1", zIndex: 1, label: "底层铺色", width: 542, height: 666, areaRatio: 0.38, confidence: 0.91, aiInferred: true, geometryVerified: false, warnings: [] },
+    { id: "cand-2", zIndex: 2, label: "主体纹样", width: 542, height: 666, areaRatio: 0.22, confidence: 0.88, aiInferred: true, geometryVerified: false, warnings: [] },
+    { id: "cand-3", zIndex: 3, label: "内部线条", width: 542, height: 666, areaRatio: 0.09, confidence: 0.74, aiInferred: true, geometryVerified: false, warnings: [] },
+    { id: "cand-4", zIndex: 4, label: "点缀元素", width: 542, height: 666, areaRatio: 0.05, confidence: 0.66, aiInferred: true, geometryVerified: false, warnings: [] },
+    { id: "cand-5", zIndex: 5, label: "外围区域", width: 542, height: 666, areaRatio: 0.61, confidence: 0.42, aiInferred: true, geometryVerified: false, warnings: ["CANDIDATE_MAY_BE_BACKGROUND"] }
+  ]
+};
+</script>
+<script>
+/* 状态解析（合法值：empty / loading / ready / selected / error，默认 ready） */
+const PARAM_STATE = new URLSearchParams(location.search).get("state");
+const STATE = ["empty", "loading", "ready", "selected", "error"].includes(PARAM_STATE) ? PARAM_STATE : "ready";
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const icon = (name, cls) => `<svg class="${cls || "w-4 h-4"}" aria-hidden="true"><use href="#i-${name}"></use></svg>`;
+
+/* 演示用本地 UI 状态 */
+const selectedIds = new Set(STATE === "selected" ? ["cand-1", "cand-2"] : []);
+let filterMode = "all"; // all | selected | review
+const ZOOM_LEVELS = [50, 75, 100, 125, 150];
+let zoomIndex = 2;
+
+/* ------------------------------------------------------------------
+ * 抽象纹样缩略图：内联 SVG，不使用真实素材
+ * ------------------------------------------------------------------ */
+function thumbSvg(seed, big) {
+  const inks = ["#1b2b54", "#33406b", "#4f587b", "#838aa6", "#bfc2ce"];
+  const c1 = inks[seed % inks.length];
+  const c2 = inks[(seed + 2) % inks.length];
+  const r = 10 + ((seed * 7) % 14);
+  const cx = 40 + ((seed * 13) % 40);
+  const cy = 34 + ((seed * 11) % 36);
+  const motif = [
+    `<path d="M80 24 L112 56 L80 88 L48 56 Z" fill="none" stroke="${c1}" stroke-width="2.5"/>`,
+    `<circle cx="${cx + 20}" cy="${cy + 14}" r="${r}" fill="none" stroke="${c2}" stroke-width="2"/>`,
+    `<path d="M32 ${88 - seed * 3} Q 80 ${56 + seed * 4} 128 ${88 - seed * 3}" fill="none" stroke="${c2}" stroke-width="2"/>`,
+    `<path d="M80 40 L96 56 L80 72 L64 56 Z" fill="none" stroke="${c2}" stroke-width="1.6"/>`,
+    `<circle cx="${36 + seed * 6}" cy="${30 + seed * 4}" r="3" fill="${c1}"/>`
+  ];
+  const count = big ? motif.length : 2 + (seed % (motif.length - 1));
+  const body = motif.slice(0, count).join("");
+  return `<svg viewBox="0 0 160 120" class="block w-full h-full" role="img" aria-label="抽象纹样占位图 ${seed}">${body}</svg>`;
+}
+
+/* ------------------------------------------------------------------
+ * 静态区域渲染：阶段导航 / 版本栏 / 画布缩略图
+ * ------------------------------------------------------------------ */
+function renderStageNav() {
+  $("stage-nav").innerHTML = MOCK.stages.map((s) => {
+    const active = s.n === "04";
+    return `<button type="button" ${active ? 'aria-current="step"' : ""}
+      class="relative flex items-baseline gap-2 min-w-0 px-[14px] border-r last:border-r-0 border-ink-25 text-left transition-colors duration-[120ms] ${
+        active ? "bg-ink text-paper" : "text-ink-60 hover:text-ink hover:bg-ink-12"
+      }" aria-label="工序 ${s.n} ${s.label}${active ? "（当前）" : ""}">
+      <span class="font-display text-[12px] tracking-widest tabular-nums ${active ? "" : "opacity-80"}">${s.n}</span>
+      <span class="text-[14px] font-medium tracking-wider whitespace-nowrap overflow-hidden text-ellipsis">${s.label}</span>
+    </button>`;
+  }).join("");
+}
+
+function renderVersionRail() {
+  $("vr-list").innerHTML = MOCK.versions.map((v) => `
+    <div role="listitem"
+      class="flex items-center gap-2 px-2 py-2 border-b border-ink-12 ${v.current ? "bg-paper-2 border-l-[3px] border-l-ink pl-[5px]" : ""}"
+      title="${esc(v.label)}${v.current ? "（当前输入）" : ""}" aria-label="版本：${esc(v.label)}${v.current ? "，当前输入" : ""}">
+      <span class="w-[32px] h-[32px] flex-none inline-flex items-center justify-center border border-ink-25 bg-paper-hi text-ink-60">${icon(v.icon, "w-4 h-4")}</span>
+      <span class="min-w-0 hidden wide:block">
+        <span class="flex items-center gap-1 flex-wrap">
+          <span class="text-[13px] font-medium whitespace-nowrap">${esc(v.label)}</span>
+          ${v.current ? '<span class="inline-flex items-center h-[17px] px-[5px] border border-ink bg-paper-2 text-[11px] text-ink">当前输入</span>' : ""}
+        </span>
+        <span class="block text-[11px] text-ink-60 tabular-nums whitespace-nowrap overflow-hidden text-ellipsis">${esc(v.meta)}</span>
+      </span>
+    </div>`).join("");
+}
+
+function renderCanvasThumb() {
+  const scale = ZOOM_LEVELS[zoomIndex] / 100;
+  const base = 300; // 参考显示宽度（px）
+  $("cv-thumb").style.width = Math.round(base * scale) + "px";
+  $("cv-thumb").innerHTML = `<div class="aspect-[542/666]">${thumbSvg(3, true)}</div>`;
+  $("zoom-readout").textContent = ZOOM_LEVELS[zoomIndex] + "%";
+  $("zoom-out").disabled = zoomIndex === 0;
+  $("zoom-in").disabled = zoomIndex === ZOOM_LEVELS.length - 1;
+  $("zoom-out").classList.toggle("opacity-40", zoomIndex === 0);
+  $("zoom-in").classList.toggle("opacity-40", zoomIndex === ZOOM_LEVELS.length - 1);
+}
+
+/* ------------------------------------------------------------------
+ * 候选工作区
+ * ------------------------------------------------------------------ */
+const BTN = {
+  solid: "inline-flex items-center justify-center gap-[5px] h-[28px] px-[10px] border border-ink bg-ink text-paper text-[12px] font-medium tracking-wide transition-colors duration-[120ms] hover:bg-ink-85 hover:border-ink-85 disabled:bg-transparent disabled:border-ink-25 disabled:text-ink-40 disabled:cursor-not-allowed",
+  line: "inline-flex items-center justify-center gap-[5px] h-[28px] px-[10px] border border-ink text-ink text-[12px] font-medium tracking-wide transition-colors duration-[120ms] hover:bg-paper-2 disabled:border-ink-25 disabled:text-ink-40 disabled:cursor-not-allowed",
+  quiet: "inline-flex items-center justify-center gap-[5px] h-[28px] px-[6px] border border-transparent text-ink-60 text-[12px] font-medium tracking-wide transition-colors duration-[120ms] hover:text-ink hover:bg-paper-2"
+};
+
+const STATUS_META = {
+  empty:    { badge: "未开始",   pillCls: "border-ink-25 text-ink-60", line: "尚未生成候选", bar: "尚未运行任务" },
+  loading:  { badge: "生成中",   pillCls: "border-ink text-ink bg-paper-2", line: "AI 拆层进行中 · 请稍候", bar: "AI 拆层 · 处理中" },
+  ready:    { badge: "等待选择", pillCls: "border-ink border-l-[3px] text-ink bg-paper-2 font-medium", line: "5 个候选图层 · 尚未选择", bar: "AI 拆层已完成 · 等待选择图层" },
+  selected: { badge: "等待选择", pillCls: "border-ink border-l-[3px] text-ink bg-paper-2 font-medium", line: "", bar: "AI 拆层已完成 · 等待选择图层" },
+  error:    { badge: "失败",     pillCls: "border-ink bg-ink text-paper", line: "候选生成失败 · 可重试", bar: "AI 拆层 · 失败" }
+};
+
+function pageHeaderHtml() {
+  const meta = STATUS_META[STATE];
+  return `
+  <div class="flex-none px-4 pt-4 pb-3 border-b-2 border-ink">
+    <div class="flex items-baseline justify-between gap-2">
+      <h1 class="font-display text-[28px] font-light leading-[1.1] tracking-wide">候选图层</h1>
+      <span class="inline-flex items-center h-[20px] px-[7px] border text-[12px] tracking-wider ${meta.pillCls}" role="status">${meta.badge}</span>
+    </div>
+    <dl class="mt-2 space-y-[2px] text-[12px]">
+      <div class="flex items-baseline gap-2 min-w-0"><dt class="flex-none text-ink-60">当前输入</dt><dd class="min-w-0 truncate tabular-nums" title="${esc(MOCK.input.name)}">${esc(MOCK.input.name)}</dd></div>
+      <div class="flex items-baseline gap-2"><dt class="flex-none text-ink-60">尺寸</dt><dd class="tabular-nums">${MOCK.input.width} × ${MOCK.input.height}</dd></div>
+      <div class="flex items-baseline gap-2"><dt class="flex-none text-ink-60">坐标空间</dt><dd class="tabular-nums">${MOCK.input.coordinateSpace}</dd></div>
+    </dl>
+  </div>`;
+}
+
+function basemapHtml() {
+  return `
+  <div class="flex items-center gap-2 px-2 py-[6px] border border-dashed border-ink-25 bg-paper-hi text-[12px] text-ink-60" aria-label="底图：${esc(MOCK.basemap.note)}">
+    <span class="w-[28px] h-[22px] flex-none checker border border-ink-25" aria-hidden="true"></span>
+    <span class="font-medium text-ink">底图</span>
+    <span class="inline-flex items-center h-[17px] px-[5px] border border-dashed border-ink-40 text-[11px]">${esc(MOCK.basemap.note)}</span>
+  </div>`;
+}
+
+function cardHtml(c) {
+  const selected = selectedIds.has(c.id);
+  const warn = c.warnings.length > 0;
+  const aria = `${selected ? "取消选择" : "选择"}候选图层 ${c.zIndex}（${esc(c.label)}）`;
+  return `
+  <article class="border ${selected ? "border-ink border-l-[3px] bg-paper-2" : "border-ink-25 bg-paper-hi"} transition-colors duration-[120ms]" data-cand="${c.id}">
+    <button type="button" data-toggle="${c.id}" aria-pressed="${selected}" aria-label="${aria}"
+      class="relative block w-full aspect-[4/3] checker border-b ${selected ? "border-ink" : "border-ink-25"} text-left">
+      ${thumbSvg(c.zIndex, false)}
+      <span class="absolute left-0 bottom-0 px-[3px] bg-ink text-paper text-[10px] leading-[13px]">AI 候选</span>
+      <span class="absolute right-0 bottom-0 px-[3px] bg-ink text-paper text-[10px] leading-[13px] tabular-nums">层级 ${c.zIndex}</span>
+      <span class="absolute top-1 right-1 w-[15px] h-[15px] inline-flex items-center justify-center border ${selected ? "border-ink bg-ink text-paper" : "border-ink bg-paper-hi text-transparent"}" aria-hidden="true">
+        ${icon("check", "w-3 h-3")}
+      </span>
+    </button>
+    <div class="px-2 py-[6px]">
+      <div class="flex items-baseline justify-between gap-1 min-w-0">
+        <strong class="text-[13px] font-medium truncate">${c.zIndex} · ${esc(c.label)}</strong>
+      </div>
+      <p class="text-[11px] text-ink-60 tabular-nums leading-[1.5]">${c.width} × ${c.height} · 面积 ${Math.round(c.areaRatio * 100)}% · 置信 ${c.confidence.toFixed(2)}</p>
+      <div class="mt-1 flex flex-wrap gap-1">
+        ${c.aiInferred ? '<span class="inline-flex items-center h-[17px] px-[5px] border border-ink text-[11px] text-ink">AI 生成</span>' : ""}
+        ${c.geometryVerified ? "" : '<span class="inline-flex items-center h-[17px] px-[5px] border border-dashed border-ink-40 text-[11px] text-ink-60">几何未核验</span>'}
+        ${warn ? `<span class="inline-flex items-center h-[17px] px-[5px] border border-ink border-l-2 bg-paper-2 text-[11px] text-ink font-medium" title="${esc(c.warnings.map((w) => WARNING_LABELS[w] || w).join("；"))}">候选存疑</span>` : ""}
+      </div>
+      ${warn ? `<p class="mt-1 pl-[6px] border-l-[3px] border-ink text-[11px] leading-[1.5] text-ink">${esc(c.warnings.map((w) => WARNING_LABELS[w] || w).join("；"))}</p>` : ""}
+    </div>
+  </article>`;
+}
+
+function filteredCandidates() {
+  if (filterMode === "selected") return MOCK.candidates.filter((c) => selectedIds.has(c.id));
+  if (filterMode === "review") return MOCK.candidates.filter((c) => c.warnings.length > 0);
+  return MOCK.candidates;
+}
+
+function filterBarHtml() {
+  const counts = {
+    all: MOCK.candidates.length,
+    selected: selectedIds.size,
+    review: MOCK.candidates.filter((c) => c.warnings.length > 0).length
+  };
+  const items = [["all", "全部"], ["selected", "已选"], ["review", "待复核"]];
+  return `
+  <div class="flex border border-ink-25 bg-paper-hi" role="group" aria-label="筛选候选图层">
+    ${items.map(([key, label], i) => `
+      <button type="button" data-filter="${key}" aria-pressed="${filterMode === key}" aria-label="筛选：${label}"
+        class="flex-1 min-h-[30px] px-1 text-[12px] tracking-wide transition-colors duration-[120ms] ${i > 0 ? "border-l border-ink-25" : ""} ${
+          filterMode === key ? "bg-ink text-paper" : "text-ink-60 hover:text-ink hover:bg-paper-2"
+        }">${label} <span class="tabular-nums">${counts[key]}</span></button>`).join("")}
+  </div>`;
+}
+
+function summaryHtml() {
+  const ids = MOCK.candidates.filter((c) => selectedIds.has(c.id)).map((c) => c.zIndex);
+  const listText = ids.length ? "图层 " + ids.join("、") : "尚未选择图层";
+  return `
+  <div class="flex-none px-4 py-3 border-t border-ink-25 text-[12px] leading-[1.6]" aria-live="polite">
+    <p>已选 <strong class="tabular-nums">${ids.length}</strong> / ${MOCK.candidates.length} 层 · ${listText}</p>
+    <p class="text-ink-60">合成沿用当前矢量参数：彩色 · 8 色 · 中细节。</p>
+  </div>`;
+}
+
+function decisionHtml() {
+  const canCompose = selectedIds.size > 0 && (STATE === "ready" || STATE === "selected");
+  return `
+  <div class="flex-none flex flex-wrap items-center justify-end gap-[6px] px-4 py-3 border-t border-ink">
+    <button type="button" class="${BTN.quiet}" data-todo="use-local" aria-label="改用本地流程">改用本地流程</button>
+    <button type="button" class="${BTN.line}" data-todo="reject" aria-label="拒绝本批候选">拒绝候选</button>
+    <button type="button" class="${BTN.solid}" data-todo="compose" ${canCompose ? "" : "disabled"} aria-label="合成所选图层${canCompose ? "" : "（需先选择至少一层）"}">合成所选图层</button>
+  </div>`;
+}
+
+function statePanelHtml() {
+  if (STATE === "empty") {
+    return `
+    <div class="border border-ink-25 border-l-[3px] border-l-ink px-3 py-[11px] bg-paper-hi">
+      <strong class="block text-[13px] font-medium">尚无候选图层</strong>
+      <p class="mt-1 text-[12px] text-ink-60 leading-[1.65]">完成 AI 拆层后，候选图层会列在这里。候选不会自动合并，底图仅作坐标参考。</p>
+      <button type="button" class="${BTN.solid} mt-3" data-todo="generate" aria-label="生成候选（占位）">生成候选</button>
+    </div>`;
+  }
+  if (STATE === "loading") {
+    const skeleton = Array.from({ length: 4 }, () => `
+      <div class="border border-ink-25 bg-paper-hi">
+        <div class="aspect-[4/3] bg-paper-2 border-b border-ink-25"></div>
+        <div class="px-2 py-[6px] space-y-[6px]">
+          <div class="h-[12px] w-2/3 bg-paper-2"></div>
+          <div class="h-[10px] w-full bg-paper-2"></div>
+        </div>
+      </div>`).join("");
+    return `
+    <div class="flex items-center gap-[10px] px-1 py-2 text-[13px] text-ink-60" role="status">
+      <span class="w-[12px] h-[12px] flex-none border border-ink bg-paper-2" aria-hidden="true"></span><span>正在生成候选，请稍候…</span>
+    </div>
+    <div class="mt-2 grid grid-cols-1 wide:grid-cols-2 gap-2" aria-hidden="true">${skeleton}</div>`;
+  }
+  if (STATE === "error") {
+    return `
+    <div class="border border-ink bg-ink text-paper px-3 py-[10px]" role="alert">
+      <strong class="block text-[13px] font-semibold">候选生成失败</strong>
+      <p class="mt-1 text-[12px] leading-[1.6]">云端请求超时，结果不确定。已发出的请求可能仍在计费，页面不会自动重发。</p>
+    </div>
+    <button type="button" class="${BTN.line} mt-3" data-todo="retry" aria-label="重试生成候选（占位）">重试生成</button>
+    <p class="mt-2 text-[12px] text-ink-60 leading-[1.6]">重试前可先核对任务历史；也可用「改用本地流程」继续。</p>`;
+  }
+  return "";
+}
+
+function workspaceHtml() {
+  const hasGrid = STATE === "ready" || STATE === "selected";
+  let body = "";
+  if (hasGrid) {
+    const list = filteredCandidates();
+    body = `
+      <div class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden scroll-thin px-4 py-3">
+        <div class="mb-2">${filterBarHtml()}</div>
+        <div class="mb-2">${basemapHtml()}</div>
+        ${list.length
+          ? `<div class="grid grid-cols-1 wide:grid-cols-2 gap-2" role="group" aria-label="AI 候选图层">${list.map(cardHtml).join("")}</div>`
+          : `<p class="px-1 py-3 text-[12px] text-ink-60">当前筛选下没有候选图层。</p>`}
+        <p class="mt-2 text-[12px] text-ink-60 leading-[1.6]">AI 生成内容仅供挑选，几何与保真尚未核验；合成后才写入新版本。</p>
+      </div>
+      ${summaryHtml()}
+      ${decisionHtml()}`;
+  } else {
+    body = `<div class="flex-1 min-h-0 overflow-y-auto scroll-thin px-4 py-3">${statePanelHtml()}</div>`;
+    if (STATE === "empty" || STATE === "error") body += decisionHtml();
+  }
+  return pageHeaderHtml() + body;
+}
+
+function statusBarHtml() {
+  const meta = STATUS_META[STATE];
+  let line = meta.line;
+  if (STATE === "selected") {
+    const ids = MOCK.candidates.filter((c) => selectedIds.has(c.id)).map((c) => c.zIndex);
+    line = ids.length ? `已选 ${ids.length} 层（${ids.join("、")}）· 可合成` : "尚未选择图层";
+  }
+  if (STATE === "ready") {
+    line = selectedIds.size ? `已选 ${selectedIds.size} 层 · 可合成` : meta.line;
+  }
+  return `
+    <span class="flex-none text-[12px] tracking-widest text-ink-60">任务</span>
+    <span class="inline-flex items-center h-[20px] px-[7px] border text-[12px] tracking-wider ${meta.pillCls}" role="status" aria-live="polite">${meta.badge}</span>
+    <p class="min-w-0 flex-1 truncate text-[13px] text-ink-60" id="status-line">${esc(line)}</p>
+    <span class="flex-none text-[12px] text-ink-60 tabular-nums">阶段 04 / 07 · 候选</span>`;
+}
+
+function render() {
+  $("workspace").innerHTML = workspaceHtml();
+  $("status-bar").innerHTML = statusBarHtml();
+}
+
+/* ------------------------------------------------------------------
+ * 纯前端演示交互：选择 / 筛选 / 缩放。业务动作全部留空（TODO）。
+ * ------------------------------------------------------------------ */
+document.addEventListener("click", (event) => {
+  const toggle = event.target.closest("[data-toggle]");
+  if (toggle) {
+    const id = toggle.getAttribute("data-toggle");
+    if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id);
+    render();
+    return;
+  }
+  const filterBtn = event.target.closest("[data-filter]");
+  if (filterBtn) {
+    filterMode = filterBtn.getAttribute("data-filter");
+    render();
+    return;
+  }
+  const todo = event.target.closest("[data-todo]");
+  if (todo) {
+    // TODO(business): 接入真实业务动作（compose / reject / use-local / generate / retry）。
+    return;
+  }
+});
+
+$("zoom-in").addEventListener("click", () => {
+  if (zoomIndex < ZOOM_LEVELS.length - 1) { zoomIndex += 1; renderCanvasThumb(); }
+});
+$("zoom-out").addEventListener("click", () => {
+  if (zoomIndex > 0) { zoomIndex -= 1; renderCanvasThumb(); }
+});
+$("zoom-fit").addEventListener("click", () => { zoomIndex = 2; renderCanvasThumb(); });
+
+renderStageNav();
+renderVersionRail();
+renderCanvasThumb();
+render();
+</script>
+</body>
+</html>
