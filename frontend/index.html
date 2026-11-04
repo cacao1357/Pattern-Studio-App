@@ -806,14 +806,6 @@
 
               <ol class="steps" id="ai-steps"></ol>
               <p class="field-error" id="ai-pipeline-error" role="alert" hidden></p>
-              <div class="decision" id="ai-decision">
-                <span id="ai-selection-note">尚未选择图层</span>
-                <div class="decision-acts">
-                  <button class="btn btn-quiet btn-sm" id="ai-use-local" type="button">改用本地流程</button>
-                  <button class="btn btn-line btn-sm" id="ai-reject" type="button">拒绝候选</button>
-                  <button class="btn btn-solid btn-sm" id="ai-compose" type="button" disabled>合成所选图层</button>
-                </div>
-              </div>
               <div class="results" id="ai-result" hidden>
                 <p class="hint">流程结果已加入版本区，可继续预览、下载或设为当前输入。</p>
                 <div id="ai-result-list" class="results-list"></div>
@@ -836,13 +828,29 @@
             </div>
 
             <div class="candidates" id="ai-candidates" hidden>
-              <div class="section-head">
-                <h3>候选图层</h3>
-                <span class="chip chip-mark">AI 生成 · 几何未核验</span>
+              <div class="ai-candidate-head">
+                <div class="ai-candidate-title">
+                  <h3>候选图层</h3>
+                  <span class="chip" id="ai-candidate-count">0 个</span>
+                </div>
+                <div class="ai-filter" id="ai-filter" role="group" aria-label="筛选候选图层">
+                  <button class="ai-filter-btn is-active" type="button" data-ai-filter="all" aria-pressed="true">全部 <span id="ai-count-all">0</span></button>
+                  <button class="ai-filter-btn" type="button" data-ai-filter="selected" aria-pressed="false">已选 <span id="ai-count-selected">0</span></button>
+                  <button class="ai-filter-btn" type="button" data-ai-filter="review" aria-pressed="false">待复核 <span id="ai-count-review">0</span></button>
+                </div>
               </div>
               <p class="hint">底图仅参考，不可作为纹样图层；合成后按当前矢量参数生成可选 SVG。</p>
-              <div class="references" id="ai-reference-list"></div>
-              <div class="layers" id="ai-layer-list" role="group" aria-label="AI 候选图层"></div>
+              <div class="references ai-reference-list" id="ai-reference-list"></div>
+              <div class="layers ai-candidate-grid" id="ai-layer-list" role="group" aria-label="AI 候选图层"></div>
+              <p class="ai-candidate-empty" id="ai-candidate-empty" hidden>当前筛选下没有候选图层。</p>
+              <div class="decision ai-candidate-foot" id="ai-decision">
+                <span id="ai-selection-note">尚未选择图层</span>
+                <div class="decision-acts">
+                  <button class="btn btn-quiet btn-sm" id="ai-use-local" type="button">改用本地流程</button>
+                  <button class="btn btn-line btn-sm" id="ai-reject" type="button">拒绝候选</button>
+                  <button class="btn btn-solid btn-sm" id="ai-compose" type="button" disabled>合成所选图层</button>
+                </div>
+              </div>
             </div>
           </section>
 

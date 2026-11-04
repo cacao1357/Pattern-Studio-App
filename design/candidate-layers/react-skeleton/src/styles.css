@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ink: #1b2b54;
+  --paper: #edede7;
+  --paper-hi: #f6f6f1;
+  --paper-2: #e4e4dc;
+  --ink-85: #33406b;
+  --ink-60: #4f587b;
+  --ink-40: #838aa6;
+  --ink-25: #bfc2ce;
+  --ink-12: #dcdde3;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei UI", "Hiragino Sans GB", sans-serif;
+  font-size: 14px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+:where(button, a, input, select, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.checker {
+  background-color: var(--paper-hi);
+  background-image: repeating-conic-gradient(var(--ink-12) 0% 25%, var(--paper-hi) 0% 50%);
+  background-size: 16px 16px;
+}
+
+.scroll-thin::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--ink-25);
+  border: 2px solid var(--paper);
+}
+
+.scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -536,6 +536,12 @@ const dom = {
   aiCandidates: $("ai-candidates"),
   aiReferenceList: $("ai-reference-list"),
   aiLayerList: $("ai-layer-list"),
+  aiFilter: $("ai-filter"),
+  aiCandidateCount: $("ai-candidate-count"),
+  aiCountAll: $("ai-count-all"),
+  aiCountSelected: $("ai-count-selected"),
+  aiCountReview: $("ai-count-review"),
+  aiCandidateEmpty: $("ai-candidate-empty"),
   maskEmpty: $("mask-empty"),
   maskSetup: $("mask-setup"),
   maskPair: $("mask-pair"),
@@ -725,6 +731,7 @@ const state = {
     layers: null,
     layerKey: "",
     selectedLayerIds: new Set(),
+    filter: "all",
     layersLoading: false,
     pollTimer: null,
     pollFailures: 0,
@@ -5445,7 +5452,7 @@ function renderAiPipeline() {
   if (showDecision) {
     const count = state.ai.selectedLayerIds.size;
     setText(dom.aiSelectionNote, waiting
-      ? (count ? "已选 " + count + " 个候选图层" : "尚未选择图层；底图不参与合成")
+      ? aiSelectionSummaryText(aiCandidateLayers())
       : "AI 流程失败，可使用本地处理继续");
     setHidden(dom.aiCompose, failed);
     setText(dom.aiCompose, count ? "合成所选图层（" + count + "）" : "合成所选图层");
@@ -5792,6 +5799,57 @@ async function handleAiRerun(action) {
   }
 }
 
+function aiLayerAsset(layer) {
+  const placed = layer.placed_asset || layer.asset || null;
+  return placed ? state.assets.get(assetIdOf(placed)) || null : null;
+}
+
+function aiLayerWarnings(layer, asset) {
+  const source = layer && layer.asset && typeof layer.asset === "object" ? layer.asset : null;
+  const metrics = (source && source.quality_metrics && typeof source.quality_metrics === "object")
+    ? source.quality_metrics
+    : (asset && asset.quality_metrics && typeof asset.quality_metrics === "object" ? asset.quality_metrics : null);
+  return metrics && Array.isArray(metrics.warnings) ? metrics.warnings.slice() : [];
+}
+
+function aiCandidateLayers() {
+  const layers = state.ai.layers && Array.isArray(state.ai.layers.layers)
+    ? state.ai.layers.layers.slice()
+    : [];
+  layers.sort((a, b) => Number(a.z_index || 0) - Number(b.z_index || 0));
+  return layers;
+}
+
+function aiFilterCounts(layers) {
+  return {
+    all: layers.length,
+    selected: layers.filter((layer) => state.ai.selectedLayerIds.has(String(layer.layer_id || ""))).length,
+    review: layers.filter((layer) => aiLayerWarnings(layer, aiLayerAsset(layer)).length > 0).length
+  };
+}
+
+function aiSelectionSummaryText(layers) {
+  const count = state.ai.selectedLayerIds.size;
+  if (!count) return "尚未选择图层；底图不参与合成";
+  const selectedZ = layers
+    .filter((layer) => state.ai.selectedLayerIds.has(String(layer.layer_id || "")))
+    .map((layer) => Number(layer.z_index || 0));
+  return "已选 " + count + " / " + layers.length + " 层 · 图层 " + selectedZ.join("、");
+}
+
+function updateAiFilterCounts(layers) {
+  const counts = aiFilterCounts(layers);
+  setText(dom.aiCountAll, counts.all);
+  setText(dom.aiCountSelected, counts.selected);
+  setText(dom.aiCountReview, counts.review);
+  setText(dom.aiCandidateCount, counts.all + " 个");
+  for (const button of dom.aiFilter.querySelectorAll("[data-ai-filter]")) {
+    const active = button.dataset.aiFilter === state.ai.filter;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+}
+
 function renderAiCandidates() {
   const pipeline = state.ai.pipeline;
   const data = state.ai.layers;
@@ -5801,26 +5859,36 @@ function renderAiCandidates() {
   if (!visible) {
     dom.aiReferenceList.replaceChildren();
     dom.aiLayerList.replaceChildren();
+    setHidden(dom.aiCandidateEmpty, true);
     return;
   }
 
+  const layers = aiCandidateLayers();
+  if (!["all", "selected", "review"].includes(state.ai.filter)) state.ai.filter = "all";
+  updateAiFilterCounts(layers);
+
   dom.aiReferenceList.replaceChildren();
   const inputAsset = pipeline.input_asset_id ? state.assets.get(String(pipeline.input_asset_id)) : null;
-  dom.aiReferenceList.append(buildAiReferenceCard("原输入", "用于本次拆层", inputAsset));
+  dom.aiReferenceList.append(buildAiReferenceCard("原输入", "用于本次拆层 · 规范输入", inputAsset));
   const basemapRaw = data.basemap || null;
   const basemap = basemapRaw ? state.assets.get(assetIdOf(basemapRaw)) || null : null;
   dom.aiReferenceList.append(buildAiReferenceCard("底图", "仅参考，不参与合成", basemap, true));
 
+  const filtered = layers.filter((layer) => {
+    if (state.ai.filter === "selected") return state.ai.selectedLayerIds.has(String(layer.layer_id || ""));
+    if (state.ai.filter === "review") return aiLayerWarnings(layer, aiLayerAsset(layer)).length > 0;
+    return true;
+  });
+
   dom.aiLayerList.replaceChildren();
-  const layers = Array.isArray(data.layers) ? data.layers.slice() : [];
-  layers.sort((a, b) => Number(a.z_index || 0) - Number(b.z_index || 0));
-  if (!layers.length) {
-    const empty = element("p", "mini-empty", "这次拆层没有返回可选图层。可以拒绝候选或改用本地流程。");
-    dom.aiLayerList.append(empty);
+  setHidden(dom.aiCandidateEmpty, filtered.length > 0);
+  if (!filtered.length) {
+    setText(dom.aiCandidateEmpty, layers.length
+      ? "当前筛选下没有候选图层。"
+      : "这次拆层没有返回可选图层。可以拒绝候选或改用本地流程。");
   }
-  for (const layer of layers) {
-    const placed = layer.placed_asset || layer.asset || null;
-    const asset = placed ? state.assets.get(assetIdOf(placed)) : null;
+  for (const layer of filtered) {
+    const asset = aiLayerAsset(layer);
     if (asset) dom.aiLayerList.append(buildAiLayerCard(layer, asset));
   }
 }
@@ -5840,7 +5908,7 @@ function buildAiReferenceCard(label, description, asset, reference) {
 
   const copy = element("div", "ai-reference-copy");
   copy.append(element("strong", "", label));
-  copy.append(element("small", "", description + " · " + assetDisplayName(asset)));
+  copy.append(element("small", "", description));
   if (assetIsAi(asset)) copy.append(element("small", "ai-inline-note", "AI 生成 · 几何未核验"));
   card.append(copy);
 
@@ -5869,52 +5937,73 @@ function buildAiLayerCard(layer, asset) {
   const selected = state.ai.selectedLayerIds.has(layerId);
   const pipeline = state.ai.pipeline;
   const selectable = aiLayerSelectionAvailable(pipeline);
+  const zIndex = Number(layer.z_index || 0);
+  const warnings = aiLayerWarnings(layer, asset);
+  const warningText = warnings.map((code) => PATTERN_WARNING_LABELS[code] || code).join("；");
   const card = element("article", "ai-layer-card" + (selected ? " is-selected" : ""));
+
   const visual = element("div", "ai-layer-visual");
   const image = element("img");
-  const zIndex = Number(layer.z_index || 0);
-  image.alt = "候选图层 " + (zIndex);
+  image.alt = "候选图层 " + zIndex;
+  loadThumb(image, asset);
   visual.append(image);
   visual.append(element("span", "ai-layer-badge", "AI 候选"));
-  visual.append(element("span", "ai-layer-index", "层级 " + (zIndex)));
-  loadThumb(image, asset);
-  card.append(visual);
+  visual.append(element("span", "ai-layer-index", "层级 " + zIndex));
 
-  const copy = element("div", "ai-layer-copy");
-  const label = element("label", "ai-layer-check");
+  const selectLabel = element("label", "ai-layer-select");
   const checkbox = element("input");
   checkbox.type = "checkbox";
   checkbox.checked = selected;
   checkbox.disabled = !selectable;
   checkbox.dataset.aiLayerId = layerId;
-  checkbox.setAttribute("aria-label", "选择候选图层 " + (zIndex));
+  checkbox.setAttribute("aria-label", "选择候选图层 " + zIndex);
+  const check = element("span", "ai-layer-check");
+  check.append(icon("check"));
+  selectLabel.append(checkbox, check);
+  visual.append(selectLabel);
+  visual.addEventListener("click", (event) => {
+    if (!selectable || event.target.closest(".ai-layer-select")) return;
+    checkbox.click();
+  });
   checkbox.addEventListener("change", () => {
     if (checkbox.checked) state.ai.selectedLayerIds.add(layerId);
     else state.ai.selectedLayerIds.delete(layerId);
     card.classList.toggle("is-selected", checkbox.checked);
     updateAiSelectionActions();
+    if (state.ai.filter === "selected" && !checkbox.checked) renderAiCandidates();
   });
-  label.append(checkbox);
-  label.append(element("strong", "", "候选图层 " + (zIndex)));
-  copy.append(label);
+  card.append(visual);
+
+  const copy = element("div", "ai-layer-copy");
+  copy.append(element("strong", "ai-layer-title", "候选图层 " + zIndex));
   const meta = [];
   if (assetWidth(asset) && assetHeight(asset)) meta.push(formatDimensions(assetWidth(asset), assetHeight(asset)));
-  meta.push("几何未核验");
-  copy.append(element("small", "", meta.join(" · ")));
+  copy.append(element("small", "", meta.length ? meta.join(" · ") : "尺寸待读取"));
+
+  const badges = element("div", "ai-layer-badges");
+  if (!assetGeometryVerified(asset)) {
+    badges.append(element("span", "ai-layer-tag is-muted", "几何未核验"));
+  }
+  if (warnings.length) {
+    const warning = element("span", "ai-layer-tag is-warn", "候选存疑");
+    warning.title = warningText;
+    badges.append(warning);
+  }
+  if (badges.childNodes.length) copy.append(badges);
+  if (warnings.length) copy.append(element("p", "ai-layer-warning", warningText));
 
   const actions = element("div", "ai-layer-actions");
-  actions.append(element("span", "", "AI 生成"));
   const view = element("button", "icon-button");
   view.type = "button";
   view.title = "查看候选图层";
-  view.setAttribute("aria-label", "查看候选图层 " + (zIndex));
+  view.setAttribute("aria-label", "查看候选图层 " + zIndex);
   view.append(icon("eye"));
   view.addEventListener("click", () => openAssetPreview(asset, "AI 候选层"));
   actions.append(view);
   const download = element("button", "icon-button");
   download.type = "button";
   download.title = "下载候选图层";
-  download.setAttribute("aria-label", "下载候选图层 " + (zIndex));
+  download.setAttribute("aria-label", "下载候选图层 " + zIndex);
   download.append(icon("download"));
   download.addEventListener("click", () => void downloadAsset(asset, download));
   actions.append(download);
@@ -5938,10 +6027,12 @@ function loadThumb(image, asset) {
 function updateAiSelectionActions() {
   const pipeline = state.ai.pipeline;
   const selectable = aiLayerSelectionAvailable(pipeline);
+  const layers = aiCandidateLayers();
   const count = state.ai.selectedLayerIds.size;
-  setText(dom.aiSelectionNote, count
-    ? "已选 " + count + " 个候选图层"
-    : (selectable ? "尚未选择图层；底图不参与合成" : "当前候选不可选择"));
+  setText(dom.aiSelectionNote, selectable
+    ? aiSelectionSummaryText(layers)
+    : "当前候选不可选择");
+  updateAiFilterCounts(layers);
   setButtonLabel(dom.aiCompose, count ? "合成所选图层（" + count + "）" : "合成所选图层");
   renderAiRerun();
   updateActionState();
@@ -6210,6 +6301,7 @@ function resetAiState() {
   state.ai.layers = null;
   state.ai.layerKey = "";
   state.ai.selectedLayerIds.clear();
+  state.ai.filter = "all";
   state.ai.layersLoading = false;
   state.ai.pollTimer = null;
   state.ai.pollFailures = 0;
@@ -10172,6 +10264,14 @@ function wireEvents() {
   dom.aiCompose.addEventListener("click", () => void continueAi("select_layers"));
   dom.aiUseLocal.addEventListener("click", () => void continueAi("use_local"));
   dom.aiReject.addEventListener("click", () => void continueAi("reject"));
+  dom.aiFilter.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-ai-filter]");
+    if (!button) return;
+    const next = button.dataset.aiFilter;
+    if (!["all", "selected", "review"].includes(next) || next === state.ai.filter) return;
+    state.ai.filter = next;
+    renderAiCandidates();
+  });
   dom.aiRefreshPipeline.addEventListener("click", () => void refreshAiPipelineNow(false));
   dom.aiRerunInput.addEventListener("change", () => {
     state.ai.rerunAssetId = dom.aiRerunInput.value;

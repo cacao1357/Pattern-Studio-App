@@ -1,4 +1,4 @@
-/* =============================================================================
+﻿/* =============================================================================
    Pattern Studio — 双色工作台
    两种墨：靛蓝(--ink) 与 生白(--paper)。所有深浅都是同一支靛蓝的网点浓度。
    层级只由三样东西建立：墨浓度、线的粗细、字号。
@@ -4186,4 +4186,235 @@ input[type="range"]::-webkit-slider-thumb {
   grid-row: 2;
   justify-content: flex-end;
   flex-wrap: wrap;
+}
+
+/* ---- 04 候选：网格选择（设计参考：design/candidate-layers） ---- */
+.ai-candidate-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ai-candidate-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ai-candidate-title h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--t-h);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+}
+
+.ai-filter {
+  display: flex;
+  border: 1px solid var(--ink-25);
+  background: var(--paper-hi);
+}
+
+.ai-filter-btn {
+  flex: 1 1 0;
+  min-height: 28px;
+  padding: 0 4px;
+  border: 0;
+  border-left: 1px solid var(--ink-25);
+  background: transparent;
+  color: var(--ink-60);
+  font-family: var(--font-ui);
+  font-size: var(--t-micro);
+  cursor: pointer;
+  transition: background-color 120ms linear, color 120ms linear;
+}
+
+.ai-filter-btn:first-child {
+  border-left: 0;
+}
+
+.ai-filter-btn:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
+.ai-filter-btn.is-active {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.ai-filter-btn span {
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-candidate-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+@media (min-width: 1181px) {
+  .ai-candidate-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.ai-layer-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0;
+  border: 1px solid var(--ink-25);
+  background: var(--paper-hi);
+}
+
+.ai-layer-card.is-selected {
+  border-color: var(--ink);
+  border-left-width: 3px;
+  background-color: var(--paper-2);
+}
+
+.ai-layer-card .ai-layer-visual {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border: 0;
+  border-bottom: 1px solid var(--ink-25);
+  background-color: var(--paper);
+}
+
+.ai-layer-card.is-selected .ai-layer-visual {
+  border-bottom-color: var(--ink);
+}
+
+.ai-layer-select {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  width: 18px;
+  height: 18px;
+}
+
+.ai-layer-select input {
+  position: absolute;
+  inset: 0;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.ai-layer-select input:disabled {
+  cursor: not-allowed;
+}
+
+.ai-layer-select .ai-layer-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--ink);
+  background: var(--paper-hi);
+  color: transparent;
+}
+
+.ai-layer-select input:checked + .ai-layer-check {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.ai-layer-select input:focus-visible + .ai-layer-check {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.ai-layer-check .icon {
+  width: 12px;
+  height: 12px;
+}
+
+.ai-layer-copy {
+  gap: 3px;
+  padding: 6px 8px 7px;
+}
+
+.ai-layer-title {
+  overflow: hidden;
+  font-size: var(--t-small);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-layer-copy small {
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.ai-layer-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.ai-layer-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 17px;
+  padding: 0 4px;
+  border: 1px solid var(--ink-25);
+  color: var(--ink-60);
+  font-size: 10.5px;
+  line-height: 1;
+}
+
+.ai-layer-tag.is-warn {
+  border-color: var(--ink);
+  border-left-width: 2px;
+  background: var(--paper-2);
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.ai-layer-warning {
+  margin: 1px 0 0;
+  padding-left: 6px;
+  border-left: 3px solid var(--ink);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.ai-layer-actions {
+  justify-content: flex-end;
+  margin-top: auto;
+  padding-top: 2px;
+}
+
+.ai-candidate-empty {
+  margin: 8px 0 0;
+  color: var(--ink-60);
+  font-size: var(--t-micro);
+  line-height: 1.6;
+}
+
+.ai-candidate-foot {
+  margin-top: 10px;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--ink);
+  background: var(--paper);
+}
+
+.ai-candidate-foot .decision-acts {
+  margin-top: 4px;
+}
+
+.ai-reference-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
