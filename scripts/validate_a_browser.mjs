@@ -116,6 +116,44 @@ try {
   await call("Emulation.clearDeviceMetricsOverride");
   await click("settings-close");
 
+  // Exercise failed workflows before the ordinary successful workflow. Only
+  // fixture responses are altered; no failed state or cloud request is persisted.
+  const fixtureFlow = await evaluate(`fetch('/api/v1/pipelines/${info.pipeline_id}').then(r=>r.json())`);
+  for (const failure of ["no-decomposition", "layers-unavailable"]) {
+    await evaluate(`(() => {
+      const originalFetch = window.fetch.bind(window);
+      window.fetch = async (input, options) => {
+        const pathname = new URL(typeof input === 'string' ? input : input.url, location.href).pathname;
+        if (pathname === '/api/v1/jobs/${fixtureFlow.decomposition_job_id}/layers') {
+          window.fixtureLayersFailed = true;
+          return new Response(JSON.stringify({error:{code:'FIXTURE_LAYERS_UNAVAILABLE',message:'fixture layers unavailable'}}),
+            {status:503,headers:{'Content-Type':'application/json'}});
+        }
+        const response = await originalFetch(input, options);
+        if (pathname !== '/api/v1/pipelines/${info.pipeline_id}') return response;
+        const data = await response.json();
+        data.state = 'failed'; data.decision = null;
+        data.error = {code:'FIXTURE_FAILURE',message:'fixture workflow failed'};
+        data.recovery = {...data.recovery,can_compose:${failure === "layers-unavailable"}};
+        if (${failure === "no-decomposition"}) data.decomposition_job_id = null;
+        return new Response(JSON.stringify(data), {status:200,headers:{'Content-Type':'application/json'}});
+      };
+    })()`);
+    await click("open-history");
+    await waitFor("document.querySelectorAll('[data-history-action]').length > 0", "failure history loaded");
+    await evaluate(`Array.from(document.querySelectorAll('[data-history-action]')).find(e=>e.dataset.jobId===${JSON.stringify(fixtureFlow.decomposition_job_id)} && e.dataset.historyAction==='restore').click()`);
+    await waitFor("document.getElementById('ai-pipeline-error').textContent.includes('fixture workflow failed')", "failed workflow restored");
+    if (failure === "layers-unavailable") await waitFor("window.fixtureLayersFailed", "candidate layer failure received");
+    await evaluate("document.querySelector('.rail-step[data-stage=\"4\"]').click()");
+    const recovery = await evaluate("(() => {const e=document.getElementById('ai-use-local');return {visible:e.getClientRects().length>0 && !e.closest('[hidden]'),enabled:!e.disabled,candidatesHidden:document.getElementById('ai-candidates').hidden};})()");
+    assert.equal(recovery.candidatesHidden, true);
+    assert.equal(recovery.visible, true, `local recovery hidden after ${failure}`);
+    assert.equal(recovery.enabled, true, `local recovery disabled after ${failure}`);
+    check(`failed workflow retains local recovery: ${failure}`);
+    await call("Page.reload");
+    await waitFor("document.getElementById('health-chip')?.classList.contains('is-ok')", "application reloaded");
+  }
+
   // Load the fixture workflow via the application's ordinary history action.
   await click("open-history");
   await waitFor("document.querySelectorAll('[data-history-action]').length > 0", "history loaded");
