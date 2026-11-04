@@ -140,7 +140,7 @@ def _contour_vectorize(pixels: np.ndarray, options: VectorOptions, limits: Resou
     })
     group = ET.SubElement(root, f"{{{SVG_NS}}}g", {"fill": "#1B2B54", "fill-rule": "evenodd"})
     for path in paths:
-        ET.SubElement(group, f"{{{SVG_NS}}}path", {"d": path["d"]})
+        ET.SubElement(group, f"{{{SVG_NS}}}path", path)
     svg = ET.tostring(root, encoding="unicode")
     metadata = validate_svg(svg, (mask.shape[1], mask.shape[0]), limits=limits)
     metadata.update({

@@ -1,8 +1,11 @@
+import xml.etree.ElementTree as ET
+
 import pytest
 from PIL import Image, ImageDraw
 
 from app.schemas.contracts import ProcessingError, VectorOptions
 from app.services.vector import vectorize
+from app.services.svg_edit import recolor_svg
 
 
 def ring_image():
@@ -22,6 +25,12 @@ def test_contour_vectorize_preserves_holes_and_validates_svg():
     assert 'fill-rule="evenodd"' in result.svg
     assert 'fill="#1B2B54"' in result.svg
     assert result.metadata["fill_policy"] == "solid_ink"
+    assert result.metadata["svg_fill_colors"] == ["#1B2B54"]
+    edited, metadata = recolor_svg(result.svg, (200, 200), {"#1B2B54": "#D02040"})
+    assert metadata["svg_fill_colors"] == ["#d02040"]
+    assert [node.get("d") for node in ET.fromstring(result.svg).iter() if node.get("d")] == [
+        node.get("d") for node in ET.fromstring(edited).iter() if node.get("d")
+    ]
 
 
 def test_contour_vectorize_rejects_empty_alpha():

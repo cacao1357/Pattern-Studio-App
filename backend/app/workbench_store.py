@@ -311,7 +311,7 @@ class WorkbenchStore(Store):
         """Aggregate the same rows used by the CSV manifest; no pixel work here."""
         rows = self.dataset_rows()
         total = len(rows)
-        grades = Counter((row["grade"] or "missing").upper() for row in rows)
+        grades = Counter(row["grade"].upper() if row["grade"] else "missing" for row in rows)
         splits = Counter(row["split"] or "unassigned" for row in rows)
         licenses = [row["license"] for row in rows]
         confirmed = sum(1 for value in licenses if value not in ("", "未确认"))

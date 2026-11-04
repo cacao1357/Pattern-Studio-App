@@ -157,4 +157,11 @@ def test_local_rerun_preview_download_recolor_and_zip(tmp_path):
             assert len(manifest['selected_assets']) == 3
             for asset in (a,b,edited):
                 assert z.read(asset['asset_id']+'.svg') == store.read_asset(asset['asset_id'])[1]
+
+        contour = run('jobs/vectorize', {'input_asset_id': source['asset_id'], 'mode': 'contour'})
+        assert contour['algorithm_version'] == contour['parameters']['adapter_version'] == 'contour-evenodd-v1'
+        assert contour['parameters']['svg_fill_colors'] == ['#1B2B54']
+        contour_edit = run('jobs/recolor-svg', {
+            'input_asset_id': contour['asset_id'], 'mapping': {'#1B2B54': '#D02040'}})
+        assert contour_edit['parameters']['svg_fill_colors'] == ['#d02040']
         assert calls == []

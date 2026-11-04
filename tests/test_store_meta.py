@@ -88,6 +88,10 @@ def test_old_image_without_meta_is_readable(tmp_path):
     assert old["original"]["asset_id"] == record["original"]["asset_id"]
     missing = store.images_without_meta()
     assert any(row["id"] == record["image_id"] for row in missing)
+    audit = store.dataset_audit()
+    assert audit["total_images"] == audit["missing_meta"] == 1
+    assert audit["grades"]["missing"] == 1
+    assert sum(audit["grades"].values()) == audit["total_images"]
 
 
 def test_idempotent_upload_returns_same_image(tmp_path):
