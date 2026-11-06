@@ -657,6 +657,10 @@ const dom = {
 };
 
 const state = {
+  view: "workspace",
+  datasetAudit: null,
+  datasetAuditLoading: false,
+  libraryQuery: "",
   health: null,
   healthError: "",
   healthBusy: false,
@@ -1784,6 +1788,224 @@ function renderVersions() {
     dom.versionList.append(item);
   }
   updateSelectionBar();
+  renderSidebarContext();
+  if (state.view === "dashboard") renderDashboard();
+  if (state.view === "library") renderLibrary();
+}
+
+const VIEW_LABELS = {
+  dashboard: ["工作台", "概览"],
+  library: ["纹样库", "全部版本"],
+  workspace: ["工作台", "图像处理"]
+};
+
+const STAGE_LABELS = {
+  "1": "来源", "2": "裁切", "3": "处理", "4": "候选",
+  "5": "蒙版", "6": "修复", "7": "平铺"
+};
+
+function openWorkspace(stage) {
+  setView("workspace");
+  if (stage) __psShell.setStage(String(stage), true);
+}
+
+function openUploadPicker() {
+  openWorkspace(1);
+  const input = $("image-file");
+  if (input) input.click();
+}
+
+function setView(view) {
+  const next = ["dashboard", "library", "workspace"].includes(view) ? view : "workspace";
+  state.view = next;
+  $("app-view")?.classList.toggle("is-workspace", next === "workspace");
+  for (const name of ["dashboard", "library", "workspace"]) {
+    const node = $("view-" + name);
+    if (node) node.hidden = name !== next;
+  }
+  const activeView = $("view-" + next);
+  if (activeView) {
+    activeView.classList.remove("view-enter");
+    void activeView.offsetWidth;
+    activeView.classList.add("view-enter");
+  }
+  document.querySelectorAll(".side-nav-item[data-view]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.view === next);
+  });
+  const labels = VIEW_LABELS[next] || VIEW_LABELS.workspace;
+  setText($("breadcrumb-root"), labels[0]);
+  setText($("breadcrumb-current"), labels[1]);
+  if (next === "dashboard") renderDashboard();
+  if (next === "library") renderLibrary();
+  renderSidebarContext();
+}
+
+function renderSidebarContext() {
+  const count = state.versionIds.length;
+  setText($("side-version-count"), String(count));
+  setText($("side-library-count"), String(count));
+  const asset = currentAsset() || (state.previewId ? state.assets.get(state.previewId) : null);
+  if (asset) {
+    setText($("side-current-name"), assetDisplayName(asset));
+    const stage = document.documentElement.getAttribute("data-stage") || "1";
+    const dims = assetWidth(asset) && assetHeight(asset)
+      ? formatDimensions(assetWidth(asset), assetHeight(asset))
+      : "尺寸待读取";
+    setText($("side-current-meta"), (STAGE_LABELS[stage] || "处理") + " · " + dims);
+  } else {
+    setText($("side-current-name"), "尚未载入图像");
+    setText($("side-current-meta"), "打开工作区开始");
+  }
+  const labels = VIEW_LABELS[state.view] || VIEW_LABELS.workspace;
+  setText($("breadcrumb-root"), labels[0]);
+  setText($("breadcrumb-current"), labels[1]);
+}
+
+function ensureDatasetAudit() {
+  if (state.datasetAudit || state.datasetAuditLoading) return;
+  state.datasetAuditLoading = true;
+  requestJson("/datasets/audit").then((result) => {
+    state.datasetAudit = result && result.data ? result.data : null;
+  }).catch(() => {
+    state.datasetAudit = null;
+  }).finally(() => {
+    state.datasetAuditLoading = false;
+    if (state.view === "dashboard") renderDashboardStats();
+  });
+}
+
+function renderDashboardStats() {
+  setText($("dashboard-version-count"), String(state.versionIds.length));
+  const asset = currentAsset() || (state.previewId ? state.assets.get(state.previewId) : null);
+  if (asset) {
+    setText($("dashboard-current"), assetDisplayName(asset));
+    const stage = document.documentElement.getAttribute("data-stage") || "1";
+    const dims = assetWidth(asset) && assetHeight(asset)
+      ? formatDimensions(assetWidth(asset), assetHeight(asset))
+      : "尺寸待读取";
+    setText($("dashboard-current-meta"), (STAGE_LABELS[stage] || "处理") + " · " + dims);
+  } else {
+    setText($("dashboard-current"), "未开始");
+    setText($("dashboard-current-meta"), "等待载入纹样");
+  }
+  setText($("dashboard-task-count"), String(state.history.items.length));
+  const audit = state.datasetAudit;
+  setText($("dashboard-dataset-count"), audit && Number.isFinite(Number(audit.total_images))
+    ? String(audit.total_images)
+    : "—");
+}
+
+function renderDashboardRecent() {
+  const container = $("dashboard-recent");
+  if (!container) return;
+  const ids = state.versionIds.filter((id) => state.assets.has(id)).slice(0, 4);
+  container.replaceChildren();
+  setHidden($("dashboard-empty"), ids.length > 0);
+  for (const id of ids) {
+    const asset = state.assets.get(id);
+    if (!asset) continue;
+    const item = element("button", "dashboard-item");
+    item.type = "button";
+    const thumb = element("span", "dashboard-thumb");
+    if (assetIsPreviewable(asset)) {
+      const image = element("img");
+      image.alt = "";
+      loadThumb(image, asset);
+      thumb.append(image);
+    } else {
+      thumb.append(icon("image"));
+    }
+    const copy = element("span", "dashboard-item-copy");
+    copy.append(element("strong", "", assetDisplayName(asset)));
+    const meta = [];
+    if (assetWidth(asset) && assetHeight(asset)) meta.push(formatDimensions(assetWidth(asset), assetHeight(asset)));
+    meta.push("#" + shortId(id));
+    copy.append(element("small", "", meta.join(" · ")));
+    item.append(thumb, copy, icon("arrow"));
+    item.addEventListener("click", () => openAssetPreview(asset, "最近版本"));
+    container.append(item);
+  }
+}
+
+function renderDashboard() {
+  renderDashboardStats();
+  renderDashboardRecent();
+  renderSidebarContext();
+  ensureDatasetAudit();
+}
+
+function libraryMatches(asset) {
+  const query = state.libraryQuery.trim().toLowerCase();
+  if (!query) return true;
+  const haystack = [
+    assetDisplayName(asset), asset.kind || "", asset.asset_id || "",
+    asset.grade || "", asset.source_name || ""
+  ].join(" ").toLowerCase();
+  return haystack.includes(query);
+}
+
+function renderLibrary() {
+  const grid = $("library-grid");
+  if (!grid) return;
+  const query = state.libraryQuery;
+  const allIds = state.versionIds.filter((id) => state.assets.has(id));
+  const ids = allIds.filter((id) => libraryMatches(state.assets.get(id)));
+  grid.replaceChildren();
+  setHidden($("library-empty"), allIds.length > 0);
+  const countText = query
+    ? ids.length + " / " + allIds.length + " 个版本"
+    : allIds.length + " 个版本";
+  setText($("library-count"), countText);
+  if (!ids.length && allIds.length) {
+    const empty = element("div", "empty-state library-empty");
+    empty.append(icon("search"), element("strong", "", "没有匹配的版本"),
+      element("p", "", "换一个名称、类型或编号试试。"));
+    grid.append(empty);
+    return;
+  }
+  for (const id of ids) {
+    const asset = state.assets.get(id);
+    if (!asset) continue;
+    const card = element("article", "library-card");
+    const thumb = element("div", "library-thumb");
+    if (assetIsPreviewable(asset)) {
+      const image = element("img");
+      image.alt = "";
+      loadThumb(image, asset);
+      thumb.append(image);
+    } else {
+      thumb.append(icon(assetIsArchive(asset) ? "zip" : "image"));
+    }
+    thumb.append(element("span", "library-badge", KIND_LABELS[normalizeKind(asset.kind)] || "版本"));
+    const copy = element("div", "library-copy");
+    copy.append(element("strong", "", assetDisplayName(asset)));
+    const meta = [];
+    if (assetWidth(asset) && assetHeight(asset)) meta.push(formatDimensions(assetWidth(asset), assetHeight(asset)));
+    if (asset.grade) meta.push(asset.grade + " 级");
+    meta.push("#" + shortId(id));
+    copy.append(element("small", "", meta.join(" · ")));
+    const actions = element("div", "library-actions");
+    const preview = element("button", "btn btn-line btn-xs", "查看");
+    preview.type = "button";
+    preview.dataset.libraryAction = "preview";
+    preview.dataset.assetId = id;
+    actions.append(preview);
+    if (assetIsInputCapable(asset)) {
+      const use = element("button", "btn btn-line btn-xs", "设为输入");
+      use.type = "button";
+      use.dataset.libraryAction = "input";
+      use.dataset.assetId = id;
+      actions.append(use);
+    }
+    const download = element("button", "btn btn-line btn-xs", "下载");
+    download.type = "button";
+    download.dataset.libraryAction = "download";
+    download.dataset.assetId = id;
+    actions.append(download);
+    copy.append(actions);
+    card.append(thumb, copy);
+    grid.append(card);
+  }
 }
 
 function renderSelectionClasses() {
@@ -1824,6 +2046,7 @@ function clearSelection() {
 /* -------------------------------------------------------------------------- */
 
 function renderCurrentInfo() {
+  renderSidebarContext();
   const asset = currentAsset();
   setHidden(dom.sourceState, !asset);
   if (!asset) {
@@ -9195,6 +9418,7 @@ function renderHistory() {
         : "尚无任务"
   );
   setDisabled(dom.refreshHistory, history.loading);
+  renderDashboardStats();
   dom.historyList.replaceChildren();
 
   if (history.loading && !history.items.length) {
@@ -9469,6 +9693,7 @@ async function restoreJob(jobId) {
   state.paramsRevision = 1;
   resetEditHistory();
   renderAll();
+  setView("workspace");
   renderFeedback();
   if (state.previewId) await loadPreview();
   if (isJobActive(latest)) {
@@ -9669,6 +9894,9 @@ function renderAll() {
   renderPendingBanner();
   updateComposeSummary();
   updateActionState();
+  renderSidebarContext();
+  if (state.view === "dashboard") renderDashboard();
+  if (state.view === "library") renderLibrary();
 }
 
 function assignFeedbackJob(jobId) {
@@ -10113,6 +10341,39 @@ function showToast(message, tone, duration) {
 
 function wireEvents() {
   dom.healthChip.addEventListener("click", () => void refreshHealth(false));
+  document.querySelectorAll("[data-view]").forEach((button) => {
+    button.addEventListener("click", () => setView(button.dataset.view));
+  });
+  $("side-dataset")?.addEventListener("click", openDatasetDialog);
+  $("side-history")?.addEventListener("click", openHistory);
+  $("side-settings")?.addEventListener("click", openSettingsDialog);
+  $("side-open-workspace")?.addEventListener("click", () => openWorkspace());
+  for (const id of ["quick-upload", "dashboard-upload", "library-upload", "dashboard-empty-upload", "library-empty-upload"]) {
+    $(id)?.addEventListener("click", openUploadPicker);
+  }
+  $("dashboard-open-workspace")?.addEventListener("click", () => openWorkspace());
+  $("dashboard-flow-open")?.addEventListener("click", () => openWorkspace());
+  $("library-open-workspace")?.addEventListener("click", () => openWorkspace());
+  $("dashboard-dataset")?.addEventListener("click", openDatasetDialog);
+  $("dashboard-history")?.addEventListener("click", openHistory);
+  $("library-search")?.addEventListener("input", (event) => {
+    state.libraryQuery = event.target.value || "";
+    renderLibrary();
+  });
+  $("library-grid")?.addEventListener("click", async (event) => {
+    const button = event.target.closest("button[data-library-action]");
+    if (!button) return;
+    const asset = state.assets.get(button.dataset.assetId);
+    if (!asset) return;
+    if (button.dataset.libraryAction === "preview") {
+      openAssetPreview(asset, "纹样库");
+    } else if (button.dataset.libraryAction === "input") {
+      await setPreview(asset.asset_id, { makeCurrent: true });
+      openWorkspace(1);
+    } else if (button.dataset.libraryAction === "download") {
+      await downloadAsset(asset, button);
+    }
+  });
   dom.duplicateUse.addEventListener("click", () => void useExistingDuplicate());
   dom.duplicateDismiss.addEventListener("click", () => {
     state.uploadDuplicates = [];

@@ -191,6 +191,14 @@ def mount_workbench(app, current_store, current_service, current_worker):
     def styles():
         return static_response("styles.css", "text/css")
 
+    @app.api_route("/theme-saas.css", methods=["GET", "HEAD"], include_in_schema=False)
+    def saas_styles():
+        return static_response("theme-saas.css", "text/css")
+
+    @app.api_route("/assets/logo.svg", methods=["GET", "HEAD"], include_in_schema=False)
+    def brand_logo():
+        return static_response("assets/logo.svg", "image/svg+xml")
+
     @app.api_route("/favicon.svg", methods=["GET", "HEAD"], include_in_schema=False)
     def favicon():
         return static_response("favicon.svg", "image/svg+xml")

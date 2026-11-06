@@ -4,11 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light">
-  <meta name="theme-color" content="#EDEDE7">
+  <meta name="theme-color" content="#F7F8FC">
   <meta name="description" content="Pattern Studio 本地纹样工作台：上传、框选、本地提取、AI 候选选择、蒙版修正、局部修复确认与手动平铺。">
   <title>本地纹样工作台 · Pattern Studio</title>
   <link rel="icon" type="image/svg+xml" href="./favicon.svg">
   <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./theme-saas.css">
   <script type="module" src="./workbench.js"></script>
 </head>
 <body>
@@ -45,6 +46,10 @@
     </symbol>
     <symbol id="i-refresh" viewBox="0 0 24 24">
       <path d="M19.5 9.5A8 8 0 1 0 20 14M19.5 4.8v4.7h-4.7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-search" viewBox="0 0 24 24">
+      <circle cx="10.8" cy="10.8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <path d="m15.5 15.5 4 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
     </symbol>
     <symbol id="i-download" viewBox="0 0 24 24">
       <path d="M12 4.5v11M7.8 11.2 12 15.5l4.2-4.3M5 16.5v1.8a2.2 2.2 0 0 0 2.2 2.2h9.6a2.2 2.2 0 0 0 2.2-2.2v-1.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
@@ -97,56 +102,239 @@
     </symbol>
   </svg>
 
-  <div class="app-view" id="app-view">
-    <header class="app-bar">
-      <a class="brand" href="#workspace-main" aria-label="回到工作台顶部">
-        <svg class="brand-glyph" aria-hidden="true"><use href="#i-mark"></use></svg>
-        <span class="brand-name">Pattern Studio</span>
-        <span class="brand-sub">本地纹样工作台</span>
+  <div class="app-view is-workspace" id="app-view">
+    <aside class="sidebar" aria-label="主导航">
+      <a class="side-brand" href="#workspace-main" aria-label="Pattern Studio">
+        <img class="brand-logo" src="./assets/logo.svg" alt="" width="38" height="38">
+        <span class="side-brand-copy">
+          <strong>Pattern Studio</strong>
+          <small>本地纹样工作台</small>
+        </span>
       </a>
-      <div class="app-bar-tools">
-        <button class="health" id="health-chip" type="button" aria-label="检查本机服务状态" title="检查本机服务状态">
-          <span class="status-dot" aria-hidden="true"></span>
-          <span id="health-label">检查连接</span>
-        </button>
-        <button class="btn btn-quiet btn-sm" id="open-dataset" type="button" aria-haspopup="dialog">
+
+      <nav class="side-nav">
+        <span class="side-label">工作区</span>
+        <button class="side-nav-item" id="side-nav-dashboard" data-view="dashboard" type="button" title="工作台">
           <svg class="icon" aria-hidden="true"><use href="#i-grid"></use></svg>
+          <span>工作台</span>
+        </button>
+        <button class="side-nav-item" id="side-nav-library" data-view="library" type="button" title="纹样库">
+          <svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg>
+          <span>纹样库</span>
+          <span class="side-count" id="side-library-count">0</span>
+        </button>
+        <button class="side-nav-item is-active" id="side-nav-workspace" data-view="workspace" type="button" title="图像处理">
+          <svg class="icon" aria-hidden="true"><use href="#i-crop"></use></svg>
+          <span>图像处理</span>
+        </button>
+        <span class="side-label side-label-spaced">数据</span>
+        <button class="side-nav-item" id="side-dataset" type="button" title="数据集">
+          <svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg>
           <span>数据集</span>
         </button>
-        <button class="btn btn-quiet btn-sm" id="open-history" type="button">
+        <button class="side-nav-item" id="side-history" type="button" title="历史任务">
           <svg class="icon" aria-hidden="true"><use href="#i-history"></use></svg>
-          <span>历史</span>
+          <span>历史任务</span>
         </button>
-        <button class="btn btn-quiet btn-sm" id="open-settings" type="button" aria-haspopup="dialog">
-          <svg class="icon" aria-hidden="true"><use href="#i-settings"></use></svg>
-          <span>设置</span>
+      </nav>
+
+      <div class="side-current">
+        <span class="side-label">当前输入</span>
+        <button class="side-current-card" id="side-open-workspace" type="button">
+          <span class="side-current-dot"></span>
+          <span class="side-current-copy">
+            <strong id="side-current-name">尚未载入图像</strong>
+            <small id="side-current-meta">打开工作区开始</small>
+          </span>
+          <svg class="icon" aria-hidden="true"><use href="#i-arrow"></use></svg>
         </button>
       </div>
-    </header>
 
-    <nav class="rail" aria-label="工序导航">
-      <button class="rail-step" type="button" data-stage="1" aria-current="step">
-        <span class="rail-num">01</span><span class="rail-name">来源</span>
-      </button>
-      <button class="rail-step" type="button" data-stage="2">
-        <span class="rail-num">02</span><span class="rail-name">裁切</span>
-      </button>
-      <button class="rail-step" type="button" data-stage="3">
-        <span class="rail-num">03</span><span class="rail-name">处理</span>
-      </button>
-      <button class="rail-step" type="button" data-stage="4">
-        <span class="rail-num">04</span><span class="rail-name">候选</span>
-      </button>
-      <button class="rail-step" type="button" data-stage="5">
-        <span class="rail-num">05</span><span class="rail-name">蒙版</span>
-      </button>
-      <button class="rail-step" type="button" data-stage="6">
-        <span class="rail-num">06</span><span class="rail-name">修复</span>
-      </button>
-      <button class="rail-step" type="button" data-stage="7">
-        <span class="rail-num">07</span><span class="rail-name">平铺</span>
-      </button>
-    </nav>
+      <div class="sidebar-foot">
+        <div class="side-storage">
+          <div class="side-storage-head">
+            <svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg>
+            <span>本地工作区</span>
+          </div>
+          <p><span id="side-version-count">0</span> 个版本 · 仅保存在本机</p>
+        </div>
+        <button class="side-user" id="side-settings" type="button" title="设置与密钥">
+          <span class="side-avatar">PS</span>
+          <span><strong>本地工作区</strong><small>设置与密钥</small></span>
+          <svg class="icon" aria-hidden="true"><use href="#i-settings"></use></svg>
+        </button>
+      </div>
+    </aside>
+
+    <div class="app-main">
+      <header class="app-bar">
+        <div class="app-breadcrumb">
+          <span id="breadcrumb-root">工作台</span>
+          <span class="crumb-sep">/</span>
+          <strong id="breadcrumb-current">图像处理</strong>
+        </div>
+        <div class="app-bar-tools">
+          <button class="health" id="health-chip" type="button" aria-label="检查本机服务状态" title="检查本机服务状态">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="health-label">检查连接</span>
+          </button>
+          <button class="icon-button top-action" id="open-dataset" type="button" aria-label="数据集" title="数据集">
+            <svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg>
+          </button>
+          <button class="icon-button top-action" id="open-history" type="button" aria-label="历史任务" title="历史任务">
+            <svg class="icon" aria-hidden="true"><use href="#i-history"></use></svg>
+          </button>
+          <button class="icon-button top-action" id="open-settings" type="button" aria-label="设置" title="设置">
+            <svg class="icon" aria-hidden="true"><use href="#i-settings"></use></svg>
+          </button>
+          <button class="btn btn-solid btn-sm" id="quick-upload" type="button">
+            <svg class="icon" aria-hidden="true"><use href="#i-upload"></use></svg>
+            <span>上传纹样</span>
+          </button>
+        </div>
+      </header>
+
+      <section class="view dashboard-view" id="view-dashboard" aria-labelledby="dashboard-title" hidden>
+        <div class="view-head">
+          <div>
+            <p class="eyebrow">WORKBENCH</p>
+            <h1 id="dashboard-title">纹样工作台</h1>
+            <p class="subtitle">上传、提取、生成候选，再把结果沉淀为可编辑 SVG。</p>
+          </div>
+          <div class="view-actions">
+            <button class="btn btn-line btn-sm" id="dashboard-dataset" type="button">查看数据集</button>
+            <button class="btn btn-solid btn-sm" id="dashboard-upload" type="button">
+              <svg class="icon" aria-hidden="true"><use href="#i-upload"></use></svg>
+              上传纹样
+            </button>
+          </div>
+        </div>
+
+        <div class="stat-grid">
+          <article class="stat-card">
+            <span class="stat-icon"><svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg></span>
+            <div><span>版本资产</span><strong id="dashboard-version-count">0</strong><small>本机保留的原图与成果</small></div>
+          </article>
+          <article class="stat-card">
+            <span class="stat-icon stat-icon-green"><svg class="icon" aria-hidden="true"><use href="#i-scan"></use></svg></span>
+            <div><span>当前输入</span><strong id="dashboard-current">未开始</strong><small id="dashboard-current-meta">等待载入纹样</small></div>
+          </article>
+          <article class="stat-card">
+            <span class="stat-icon stat-icon-amber"><svg class="icon" aria-hidden="true"><use href="#i-history"></use></svg></span>
+            <div><span>历史任务</span><strong id="dashboard-task-count">0</strong><small>最近的处理与生成记录</small></div>
+          </article>
+          <article class="stat-card">
+            <span class="stat-icon stat-icon-rose"><svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg></span>
+            <div><span>数据集样本</span><strong id="dashboard-dataset-count">—</strong><small>已登记的质量与来源记录</small></div>
+          </article>
+        </div>
+
+        <div class="dashboard-grid">
+          <section class="panel-card recent-card">
+            <header class="panel-card-head">
+              <div><h2>最近版本</h2><p>从上次停下的地方继续</p></div>
+              <button class="text-button" data-view="library" type="button">查看全部</button>
+            </header>
+            <div class="dashboard-list" id="dashboard-recent"></div>
+            <div class="empty-state" id="dashboard-empty" hidden>
+              <svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg>
+              <strong>还没有版本</strong>
+              <p>上传一张纹样，第一步会保留在这里。</p>
+              <button class="btn btn-solid btn-sm" id="dashboard-empty-upload" type="button">上传纹样</button>
+            </div>
+          </section>
+
+          <section class="panel-card quick-card">
+            <header class="panel-card-head"><div><h2>快速开始</h2><p>常用入口</p></div></header>
+            <div class="quick-list">
+              <button class="quick-item" id="dashboard-open-workspace" type="button">
+                <span class="quick-icon"><svg class="icon" aria-hidden="true"><use href="#i-crop"></use></svg></span>
+                <span><strong>打开图像处理</strong><small>裁切、提取、候选与修复</small></span>
+                <svg class="icon quick-arrow" aria-hidden="true"><use href="#i-arrow"></use></svg>
+              </button>
+              <button class="quick-item" data-view="library" type="button">
+                <span class="quick-icon quick-icon-green"><svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg></span>
+                <span><strong>浏览纹样库</strong><small>全部原图、成果与候选</small></span>
+                <svg class="icon quick-arrow" aria-hidden="true"><use href="#i-arrow"></use></svg>
+              </button>
+              <button class="quick-item" id="dashboard-history" type="button">
+                <span class="quick-icon quick-icon-amber"><svg class="icon" aria-hidden="true"><use href="#i-history"></use></svg></span>
+                <span><strong>查看历史任务</strong><small>恢复流程或重跑局部</small></span>
+                <svg class="icon quick-arrow" aria-hidden="true"><use href="#i-arrow"></use></svg>
+              </button>
+            </div>
+          </section>
+        </div>
+
+        <section class="panel-card flow-card">
+          <header class="panel-card-head">
+            <div><h2>从原图到可编辑 SVG</h2><p>全部处理都在本机完成；云端生成只是可选的一步</p></div>
+            <button class="text-button" id="dashboard-flow-open" type="button">打开工作区</button>
+          </header>
+          <div class="flow-strip">
+            <div class="flow-step"><span>01</span><strong>导入</strong><small>保留原图与来源</small></div>
+            <div class="flow-step"><span>02</span><strong>提取</strong><small>裁切、蒙版与线稿</small></div>
+            <div class="flow-step"><span>03</span><strong>候选</strong><small>AI 拆层或本地合成</small></div>
+            <div class="flow-step"><span>04</span><strong>矢量</strong><small>SVG 与平铺导出</small></div>
+          </div>
+        </section>
+      </section>
+
+      <section class="view library-view" id="view-library" aria-labelledby="library-title" hidden>
+        <div class="view-head">
+          <div>
+            <p class="eyebrow">ASSET LIBRARY</p>
+            <h1 id="library-title">纹样库</h1>
+            <p class="subtitle">本机保留的全部版本；可预览、下载或设为当前输入。</p>
+          </div>
+          <div class="view-actions">
+            <button class="btn btn-line btn-sm" id="library-open-workspace" type="button">打开工作区</button>
+            <button class="btn btn-solid btn-sm" id="library-upload" type="button">
+              <svg class="icon" aria-hidden="true"><use href="#i-upload"></use></svg>
+              上传纹样
+            </button>
+          </div>
+        </div>
+        <div class="library-toolbar">
+          <label class="library-search">
+            <svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg>
+            <input id="library-search" type="search" placeholder="搜索版本名称、类型或编号" aria-label="搜索纹样库">
+          </label>
+          <span class="library-count" id="library-count">0 个版本</span>
+        </div>
+        <div class="library-grid" id="library-grid"></div>
+        <div class="empty-state library-empty" id="library-empty">
+          <svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg>
+          <strong>纹样库还是空的</strong>
+          <p>上传第一张纹样，原图和每一步成果都会自动出现在这里。</p>
+          <button class="btn btn-solid btn-sm" id="library-empty-upload" type="button">上传纹样</button>
+        </div>
+      </section>
+
+      <section class="view view-workspace" id="view-workspace" aria-label="图像处理工作区">
+        <nav class="rail" aria-label="工序导航">
+          <button class="rail-step" type="button" data-stage="1" aria-current="step">
+            <span class="rail-num">01</span><span class="rail-name">来源</span>
+          </button>
+          <button class="rail-step" type="button" data-stage="2">
+            <span class="rail-num">02</span><span class="rail-name">裁切</span>
+          </button>
+          <button class="rail-step" type="button" data-stage="3">
+            <span class="rail-num">03</span><span class="rail-name">处理</span>
+          </button>
+          <button class="rail-step" type="button" data-stage="4">
+            <span class="rail-num">04</span><span class="rail-name">候选</span>
+          </button>
+          <button class="rail-step" type="button" data-stage="5">
+            <span class="rail-num">05</span><span class="rail-name">蒙版</span>
+          </button>
+          <button class="rail-step" type="button" data-stage="6">
+            <span class="rail-num">06</span><span class="rail-name">修复</span>
+          </button>
+          <button class="rail-step" type="button" data-stage="7">
+            <span class="rail-num">07</span><span class="rail-name">平铺</span>
+          </button>
+        </nav>
 
     <div class="banner banner-error" id="connection-banner" role="alert" hidden>
       <span class="banner-mark"><svg class="icon" aria-hidden="true"><use href="#i-alert"></use></svg></span>
@@ -1177,6 +1365,8 @@
         </section>
       </div>
     </section>
+      </section>
+    </div>
   </div>
 
   <div class="scrim" id="history-scrim" hidden></div>
