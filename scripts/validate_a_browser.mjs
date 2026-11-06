@@ -140,8 +140,10 @@ try {
       };
     })()`);
     await click("open-history");
-    await waitFor("document.querySelectorAll('[data-history-action]').length > 0", "failure history loaded");
-    await evaluate(`Array.from(document.querySelectorAll('[data-history-action]')).find(e=>e.dataset.jobId===${JSON.stringify(fixtureFlow.decomposition_job_id)} && e.dataset.historyAction==='restore').click()`);
+    await waitFor("document.querySelectorAll('#history-list [data-history-id]').length > 0", "failure history loaded");
+    await evaluate(`document.querySelector('#history-list [data-history-id="${fixtureFlow.decomposition_job_id}"]')?.click()`);
+    await waitFor(`document.querySelector('#history-detail [data-history-action="restore"][data-job-id="${fixtureFlow.decomposition_job_id}"]')`, "failure job detail");
+    await evaluate(`document.querySelector('#history-detail [data-history-action="restore"][data-job-id="${fixtureFlow.decomposition_job_id}"]').click()`);
     await waitFor("document.getElementById('ai-pipeline-error').textContent.includes('fixture workflow failed')", "failed workflow restored");
     if (failure === "layers-unavailable") await waitFor("window.fixtureLayersFailed", "candidate layer failure received");
     await evaluate("document.querySelector('.rail-step[data-stage=\"4\"]').click()");
@@ -156,10 +158,11 @@ try {
 
   // Load the fixture workflow via the application's ordinary history action.
   await click("open-history");
-  await waitFor("document.querySelectorAll('[data-history-action]').length > 0", "history loaded");
-  const actions = await evaluate("Array.from(document.querySelectorAll('[data-history-action]')).map(e=>({action:e.dataset.historyAction,jobId:e.dataset.jobId,pipelineId:e.dataset.pipelineId}))");
+  await waitFor("document.querySelectorAll('#history-list [data-history-id]').length > 0", "history loaded");
   const flow = await evaluate(`fetch('/api/v1/pipelines/${info.pipeline_id}').then(r=>r.json())`);
-  const loadButton = await evaluate(`(() => {const e=Array.from(document.querySelectorAll('[data-history-action]')).find(e=>e.dataset.jobId===${JSON.stringify(flow.decomposition_job_id)} && e.dataset.historyAction==='restore');if(e){e.click();return true}return false})()`);
+  const actions = await evaluate("Array.from(document.querySelectorAll('#history-detail [data-history-action]')).map(e=>({action:e.dataset.historyAction,jobId:e.dataset.jobId,pipelineId:e.dataset.pipelineId}))");
+  await evaluate(`document.querySelector('#history-list [data-history-id="${flow.decomposition_job_id}"]')?.click()`);
+  const loadButton = await evaluate(`(() => {const e=document.querySelector('#history-detail [data-history-action="restore"][data-job-id="${flow.decomposition_job_id}"]');if(e){e.click();return true}return false})()`);
   if (!loadButton) throw new Error("Workflow history action missing: " + JSON.stringify(actions));
   await waitFor("document.querySelector('[data-ai-layer-id]')", "AI layers loaded");
   await evaluate("document.querySelector('[data-ai-layer-id]').click()");

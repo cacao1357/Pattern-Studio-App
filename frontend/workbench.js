@@ -480,13 +480,12 @@ const dom = {
   sharpenValue: $("sharpen-value"),
   sharpenReadout: $("sharpen-readout"),
   enhanceButton: $("enhance-button"),
-  historyScrim: $("history-scrim"),
-  historyDrawer: $("history-drawer"),
-  closeHistory: $("close-history"),
   historySummary: $("history-summary"),
   refreshHistory: $("refresh-history"),
   historyList: $("history-list"),
   historyMore: $("history-more"),
+  historyDetail: $("history-detail"),
+  historyFilter: $("history-filter"),
   confirmDialog: $("confirm-dialog"),
   confirmTitle: $("confirm-title"),
   confirmMessage: $("confirm-message"),
@@ -658,8 +657,6 @@ const dom = {
 
 const state = {
   view: "home",
-  datasetAudit: null,
-  datasetAuditLoading: false,
   libraryQuery: "",
   health: null,
   healthError: "",
@@ -718,15 +715,14 @@ const state = {
   cancelNote: "",
   cancelIntent: null,
   assetPreviewId: null,
-  historyOpen: false,
-  historyCloseSeq: 0,
-  historyLastFocus: null,
   history: {
     items: [],
     nextCursor: null,
     loading: false,
     error: "",
-    seq: 0
+    seq: 0,
+    selectedId: "",
+    query: ""
   },
   confirmResolver: null,
   settings: {
@@ -977,6 +973,15 @@ function formatTime(value) {
   } catch (_) {
     return date.toLocaleString();
   }
+}
+
+function formatDateTime(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  const pad = (part) => String(part).padStart(2, "0");
+  return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate()) +
+    " " + pad(date.getHours()) + ":" + pad(date.getMinutes());
 }
 
 function friendlyError(error) {
@@ -1789,13 +1794,12 @@ function renderVersions() {
   }
   updateSelectionBar();
   renderSidebarContext();
-  if (state.view === "dashboard") renderDashboard();
   if (state.view === "library") renderLibrary();
 }
 
 const VIEW_LABELS = {
   home: ["首页", "Pattern Studio"],
-  dashboard: ["工作台", "概览"],
+  history: ["工作台", "历史任务"],
   library: ["纹样库", "全部版本"],
   workspace: ["工作台", "图像处理"]
 };
@@ -1817,11 +1821,11 @@ function openUploadPicker() {
 }
 
 function setView(view) {
-  const next = ["home", "dashboard", "library", "workspace"].includes(view) ? view : "home";
+  const next = ["home", "history", "library", "workspace"].includes(view) ? view : "home";
   state.view = next;
   $("app-view")?.classList.toggle("is-workspace", next === "workspace");
   $("app-view")?.classList.toggle("is-home", next === "home");
-  for (const name of ["home", "dashboard", "library", "workspace"]) {
+  for (const name of ["home", "history", "library", "workspace"]) {
     const node = $("view-" + name);
     if (node) node.hidden = name !== next;
   }
@@ -1838,7 +1842,10 @@ function setView(view) {
   const labels = VIEW_LABELS[next] || VIEW_LABELS.workspace;
   setText($("breadcrumb-root"), labels[0]);
   setText($("breadcrumb-current"), labels[1]);
-  if (next === "dashboard") renderDashboard();
+  if (next === "history") {
+    renderHistory();
+    if (!state.history.loading) void loadHistory(true);
+  }
   if (next === "library") renderLibrary();
   renderSidebarContext();
 }
@@ -1862,79 +1869,6 @@ function renderSidebarContext() {
   const labels = VIEW_LABELS[state.view] || VIEW_LABELS.workspace;
   setText($("breadcrumb-root"), labels[0]);
   setText($("breadcrumb-current"), labels[1]);
-}
-
-function ensureDatasetAudit() {
-  if (state.datasetAudit || state.datasetAuditLoading) return;
-  state.datasetAuditLoading = true;
-  requestJson("/datasets/audit").then((result) => {
-    state.datasetAudit = result && result.data ? result.data : null;
-  }).catch(() => {
-    state.datasetAudit = null;
-  }).finally(() => {
-    state.datasetAuditLoading = false;
-    if (state.view === "dashboard") renderDashboardStats();
-  });
-}
-
-function renderDashboardStats() {
-  setText($("dashboard-version-count"), String(state.versionIds.length));
-  const asset = currentAsset() || (state.previewId ? state.assets.get(state.previewId) : null);
-  if (asset) {
-    setText($("dashboard-current"), assetDisplayName(asset));
-    const stage = document.documentElement.getAttribute("data-stage") || "1";
-    const dims = assetWidth(asset) && assetHeight(asset)
-      ? formatDimensions(assetWidth(asset), assetHeight(asset))
-      : "尺寸待读取";
-    setText($("dashboard-current-meta"), (STAGE_LABELS[stage] || "处理") + " · " + dims);
-  } else {
-    setText($("dashboard-current"), "未开始");
-    setText($("dashboard-current-meta"), "等待载入纹样");
-  }
-  setText($("dashboard-task-count"), String(state.history.items.length));
-  const audit = state.datasetAudit;
-  setText($("dashboard-dataset-count"), audit && Number.isFinite(Number(audit.total_images))
-    ? String(audit.total_images)
-    : "—");
-}
-
-function renderDashboardRecent() {
-  const container = $("dashboard-recent");
-  if (!container) return;
-  const ids = state.versionIds.filter((id) => state.assets.has(id)).slice(0, 4);
-  container.replaceChildren();
-  setHidden($("dashboard-empty"), ids.length > 0);
-  for (const id of ids) {
-    const asset = state.assets.get(id);
-    if (!asset) continue;
-    const item = element("button", "dashboard-item");
-    item.type = "button";
-    const thumb = element("span", "dashboard-thumb");
-    if (assetIsPreviewable(asset)) {
-      const image = element("img");
-      image.alt = "";
-      loadThumb(image, asset);
-      thumb.append(image);
-    } else {
-      thumb.append(icon("image"));
-    }
-    const copy = element("span", "dashboard-item-copy");
-    copy.append(element("strong", "", assetDisplayName(asset)));
-    const meta = [];
-    if (assetWidth(asset) && assetHeight(asset)) meta.push(formatDimensions(assetWidth(asset), assetHeight(asset)));
-    meta.push("#" + shortId(id));
-    copy.append(element("small", "", meta.join(" · ")));
-    item.append(thumb, copy, icon("arrow"));
-    item.addEventListener("click", () => openAssetPreview(asset, "最近版本"));
-    container.append(item);
-  }
-}
-
-function renderDashboard() {
-  renderDashboardStats();
-  renderDashboardRecent();
-  renderSidebarContext();
-  ensureDatasetAudit();
 }
 
 function libraryMatches(asset) {
@@ -5256,7 +5190,7 @@ async function retryJob(jobId) {
     onSuccess: async (data) => {
       const job = extractJobFromResponse(data);
       if (!job) throw new ApiError("重试响应缺少 job_id。", { status: 202 });
-      closeHistory({ restoreFocus: false, immediate: true });
+      setView("workspace");
       await adoptJob(job, { announce: true });
     },
     onError: (error) => {
@@ -5265,7 +5199,6 @@ async function retryJob(jobId) {
     },
     onUnknown: () => {
       setError(dom.composeError, "重试提交结果未知，请用页面顶部提示重试。");
-      closeHistory({ restoreFocus: false, immediate: true });
     }
   });
 }
@@ -9269,7 +9202,7 @@ async function fillComparePane(pane, asset) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* History drawer                                                             */
+/* History page                                                               */
 /* -------------------------------------------------------------------------- */
 
 function datasetStat(label, value, detail) {
@@ -9323,50 +9256,7 @@ function openDatasetDialog() {
 }
 
 function openHistory() {
-  if (state.historyOpen) return;
-  state.historyOpen = true;
-  state.historyLastFocus = document.activeElement;
-  state.historyCloseSeq += 1;
-  dom.historyScrim.hidden = false;
-  dom.historyDrawer.hidden = false;
-  dom.appView.inert = true;
-  document.body.classList.add("drawer-open");
-  window.requestAnimationFrame(() => {
-    if (!state.historyOpen) return;
-    dom.historyScrim.classList.add("is-open");
-    dom.historyDrawer.classList.add("is-open");
-  });
-  dom.closeHistory.focus();
-  loadHistory(true);
-}
-
-function closeHistory(options) {
-  const opts = options || {};
-  if (!state.historyOpen && dom.historyDrawer.hidden) return;
-  state.historyOpen = false;
-  state.historyCloseSeq += 1;
-  const seq = state.historyCloseSeq;
-  dom.historyScrim.classList.remove("is-open");
-  dom.historyDrawer.classList.remove("is-open");
-  dom.appView.inert = false;
-  document.body.classList.remove("drawer-open");
-  if (opts.restoreFocus !== false && state.historyLastFocus && typeof state.historyLastFocus.focus === "function") {
-    try {
-      state.historyLastFocus.focus();
-    } catch (_) {
-      /* ignore */
-    }
-  }
-  if (opts.immediate) {
-    dom.historyScrim.hidden = true;
-    dom.historyDrawer.hidden = true;
-  } else {
-    window.setTimeout(() => {
-      if (seq !== state.historyCloseSeq || state.historyOpen) return;
-      dom.historyScrim.hidden = true;
-      dom.historyDrawer.hidden = true;
-    }, 210);
-  }
+  setView("history");
 }
 
 async function loadHistory(reset) {
@@ -9376,10 +9266,7 @@ async function loadHistory(reset) {
   state.history.seq = sequence;
   state.history.loading = true;
   state.history.error = "";
-  if (loadReset) {
-    state.history.items = [];
-    state.history.nextCursor = null;
-  }
+  if (loadReset) state.history.nextCursor = null;
   renderHistory();
 
   const params = new URLSearchParams();
@@ -9390,13 +9277,16 @@ async function loadHistory(reset) {
     if (sequence !== state.history.seq) return;
     const data = result.data || {};
     const items = Array.isArray(data.items) ? data.items : [];
-    const existing = loadReset ? [] : state.history.items;
-    const byId = new Map(existing.map((job) => [jobIdOf(job), job]));
-    for (const item of items) {
-      const normalized = normalizeJob(item);
-      if (normalized) byId.set(normalized.job_id, normalized);
+    const incoming = items.map((item) => normalizeJob(item)).filter(Boolean);
+    if (loadReset) {
+      // A refresh replaces the first page but keeps the current rows visible
+      // until the response lands, so the page never blanks out.
+      state.history.items = incoming;
+    } else {
+      const byId = new Map(state.history.items.map((job) => [jobIdOf(job), job]));
+      for (const item of incoming) byId.set(item.job_id, item);
+      state.history.items = Array.from(byId.values());
     }
-    state.history.items = Array.from(byId.values());
     state.history.nextCursor = data.next_cursor || null;
     state.history.error = "";
   } catch (error) {
@@ -9410,27 +9300,78 @@ async function loadHistory(reset) {
   }
 }
 
+function historyJobTime(job) {
+  return job.finished_at || job.updated_at || job.created_at || "";
+}
+
+function historyDayLabel(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "日期未记录";
+  const today = new Date();
+  const dayStart = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((dayStart(today) - dayStart(date)) / 86400000);
+  if (days === 0) return "今天";
+  if (days === 1) return "昨天";
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return date.getFullYear() + "-" + month + "-" + day;
+}
+
+function historyMatches(job, query) {
+  const text = String(query || "").trim().toLowerCase();
+  if (!text) return true;
+  const haystack = [
+    jobLabel(job.kind), job.state || "", stateLabel(job.state), job.job_id || "",
+    job.error && job.error.message ? job.error.message : "", summarizeJob(job)
+  ].join(" ").toLowerCase();
+  return haystack.includes(text);
+}
+
+function visibleHistoryJobs() {
+  return state.history.items.filter((job) => historyMatches(job, state.history.query));
+}
+
+function ensureHistorySelection(jobs) {
+  const current = state.history.selectedId;
+  if (current && jobs.some((job) => jobIdOf(job) === current)) return current;
+  const next = jobs.length ? jobIdOf(jobs[0]) : "";
+  state.history.selectedId = next;
+  return next;
+}
+
+function setHistoryMoreVisible(visible) {
+  setHidden(dom.historyMore, !visible);
+  const foot = dom.historyMore ? dom.historyMore.closest(".history-index-foot") : null;
+  if (foot) foot.hidden = !visible;
+}
+
 function renderHistory() {
   const history = state.history;
-  setText(
-    dom.historySummary,
-    history.loading
-      ? "正在读取本机历史…"
-      : history.items.length
-        ? "已载入 " + history.items.length + " 条任务"
-        : "尚无任务"
-  );
+  const jobs = visibleHistoryJobs();
+  const selected = ensureHistorySelection(jobs);
+  const total = history.items.length;
+  const summary = history.loading && !total
+    ? "正在读取本机历史…"
+    : total
+      ? (jobs.length === total ? "共 " + total + " 条任务" : "筛选 " + jobs.length + " / " + total + " 条")
+      : "尚无任务";
+  setText(dom.historySummary, summary);
   setDisabled(dom.refreshHistory, history.loading);
-  renderDashboardStats();
-  dom.historyList.replaceChildren();
+  renderHistoryIndex(jobs, selected);
+  renderHistoryDetail(selected ? findHistoryJob(selected) : null);
+}
+
+function renderHistoryIndex(jobs, selected) {
+  const history = state.history;
+  const list = dom.historyList;
+  if (!list) return;
+  list.replaceChildren();
 
   if (history.loading && !history.items.length) {
-    const loading = element("div", "history-loading");
     const stack = element("div", "skeleton-stack");
     stack.append(element("div", "skeleton"), element("div", "skeleton"), element("div", "skeleton"));
-    loading.append(stack);
-    dom.historyList.append(loading);
-    setHidden(dom.historyMore, true);
+    list.append(stack);
+    setHistoryMoreVisible(false);
     return;
   }
 
@@ -9443,8 +9384,8 @@ function renderHistory() {
     retry.type = "button";
     retry.addEventListener("click", () => void loadHistory(true));
     errorBox.append(retry);
-    dom.historyList.append(errorBox);
-    setHidden(dom.historyMore, true);
+    list.append(errorBox);
+    setHistoryMoreVisible(false);
     return;
   }
 
@@ -9453,51 +9394,144 @@ function renderHistory() {
     empty.append(icon("history", "empty-mark"));
     empty.append(element("h3", "", "还没有历史任务"));
     empty.append(element("p", "", "上传图片并运行本地操作后，任务会持久化在这里。失败与中断也会如实保留。"));
-    dom.historyList.append(empty);
-    setHidden(dom.historyMore, true);
+    list.append(empty);
+    setHistoryMoreVisible(false);
+    return;
+  }
+
+  if (!jobs.length) {
+    const empty = element("div", "history-empty");
+    empty.append(icon("search", "empty-mark"));
+    empty.append(element("h3", "", "没有匹配的任务"));
+    empty.append(element("p", "", "换个关键词：类型、编号、状态或错误信息。"));
+    list.append(empty);
+    setHistoryMoreVisible(false);
     return;
   }
 
   if (history.error) {
-    const warning = element("p", "history-error", "本次刷新失败：" + history.error);
-    dom.historyList.append(warning);
+    list.append(element("p", "history-error", "本次刷新失败：" + history.error));
   }
 
-  for (const job of history.items) {
-    dom.historyList.append(buildHistoryItem(job));
+  let day = "";
+  for (const job of jobs) {
+    const jobDay = historyDayLabel(historyJobTime(job));
+    if (jobDay !== day) {
+      day = jobDay;
+      list.append(element("div", "history-index-day", day));
+    }
+    list.append(buildHistoryIndexItem(job, selected));
   }
-  setHidden(dom.historyMore, !history.nextCursor);
+  setHistoryMoreVisible(Boolean(history.nextCursor));
   setDisabled(dom.historyMore, history.loading);
   setText(dom.historyMore, history.loading ? "读取中…" : "加载更多");
 }
 
-function buildHistoryItem(job) {
-  const item = element("article", "history-item");
-  const top = element("div", "history-item-top");
-  const titleWrap = element("div", "history-item-title");
-  const kindRow = element("div", "history-kind");
-  kindRow.append(element("span", "", jobLabel(job.kind)));
-  if (job.ai_pipeline_id) kindRow.append(element("span", "mini-badge is-ai", "AI 流程"));
-  if (isRepairJobKind(job.kind)) kindRow.append(element("span", "mini-badge is-ai", "AI 修复"));
-  if (isTileJobKind(job.kind)) kindRow.append(element("span", "mini-badge", "手动平铺"));
-  const jobState = String(job.state || "").toLowerCase();
-  const status = element("span", "status-pill is-" + jobState, stateLabel(job.state));
-  kindRow.append(status);
-  titleWrap.append(kindRow);
-  titleWrap.append(element("div", "history-item-meta",
-    "#" + shortId(job.job_id) + " · " + formatTime(job.finished_at || job.updated_at || job.created_at) +
-    (job.retry_of ? " · 重试自 #" + shortId(job.retry_of) : "")));
-  const summary = summarizeJob(job);
-  if (summary) titleWrap.append(element("div", "history-summary", summary));
-  if (job.error && (job.error.message || job.error.code)) {
-    titleWrap.append(element("div", "history-error", job.error.message || "任务失败，可重试。"));
-  }
-  top.append(titleWrap);
-  item.append(top);
+function buildHistoryIndexItem(job, selected) {
+  const id = jobIdOf(job);
+  const active = id === selected;
+  const item = element("button", "history-index-item" + (active ? " is-selected" : ""));
+  item.type = "button";
+  item.dataset.historyId = id;
+  item.setAttribute("role", "option");
+  item.setAttribute("aria-selected", active ? "true" : "false");
+  item.append(element("span", "history-index-dot is-" + String(job.state || "unknown").toLowerCase()));
 
-  const actions = element("div", "history-actions");
+  const copy = element("span", "history-index-copy");
+  copy.append(element("strong", "", jobLabel(job.kind)));
+  copy.append(element("small", "", "#" + shortId(id) + " · " + formatTime(historyJobTime(job))));
+  item.append(copy);
+
+  const stateText = element("span", "history-index-state", stateLabel(job.state));
+  if (String(job.state || "").toLowerCase() === "failed") stateText.classList.add("is-failed");
+  item.append(stateText);
+  return item;
+}
+
+function renderHistoryDetail(job) {
+  const detail = dom.historyDetail;
+  if (!detail) return;
+  detail.replaceChildren();
+  if (state.history.loading && !state.history.items.length) {
+    const stack = element("div", "skeleton-stack");
+    stack.append(element("div", "skeleton"), element("div", "skeleton"));
+    detail.append(stack);
+    return;
+  }
+  if (!job) {
+    const empty = element("div", "history-empty history-detail-empty");
+    empty.append(icon("history", "empty-mark"));
+    empty.append(element("h3", "", state.history.items.length ? "未选择任务" : "还没有历史任务"));
+    empty.append(element("p", "", state.history.items.length
+      ? "在左侧索引里点一条任务，这里会显示它的参数、错误和可执行操作。"
+      : "上传图片并运行本地操作后，任务会按时间保留在这里。"));
+    if (!state.history.items.length) {
+      const upload = element("button", "btn btn-solid btn-sm", "上传纹样");
+      upload.type = "button";
+      upload.addEventListener("click", openUploadPicker);
+      empty.append(upload);
+    }
+    detail.append(empty);
+    return;
+  }
+  detail.append(buildHistoryDetail(job));
+}
+
+function buildHistoryDetail(job) {
+  const body = element("article", "history-detail-body");
+
+  const head = element("header", "history-detail-head");
+  const kinds = element("div", "history-detail-kinds");
+  kinds.append(element("span", "history-detail-kicker", "任务详情"));
+  if (job.ai_pipeline_id) kinds.append(element("span", "mini-badge is-ai", "AI 流程"));
+  if (isRepairJobKind(job.kind)) kinds.append(element("span", "mini-badge is-ai", "AI 修复"));
+  if (isTileJobKind(job.kind)) kinds.append(element("span", "mini-badge", "手动平铺"));
+  head.append(kinds);
+  head.append(element("span", "status-pill is-" + String(job.state || "").toLowerCase(), stateLabel(job.state)));
+  body.append(head);
+
+  body.append(element("h2", "history-detail-title", jobLabel(job.kind) + " #" + shortId(job.job_id)));
+  const meta = [
+    job.finished_at ? "完成于 " + formatTime(job.finished_at) : "创建于 " + formatTime(job.created_at),
+    "第 " + Number(job.attempt || 1) + " 次尝试"
+  ];
+  if (job.retry_of) meta.push("重试自 #" + shortId(job.retry_of));
+  body.append(element("p", "history-detail-meta", meta.join(" · ")));
+
+  const summary = summarizeJob(job);
+  if (summary) body.append(element("p", "history-detail-summary", summary));
+
+  if (job.error && (job.error.message || job.error.code)) {
+    const box = element("div", "history-error history-detail-error");
+    box.append(element("strong", "", job.error.code || "任务失败"));
+    box.append(element("p", "", job.error.message || "任务失败，可重试。"));
+    body.append(box);
+  }
+
+  const facts = element("dl", "history-facts");
+  const fact = (label, value) => {
+    const row = element("div", "history-fact");
+    row.append(element("dt", "", label));
+    row.append(element("dd", "", value));
+    facts.append(row);
+  };
+  const resultAssets = job.result && Array.isArray(job.result.assets) ? job.result.assets.length : 0;
+  fact("任务编号", job.job_id);
+  fact("输入版本", job.input_asset_id ? "#" + shortId(job.input_asset_id) : "—");
+  fact("创建时间", formatDateTime(job.created_at));
+  fact("完成时间", formatDateTime(job.finished_at));
+  fact("尝试次数", "第 " + Number(job.attempt || 1) + " 次");
+  fact("成果数量", resultAssets ? resultAssets + " 个" : "—");
+  body.append(facts);
+
+  body.append(buildHistoryActions(job));
+  return body;
+}
+
+function buildHistoryActions(job) {
+  const actions = element("div", "history-actions history-detail-actions");
   const blocked = state.taskRunning || state.requestInFlight || Boolean(state.pendingSubmission);
-  const restore = element("button", "btn btn-outline", "恢复");
+  const restore = element("button", "btn btn-solid", "恢复");
   restore.type = "button";
   restore.dataset.historyAction = "restore";
   restore.dataset.jobId = job.job_id;
@@ -9506,7 +9540,7 @@ function buildHistoryItem(job) {
   actions.append(restore);
 
   if (job.state === "failed" && jobAllowsRetry(job)) {
-    const retry = element("button", "btn btn-quiet", "重试");
+    const retry = element("button", "btn btn-line", "重试");
     retry.type = "button";
     retry.dataset.historyAction = "retry";
     retry.dataset.jobId = job.job_id;
@@ -9522,8 +9556,7 @@ function buildHistoryItem(job) {
     evaluate.disabled = state.requestInFlight || Boolean(state.pendingSubmission);
     actions.append(evaluate);
   }
-  item.append(actions);
-  return item;
+  return actions;
 }
 
 function summarizeJob(job) {
@@ -9632,7 +9665,6 @@ async function restoreJob(jobId) {
     return;
   }
 
-  closeHistory({ restoreFocus: false, immediate: true });
   clearBBox();
   resetWorkspace({ clearUpload: true });
   state.sourceLabel = "历史任务 #" + shortId(latest.job_id);
@@ -9898,7 +9930,6 @@ function renderAll() {
   updateComposeSummary();
   updateActionState();
   renderSidebarContext();
-  if (state.view === "dashboard") renderDashboard();
   if (state.view === "library") renderLibrary();
 }
 
@@ -10348,17 +10379,12 @@ function wireEvents() {
     button.addEventListener("click", () => setView(button.dataset.view));
   });
   $("side-dataset")?.addEventListener("click", openDatasetDialog);
-  $("side-history")?.addEventListener("click", openHistory);
   $("side-settings")?.addEventListener("click", openSettingsDialog);
   $("side-open-workspace")?.addEventListener("click", () => openWorkspace());
-  for (const id of ["quick-upload", "dashboard-upload", "library-upload", "dashboard-empty-upload", "library-empty-upload"]) {
+  for (const id of ["quick-upload", "library-upload", "library-empty-upload"]) {
     $(id)?.addEventListener("click", openUploadPicker);
   }
-  $("dashboard-open-workspace")?.addEventListener("click", () => openWorkspace());
-  $("dashboard-flow-open")?.addEventListener("click", () => openWorkspace());
   $("library-open-workspace")?.addEventListener("click", () => openWorkspace());
-  $("dashboard-dataset")?.addEventListener("click", openDatasetDialog);
-  $("dashboard-history")?.addEventListener("click", openHistory);
   $("library-search")?.addEventListener("input", (event) => {
     state.libraryQuery = event.target.value || "";
     renderLibrary();
@@ -10393,8 +10419,6 @@ function wireEvents() {
   dom.datasetDialog.addEventListener("click", (event) => {
     if (event.target === dom.datasetDialog) dom.datasetDialog.close();
   });
-  dom.closeHistory.addEventListener("click", () => closeHistory({}));
-  dom.historyScrim.addEventListener("click", () => closeHistory({}));
   dom.openSettings.addEventListener("click", openSettingsDialog);
   dom.settingsClose.addEventListener("click", closeSettingsDialog);
   dom.settingsReload.addEventListener("click", () => void loadSettings({}));
@@ -10411,7 +10435,17 @@ function wireEvents() {
   });
   dom.refreshHistory.addEventListener("click", () => void loadHistory(true));
   dom.historyMore.addEventListener("click", () => void loadHistory(false));
-  dom.historyList.addEventListener("click", async (event) => {
+  dom.historyFilter.addEventListener("input", (event) => {
+    state.history.query = event.target.value || "";
+    renderHistory();
+  });
+  dom.historyList.addEventListener("click", (event) => {
+    const row = event.target.closest("[data-history-id]");
+    if (!row) return;
+    state.history.selectedId = row.dataset.historyId || "";
+    renderHistory();
+  });
+  dom.historyDetail.addEventListener("click", async (event) => {
     const button = event.target.closest("button[data-history-action]");
     if (!button) return;
     const jobId = button.dataset.jobId || "";
@@ -10424,7 +10458,6 @@ function wireEvents() {
       const job = findHistoryJob(jobId);
       if (!job) return;
       state.tasks.set(job.job_id, Object.assign({}, state.tasks.get(job.job_id) || {}, job));
-      closeHistory({ restoreFocus: false });
       setFeedbackJob(job.job_id, { focus: true });
     }
   });
@@ -10880,26 +10913,6 @@ function wireEvents() {
   });
 
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && state.historyOpen && !document.querySelector("dialog[open]")) {
-      event.preventDefault();
-      closeHistory({});
-      return;
-    }
-    if (event.key === "Tab" && state.historyOpen) {
-      const focusables = Array.from(
-        dom.historyDrawer.querySelectorAll('button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')
-      );
-      if (!focusables.length) return;
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
     if (document.querySelector("dialog[open]")) return;
     const target = event.target;
     const typing = target && typeof target.closest === "function" &&
@@ -11038,7 +11051,6 @@ const __psShell = (function createStageShell() {
       const bar = statusBar();
       if (!bar || !bar.classList.contains("is-open")) return;
       if (doc.querySelector("dialog[open]")) return;
-      if (doc.body.classList.contains("drawer-open")) return;
       closeStatus();
       const back = statusToggle();
       if (back) back.focus();

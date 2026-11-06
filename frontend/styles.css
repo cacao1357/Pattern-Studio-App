@@ -90,10 +90,6 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-body.drawer-open {
-  overflow: hidden;
-}
-
 h1, h2, h3, h4, p, ol, ul, dl, dd, figure {
   margin: 0;
   padding: 0;
@@ -2737,121 +2733,8 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 /* =============================================================================
-   7. 历史抽屉
+   7. 历史页
    ============================================================================= */
-
-.scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  background: rgba(27, 43, 84, 0.28);
-  opacity: 0;
-  transition: opacity 0.18s linear;
-}
-
-.scrim.is-open {
-  opacity: 1;
-}
-
-.drawer {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 41;
-  display: flex;
-  flex-direction: column;
-  width: min(430px, 92vw);
-  border-left: 2px solid var(--ink);
-  background: var(--paper);
-  transform: translateX(100%);
-  transition: transform 0.19s cubic-bezier(0.2, 0, 0.2, 1);
-}
-
-.drawer.is-open {
-  transform: translateX(0);
-}
-
-.drawer-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--s2);
-  padding: 14px 16px 10px;
-  border-bottom: 2px solid var(--ink);
-}
-
-.drawer-head h2 {
-  font-family: var(--font-display);
-  font-size: 22px;
-  font-weight: 300;
-  letter-spacing: 0.03em;
-}
-
-.drawer-head p {
-  font-size: var(--t-micro);
-  color: var(--ink-60);
-  letter-spacing: 0.06em;
-}
-
-.drawer-tools {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--s2);
-  padding: 7px 16px;
-  border-bottom: var(--rule);
-  font-size: var(--t-micro);
-  color: var(--ink-60);
-}
-
-.drawer-list {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.drawer-foot {
-  flex: none;
-  padding: 9px 16px;
-  border-top: var(--rule);
-}
-
-.history-item {
-  padding: 10px 16px;
-  border-bottom: var(--rule-2);
-}
-
-.history-item-top {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.history-item-title {
-  font-size: var(--t-small);
-  font-weight: 500;
-}
-
-.history-kind {
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  color: var(--ink-60);
-}
-
-.history-item-meta {
-  font-size: 11px;
-  color: var(--ink-60);
-  font-variant-numeric: tabular-nums;
-}
-
-.history-summary {
-  font-size: var(--t-micro);
-  line-height: 1.6;
-  color: var(--ink-60);
-  margin-top: 4px;
-}
 
 .history-error {
   font-size: var(--t-micro);
@@ -2868,7 +2751,6 @@ input[type="range"]::-webkit-slider-thumb {
   margin-top: 7px;
 }
 
-.history-loading,
 .history-empty {
   padding: 14px 16px;
   font-size: var(--t-micro);

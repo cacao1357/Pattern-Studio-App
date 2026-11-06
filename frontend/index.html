@@ -124,9 +124,9 @@
           <svg class="icon" aria-hidden="true"><use href="#i-home"></use></svg>
           <span>首页</span>
         </button>
-        <button class="side-nav-item" id="side-nav-dashboard" data-view="dashboard" type="button" title="概览">
-          <svg class="icon" aria-hidden="true"><use href="#i-grid"></use></svg>
-          <span>概览</span>
+        <button class="side-nav-item" id="side-nav-history" data-view="history" type="button" title="历史任务">
+          <svg class="icon" aria-hidden="true"><use href="#i-history"></use></svg>
+          <span>历史任务</span>
         </button>
         <button class="side-nav-item" id="side-nav-library" data-view="library" type="button" title="纹样库">
           <svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg>
@@ -234,90 +234,39 @@
         </div>
       </section>
 
-      <section class="view dashboard-view view-enter" id="view-dashboard" aria-labelledby="dashboard-title" hidden>
+      <section class="view history-view" id="view-history" aria-labelledby="history-title" hidden>
         <div class="view-head">
           <div>
-            <p class="eyebrow">WORKBENCH</p>
-            <h1 id="dashboard-title">纹样工作台</h1>
-            <p class="subtitle">上传、提取、生成候选，再把结果沉淀为可编辑 SVG。</p>
+            <p class="eyebrow">HISTORY</p>
+            <h1 id="history-title">历史任务</h1>
+            <p class="subtitle">本机保留的每一次处理与生成；在左侧索引里选中一条，查看详情、恢复工作区或重试失败步骤。</p>
           </div>
           <div class="view-actions">
-            <button class="btn btn-line btn-sm" id="dashboard-dataset" type="button">查看数据集</button>
-            <button class="btn btn-solid btn-sm" id="dashboard-upload" type="button">
-              <svg class="icon" aria-hidden="true"><use href="#i-upload"></use></svg>
-              上传纹样
+            <span class="history-count" id="history-summary">尚未加载</span>
+            <button class="btn btn-line btn-sm" id="refresh-history" type="button">
+              <svg class="icon" aria-hidden="true"><use href="#i-refresh"></use></svg>
+              刷新
             </button>
           </div>
         </div>
 
-        <div class="stat-grid">
-          <article class="stat-card">
-            <span class="stat-icon"><svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg></span>
-            <div><span>版本资产</span><strong id="dashboard-version-count">0</strong><small>本机保留的原图与成果</small></div>
-          </article>
-          <article class="stat-card">
-            <span class="stat-icon stat-icon-green"><svg class="icon" aria-hidden="true"><use href="#i-scan"></use></svg></span>
-            <div><span>当前输入</span><strong id="dashboard-current">未开始</strong><small id="dashboard-current-meta">等待载入纹样</small></div>
-          </article>
-          <article class="stat-card">
-            <span class="stat-icon stat-icon-amber"><svg class="icon" aria-hidden="true"><use href="#i-history"></use></svg></span>
-            <div><span>历史任务</span><strong id="dashboard-task-count">0</strong><small>最近的处理与生成记录</small></div>
-          </article>
-          <article class="stat-card">
-            <span class="stat-icon stat-icon-rose"><svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg></span>
-            <div><span>数据集样本</span><strong id="dashboard-dataset-count">—</strong><small>已登记的质量与来源记录</small></div>
-          </article>
-        </div>
-
-        <div class="dashboard-grid">
-          <section class="panel-card recent-card">
+        <div class="history-layout">
+          <aside class="panel-card history-index" aria-labelledby="history-index-title">
             <header class="panel-card-head">
-              <div><h2>最近版本</h2><p>从上次停下的地方继续</p></div>
-              <button class="text-button" data-view="library" type="button">查看全部</button>
+              <div><h2 id="history-index-title">任务索引</h2><p>按记录时间倒序</p></div>
             </header>
-            <div class="dashboard-list" id="dashboard-recent"></div>
-            <div class="empty-state" id="dashboard-empty" hidden>
-              <svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg>
-              <strong>还没有版本</strong>
-              <p>上传一张纹样，第一步会保留在这里。</p>
-              <button class="btn btn-solid btn-sm" id="dashboard-empty-upload" type="button">上传纹样</button>
+            <label class="history-filter">
+              <svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg>
+              <input id="history-filter" type="search" placeholder="搜索类型、编号或状态" aria-label="搜索历史任务" autocomplete="off">
+            </label>
+            <div class="history-index-list" id="history-list" role="listbox" aria-label="历史任务索引"></div>
+            <div class="history-index-foot">
+              <button class="btn btn-line btn-sm" id="history-more" type="button" hidden>加载更多</button>
             </div>
-          </section>
+          </aside>
 
-          <section class="panel-card quick-card">
-            <header class="panel-card-head"><div><h2>快速开始</h2><p>常用入口</p></div></header>
-            <div class="quick-list">
-              <button class="quick-item" id="dashboard-open-workspace" type="button">
-                <span class="quick-icon"><svg class="icon" aria-hidden="true"><use href="#i-crop"></use></svg></span>
-                <span><strong>打开图像处理</strong><small>裁切、提取、候选与修复</small></span>
-                <svg class="icon quick-arrow" aria-hidden="true"><use href="#i-arrow"></use></svg>
-              </button>
-              <button class="quick-item" data-view="library" type="button">
-                <span class="quick-icon quick-icon-green"><svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg></span>
-                <span><strong>浏览纹样库</strong><small>全部原图、成果与候选</small></span>
-                <svg class="icon quick-arrow" aria-hidden="true"><use href="#i-arrow"></use></svg>
-              </button>
-              <button class="quick-item" id="dashboard-history" type="button">
-                <span class="quick-icon quick-icon-amber"><svg class="icon" aria-hidden="true"><use href="#i-history"></use></svg></span>
-                <span><strong>查看历史任务</strong><small>恢复流程或重跑局部</small></span>
-                <svg class="icon quick-arrow" aria-hidden="true"><use href="#i-arrow"></use></svg>
-              </button>
-            </div>
-          </section>
+          <section class="panel-card history-detail" id="history-detail" aria-live="polite"></section>
         </div>
-
-        <section class="panel-card flow-card">
-          <header class="panel-card-head">
-            <div><h2>从原图到可编辑 SVG</h2><p>全部处理都在本机完成；云端生成只是可选的一步</p></div>
-            <button class="text-button" id="dashboard-flow-open" type="button">打开工作区</button>
-          </header>
-          <div class="flow-strip">
-            <div class="flow-step"><span>01</span><strong>导入</strong><small>保留原图与来源</small></div>
-            <div class="flow-step"><span>02</span><strong>提取</strong><small>裁切、蒙版与线稿</small></div>
-            <div class="flow-step"><span>03</span><strong>候选</strong><small>AI 拆层或本地合成</small></div>
-            <div class="flow-step"><span>04</span><strong>矢量</strong><small>SVG 与平铺导出</small></div>
-          </div>
-        </section>
       </section>
 
       <section class="view library-view" id="view-library" aria-labelledby="library-title" hidden>
@@ -1417,29 +1366,6 @@
       </section>
     </div>
   </div>
-
-  <div class="scrim" id="history-scrim" hidden></div>
-  <aside class="drawer" id="history-drawer" role="dialog" aria-modal="true" aria-labelledby="history-title" hidden>
-    <header class="drawer-head">
-      <div>
-        <h2 id="history-title">历史任务</h2>
-        <p>本机记录</p>
-      </div>
-      <button class="icon-btn" id="close-history" type="button" aria-label="关闭历史抽屉" title="关闭">
-        <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
-      </button>
-    </header>
-    <div class="drawer-tools">
-      <span id="history-summary">尚未加载</span>
-      <button class="icon-btn" id="refresh-history" type="button" aria-label="刷新历史任务" title="刷新">
-        <svg class="icon" aria-hidden="true"><use href="#i-refresh"></use></svg>
-      </button>
-    </div>
-    <div class="drawer-list" id="history-list"></div>
-    <div class="drawer-foot">
-      <button class="btn btn-line btn-sm" id="history-more" type="button" hidden>加载更多</button>
-    </div>
-  </aside>
 
   <dialog class="dialog" id="settings-dialog" aria-labelledby="settings-title">
     <form class="dialog-card settings-card" id="settings-form" autocomplete="off" novalidate>

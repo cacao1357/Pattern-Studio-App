@@ -18,9 +18,6 @@ if (appView) {
   };
 
   handle.addEventListener("click", () => setClosed(!appView.classList.contains("drawer-closed")));
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !appView.classList.contains("drawer-closed")) setClosed(true);
-  });
 }
 
 // Lightweight ripple on real controls only; no layout changes.
