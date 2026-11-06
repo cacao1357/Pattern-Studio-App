@@ -1152,51 +1152,29 @@ body::before {
 .rail-step { flex: 0 0 var(--rail-item); scroll-snap-align: center; }
 .rail-step .rail-name { display: inline-block; }
 
-/* Fixed vertical nav slider: active icon is centered in a compact viewport. */
+/* Static vertical nav: every entry stays visible, and the top offset keeps the
+   icons where the old sliding window placed them. */
 .side-nav {
-  height: 300px;
-  max-height: 300px;
-  flex: 0 0 300px;
-  overflow-x: hidden;
-  overflow-y: auto;
-  padding: 126px 0;
+  height: auto;
+  max-height: none;
+  flex: 0 0 auto;
+  overflow: visible;
+  padding: 126px 0 0;
   gap: 5px;
-  scroll-snap-type: y mandatory;
-  scroll-behavior: smooth;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-  mask-image: linear-gradient(180deg, transparent 0, #000 8%, #000 92%, transparent 100%);
 }
 
-.side-nav::-webkit-scrollbar { display: none; }
-.side-nav-item { flex: 0 0 48px; scroll-snap-align: center; }
+.side-nav-item { flex: 0 0 48px; }
 
-/* Test-version wipe: a light clip-path reveal. No transform, no blur, no
-   backdrop-filter on the moving layer, so it stays cheap during a view switch. */
-.ps-page-wipe {
-  position: fixed;
-  inset: 0;
-  z-index: 70;
-  display: none;
-  pointer-events: none;
-  background: linear-gradient(135deg, rgba(246, 248, 252, .98), rgba(216, 230, 250, .98));
-  clip-path: inset(0 0 0 0);
-  will-change: clip-path;
-}
-
-.ps-page-wipe.is-wiping {
-  display: block;
-  animation: ps-page-wipe .52s cubic-bezier(.22, .68, .24, 1) both;
-}
-
-@keyframes ps-page-wipe {
-  from { clip-path: inset(0 0 0 0); }
-  to { clip-path: inset(0 100% 0 0); }
-}
-
-/* The wipe is the only page transition; content is never faded or hidden. */
+/* View switch: only the incoming view fades in. Opacity is deliberate — a
+   transform on .view would turn it into the containing block of the fixed
+   .status-body and make the status bar jump for the length of the animation. */
 .view-enter {
-  animation: none;
+  animation: view-fade-in .17s cubic-bezier(.22, .68, .24, 1) both;
+}
+
+@keyframes view-fade-in {
+  from { opacity: .85; }
+  to { opacity: 1; }
 }
 
 /* Home disc sheen, orbit dot and magnetic displacement. */
@@ -1237,7 +1215,7 @@ body::before {
 
 @media (max-width: 1080px) {
   .view-workspace .rail, .rail { --rail-item: 84px; --rail-pad: 258px; width: 600px; max-width: calc(100% - 28px); }
-  .side-nav { height: 270px; max-height: 270px; flex-basis: 270px; padding-top: 111px; padding-bottom: 111px; }
+  .side-nav { padding-top: 111px; }
   .side-nav-item { flex-basis: 44px; }
 }
 
@@ -1245,12 +1223,11 @@ body::before {
   .view-workspace .rail, .rail { --rail-item: 78px; --rail-pad: calc(50% - 49px); width: auto; max-width: none; align-self: stretch; margin-left: 10px; margin-right: 10px; }
   .view-workspace .rail { margin-top: 8px; }
   .rail-name { font-size: 10px; }
-  .side-nav { height: 240px; max-height: 240px; flex-basis: 240px; padding-top: 96px; padding-bottom: 96px; }
+  .side-nav { padding-top: 96px; }
   .side-nav-item { flex-basis: 42px; min-height: 42px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ps-page-wipe.is-wiping,
   .view-enter,
   .home-disc::before { animation: none !important; }
   .home-entry:hover .home-disc { transform: none; }

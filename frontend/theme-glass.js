@@ -54,9 +54,8 @@ document.querySelectorAll("[data-home-action]").forEach((button) => {
   });
 });
 
-// Keep the current stage and current nav item centered in their fixed sliders.
+// Keep the current stage centered in its fixed slider.
 const railEl = document.querySelector(".rail");
-const sideNavEl = document.querySelector(".side-nav");
 
 function centerRail(behavior = "smooth") {
   if (!railEl) return;
@@ -64,16 +63,6 @@ function centerRail(behavior = "smooth") {
   if (!active) return;
   railEl.scrollTo({
     left: active.offsetLeft + active.offsetWidth / 2 - railEl.clientWidth / 2,
-    behavior
-  });
-}
-
-function centerSideNav(behavior = "smooth") {
-  if (!sideNavEl) return;
-  const active = sideNavEl.querySelector(".side-nav-item.is-active");
-  if (!active) return;
-  sideNavEl.scrollTo({
-    top: active.offsetTop + active.offsetHeight / 2 - sideNavEl.clientHeight / 2,
     behavior
   });
 }
@@ -86,50 +75,18 @@ if (railEl) {
   });
 }
 
-if (sideNavEl) {
-  new MutationObserver(() => centerSideNav()).observe(sideNavEl, {
-    subtree: true,
-    attributes: true,
-    attributeFilter: ["class"]
-  });
-}
-
 window.addEventListener("resize", () => {
   centerRail("auto");
-  centerSideNav("auto");
 }, { passive: true });
 
 document.addEventListener("ps:viewchange", () => {
   requestAnimationFrame(() => {
     centerRail();
-    centerSideNav();
   });
 });
 
 requestAnimationFrame(() => {
   centerRail("auto");
-  centerSideNav("auto");
-});
-
-// Page wipe between views.
-const pageWipe = document.createElement("div");
-pageWipe.className = "ps-page-wipe";
-pageWipe.setAttribute("aria-hidden", "true");
-document.body.append(pageWipe);
-
-let wipeTimer = 0;
-const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-document.addEventListener("ps:viewchange", () => {
-  if (reduceMotion) {
-    pageWipe.classList.remove("is-wiping");
-    return;
-  }
-  pageWipe.classList.remove("is-wiping");
-  void pageWipe.offsetWidth;
-  pageWipe.classList.add("is-wiping");
-  window.clearTimeout(wipeTimer);
-  wipeTimer = window.setTimeout(() => pageWipe.classList.remove("is-wiping"), 540);
 });
 
 // Magnetic home discs: the displacement is applied through CSS variables so
