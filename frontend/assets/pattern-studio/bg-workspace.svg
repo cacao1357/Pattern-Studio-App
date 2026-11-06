@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 900" width="1440" height="900">
+  <defs>
+    <radialGradient id="glow" cx="88%" cy="12%" r="72%">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="base" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#FBFDFF"/>
+      <stop offset="0.55" stop-color="#EDF3FD"/>
+      <stop offset="1" stop-color="#DFE9F9"/>
+    </linearGradient>
+    <pattern id="motif" width="200" height="200" patternUnits="userSpaceOnUse">
+      <g fill="none" stroke="#8FB0E2" stroke-width="1.1" stroke-linecap="round" opacity="0.045">
+      <path d="M4 36V4h32v24H12v-16h16"/>
+      <path d="M44 36V4h32v24H52v-16h16"/>
+      <path d="M84 36V4h32v24H92v-16h16"/>
+      <path d="M124 36V4h32v24H132v-16h16"/>
+      <path d="M164 36V4h32v24H172v-16h16"/>
+      <path d="M4 76V44h32v24H12v-16h16"/>
+      <path d="M44 76V44h32v24H52v-16h16"/>
+      <path d="M84 76V44h32v24H92v-16h16"/>
+      <path d="M124 76V44h32v24H132v-16h16"/>
+      <path d="M164 76V44h32v24H172v-16h16"/>
+      <path d="M4 116V84h32v24H12v-16h16"/>
+      <path d="M44 116V84h32v24H52v-16h16"/>
+      <path d="M84 116V84h32v24H92v-16h16"/>
+      <path d="M124 116V84h32v24H132v-16h16"/>
+      <path d="M164 116V84h32v24H172v-16h16"/>
+      <path d="M4 156V124h32v24H12v-16h16"/>
+      <path d="M44 156V124h32v24H52v-16h16"/>
+      <path d="M84 156V124h32v24H92v-16h16"/>
+      <path d="M124 156V124h32v24H132v-16h16"/>
+      <path d="M164 156V124h32v24H172v-16h16"/>
+      <path d="M4 196V164h32v24H12v-16h16"/>
+      <path d="M44 196V164h32v24H52v-16h16"/>
+      <path d="M84 196V164h32v24H92v-16h16"/>
+      <path d="M124 196V164h32v24H132v-16h16"/>
+      <path d="M164 196V164h32v24H172v-16h16"/>
+      </g>
+    </pattern>
+  </defs>
+  <rect width="1440" height="900" fill="url(#base)"/>
+  <rect width="1440" height="900" fill="url(#motif)"/>
+  <rect width="1440" height="900" fill="url(#glow)"/>
+</svg>

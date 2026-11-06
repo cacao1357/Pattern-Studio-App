@@ -167,7 +167,7 @@ def mount_workbench(app, current_store, current_service, current_worker):
         path = frontend / filename
         if not path.is_file():
             raise ServiceError("WORKBENCH_UNAVAILABLE", "The local workbench files are unavailable", 503)
-        return Response(path.read_bytes(), media_type=media_type)
+        return Response(path.read_bytes(), media_type=media_type, headers={"Cache-Control": "no-store"})
 
     @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
     def index():
@@ -195,9 +195,21 @@ def mount_workbench(app, current_store, current_service, current_worker):
     def saas_styles():
         return static_response("theme-saas.css", "text/css")
 
-    @app.api_route("/assets/logo.svg", methods=["GET", "HEAD"], include_in_schema=False)
-    def brand_logo():
-        return static_response("assets/logo.svg", "image/svg+xml")
+    @app.api_route("/theme-glass.css", methods=["GET", "HEAD"], include_in_schema=False)
+    def glass_styles():
+        return static_response("theme-glass.css", "text/css")
+
+    @app.api_route("/theme-glass.js", methods=["GET", "HEAD"], include_in_schema=False)
+    def glass_script():
+        return static_response("theme-glass.js", "text/javascript")
+
+    @app.api_route("/assets/pattern-studio/{filename}", methods=["GET", "HEAD"], include_in_schema=False)
+    def pattern_asset(filename: str):
+        allowed = {"bg-home.svg", "bg-workspace.svg", "motif-01-meander.svg", "motif-04-cloud.svg", "lotus-mark.svg", "crane-line-blue.png"}
+        if filename not in allowed:
+            raise ServiceError("ASSET_NOT_FOUND", "Unknown pattern asset", 404)
+        media = "image/svg+xml" if filename.endswith(".svg") else "image/png" if filename.endswith(".png") else "application/octet-stream"
+        return static_response(f"assets/pattern-studio/{filename}", media)
 
     @app.api_route("/favicon.svg", methods=["GET", "HEAD"], include_in_schema=False)
     def favicon():

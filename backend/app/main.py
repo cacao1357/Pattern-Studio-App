@@ -88,7 +88,7 @@ class LocalApiBoundary:
             return await JSONResponse({"error": {"code": "LOCAL_ACCESS_ONLY", "message": "Use the same-origin loopback workbench"}}, 403)(scope, receive, send)
         if headers.get(b"sec-fetch-site") not in (None, b"same-origin", b"none"):
             return await JSONResponse({"error": {"code": "LOCAL_ACCESS_ONLY", "message": "Cross-site workbench requests are unavailable"}}, 403)(scope, receive, send)
-        public_shell = scope.get("path") in {"/", "/workbench.js", "/styles.css", "/theme-saas.css", "/favicon.svg", "/assets/logo.svg", *("/" + name for name in FRONTEND_MODULES)} and scope.get("method") in {"GET", "HEAD"}
+        public_shell = scope.get("path") in {"/", "/workbench.js", "/styles.css", "/theme-saas.css", "/theme-glass.css", "/theme-glass.js", "/favicon.svg", "/assets/pattern-studio/bg-home.svg", "/assets/pattern-studio/bg-workspace.svg", "/assets/pattern-studio/motif-01-meander.svg", "/assets/pattern-studio/motif-04-cloud.svg", "/assets/pattern-studio/lotus-mark.svg", "/assets/pattern-studio/crane-line-blue.png", *("/" + name for name in FRONTEND_MODULES)} and scope.get("method") in {"GET", "HEAD"}
         if scope.get("method") not in {"GET", "HEAD", "OPTIONS"} and headers.get(b"x-pattern-studio") != b"local":
             return await JSONResponse({"error": {"code": "LOCAL_REQUEST_HEADER_REQUIRED", "message": "Use the workbench or supply X-Pattern-Studio: local"}}, 403)(scope, receive, send)
         path = scope.get("path")

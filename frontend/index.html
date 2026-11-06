@@ -4,13 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light">
-  <meta name="theme-color" content="#F7F8FC">
+  <meta name="theme-color" content="#F6F8FC">
   <meta name="description" content="Pattern Studio 本地纹样工作台：上传、框选、本地提取、AI 候选选择、蒙版修正、局部修复确认与手动平铺。">
   <title>本地纹样工作台 · Pattern Studio</title>
   <link rel="icon" type="image/svg+xml" href="./favicon.svg">
   <link rel="stylesheet" href="./styles.css">
   <link rel="stylesheet" href="./theme-saas.css">
+  <link rel="stylesheet" href="./theme-glass.css">
   <script type="module" src="./workbench.js"></script>
+  <script type="module" src="./theme-glass.js"></script>
 </head>
 <body>
   <a class="skip-link" href="#workspace-main">跳到工作台</a>
@@ -20,6 +22,10 @@
       <path d="M16 3.5c4.2 4.2 8 8 12.5 12.5C24 20.5 20.2 24.3 16 28.5 11.8 24.3 8 20.5 3.5 16 8 11.5 11.8 7.7 16 3.5Z" fill="none" stroke="currentColor" stroke-width="1.5"/>
       <path d="M16 9.6c2.3 2.3 4.1 4.1 6.4 6.4-2.3 2.3-4.1 4.1-6.4 6.4-2.3-2.3-4.1-4.1-6.4-6.4 2.3-2.3 4.1-4.1 6.4-6.4Z" fill="none" stroke="currentColor" stroke-width="1.5"/>
       <circle cx="16" cy="16" r="1.6" fill="currentColor"/>
+    </symbol>
+    <symbol id="i-home" viewBox="0 0 24 24">
+      <path d="M4 10.8 12 4l8 6.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M6.4 9.8V19h11.2V9.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
     </symbol>
     <symbol id="i-lock" viewBox="0 0 24 24">
       <rect x="5" y="10" width="14" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.7"/>
@@ -102,10 +108,10 @@
     </symbol>
   </svg>
 
-  <div class="app-view is-workspace" id="app-view">
+  <div class="app-view is-home" id="app-view">
     <aside class="sidebar" aria-label="主导航">
       <a class="side-brand" href="#workspace-main" aria-label="Pattern Studio">
-        <img class="brand-logo" src="./assets/logo.svg" alt="" width="38" height="38">
+        <img class="brand-logo" src="./assets/pattern-studio/lotus-mark.svg" alt="" width="38" height="38">
         <span class="side-brand-copy">
           <strong>Pattern Studio</strong>
           <small>本地纹样工作台</small>
@@ -114,27 +120,22 @@
 
       <nav class="side-nav">
         <span class="side-label">工作区</span>
-        <button class="side-nav-item" id="side-nav-dashboard" data-view="dashboard" type="button" title="工作台">
+        <button class="side-nav-item is-active" id="side-nav-home" data-view="home" type="button" title="首页">
+          <svg class="icon" aria-hidden="true"><use href="#i-home"></use></svg>
+          <span>首页</span>
+        </button>
+        <button class="side-nav-item" id="side-nav-dashboard" data-view="dashboard" type="button" title="概览">
           <svg class="icon" aria-hidden="true"><use href="#i-grid"></use></svg>
-          <span>工作台</span>
+          <span>概览</span>
         </button>
         <button class="side-nav-item" id="side-nav-library" data-view="library" type="button" title="纹样库">
           <svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg>
           <span>纹样库</span>
           <span class="side-count" id="side-library-count">0</span>
         </button>
-        <button class="side-nav-item is-active" id="side-nav-workspace" data-view="workspace" type="button" title="图像处理">
+        <button class="side-nav-item" id="side-nav-workspace" data-view="workspace" type="button" title="图像处理">
           <svg class="icon" aria-hidden="true"><use href="#i-crop"></use></svg>
           <span>图像处理</span>
-        </button>
-        <span class="side-label side-label-spaced">数据</span>
-        <button class="side-nav-item" id="side-dataset" type="button" title="数据集">
-          <svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg>
-          <span>数据集</span>
-        </button>
-        <button class="side-nav-item" id="side-history" type="button" title="历史任务">
-          <svg class="icon" aria-hidden="true"><use href="#i-history"></use></svg>
-          <span>历史任务</span>
         </button>
       </nav>
 
@@ -171,7 +172,7 @@
         <div class="app-breadcrumb">
           <span id="breadcrumb-root">工作台</span>
           <span class="crumb-sep">/</span>
-          <strong id="breadcrumb-current">图像处理</strong>
+          <strong id="breadcrumb-current">概览</strong>
         </div>
         <div class="app-bar-tools">
           <button class="health" id="health-chip" type="button" aria-label="检查本机服务状态" title="检查本机服务状态">
@@ -194,7 +195,46 @@
         </div>
       </header>
 
-      <section class="view dashboard-view" id="view-dashboard" aria-labelledby="dashboard-title" hidden>
+      <section class="view home-view view-enter" id="view-home" aria-labelledby="home-title">
+        <div class="home-hero">
+          <img class="home-mark" src="./assets/pattern-studio/lotus-mark.svg" alt="" width="64" height="64">
+          <h1 id="home-title">Pattern Studio</h1>
+          <p class="home-sub">让文物纹样 · 焕发数字新生</p>
+
+          <div class="home-entries">
+            <button class="home-entry" type="button" data-home-action="extract">
+              <span class="home-disc">
+                <svg class="icon" aria-hidden="true"><use href="#i-crop"></use></svg>
+              </span>
+              <strong>纹样提取</strong>
+            </button>
+            <button class="home-entry" type="button" data-home-action="lineart">
+              <span class="home-disc">
+                <svg class="icon" aria-hidden="true"><use href="#i-brush"></use></svg>
+              </span>
+              <strong>线稿重构</strong>
+            </button>
+            <button class="home-entry is-featured" type="button" data-home-action="candidates">
+              <span class="home-orbit" aria-hidden="true"></span>
+              <span class="home-disc">
+                <img class="home-crane" src="./assets/pattern-studio/crane-line-blue.png" alt="">
+                <svg class="icon" aria-hidden="true"><use href="#i-spark"></use></svg>
+              </span>
+              <strong>AI 纹样补全</strong>
+            </button>
+            <button class="home-entry" type="button" data-home-action="review">
+              <span class="home-disc">
+                <svg class="icon" aria-hidden="true"><use href="#i-check"></use></svg>
+              </span>
+              <strong>质量审核</strong>
+            </button>
+          </div>
+
+          <p class="home-hint">点击圆盘进入工作区</p>
+        </div>
+      </section>
+
+      <section class="view dashboard-view view-enter" id="view-dashboard" aria-labelledby="dashboard-title" hidden>
         <div class="view-head">
           <div>
             <p class="eyebrow">WORKBENCH</p>
@@ -311,7 +351,7 @@
         </div>
       </section>
 
-      <section class="view view-workspace" id="view-workspace" aria-label="图像处理工作区">
+      <section class="view view-workspace" id="view-workspace" aria-label="图像处理工作区" hidden>
         <nav class="rail" aria-label="工序导航">
           <button class="rail-step" type="button" data-stage="1" aria-current="step">
             <span class="rail-num">01</span><span class="rail-name">来源</span>
@@ -469,25 +509,31 @@
       <aside class="tools" aria-label="当前工序参数">
         <div class="tools-scroll">
 
-          <section class="guide" id="guide-panel" aria-labelledby="guide-heading">
-            <div class="guide-head">
+          <details class="guide" id="guide-panel" aria-labelledby="guide-heading">
+            <summary class="guide-head">
               <h2 class="guide-title" id="guide-heading">引导</h2>
               <span class="guide-tone" id="guide-tone">等待开始</span>
+              <svg class="icon guide-chevron" aria-hidden="true"><use href="#i-chevron"></use></svg>
+            </summary>
+            <div class="guide-body">
+              <p class="guide-next" id="guide-next">先放入一张纹样。</p>
+              <p class="guide-detail" id="guide-detail">上传后可从本地提取开始；不会调用 AI。</p>
+              <ol class="guide-steps" id="guide-steps"></ol>
+              <p class="guide-location" id="guide-location">成果会出现在左栏版本区。</p>
+              <p class="guide-blocked" id="guide-blocked" hidden></p>
+              <details class="guide-failure" id="guide-failure" hidden>
+                <summary id="guide-failure-title">失败后的下一步</summary>
+                <ul id="guide-failure-lines"></ul>
+              </details>
             </div>
-            <p class="guide-next" id="guide-next">先放入一张纹样。</p>
-            <p class="guide-detail" id="guide-detail">上传后可从本地提取开始；不会调用 AI。</p>
-            <ol class="guide-steps" id="guide-steps"></ol>
-            <p class="guide-location" id="guide-location">成果会出现在左栏版本区。</p>
-            <p class="guide-blocked" id="guide-blocked" hidden></p>
-            <details class="guide-failure" id="guide-failure" hidden>
-              <summary id="guide-failure-title">失败后的下一步</summary>
-              <ul id="guide-failure-lines"></ul>
-            </details>
-          </section>
+          </details>
 
           <section class="stage-panel" id="source-panel" data-stage="1" aria-labelledby="source-heading">
             <h2 class="tools-title" id="source-heading">来源</h2>
-            <p class="tools-note">原文件保留，规范输入另存为新资产。</p>
+            <details class="inline-help">
+              <summary>来源说明</summary>
+              <p class="tools-note">原文件保留，规范输入另存为新资产。</p>
+            </details>
 
             <div class="dropzone" id="dropzone" aria-describedby="dropzone-help">
               <svg class="dropzone-icon" aria-hidden="true"><use href="#i-upload"></use></svg>
@@ -512,7 +558,10 @@
               <span class="field-label">来源备注 <em>可选</em></span>
               <textarea id="source-note" name="source-note" rows="2" maxlength="500" placeholder="馆藏编号、来源或授权范围"></textarea>
             </label>
-            <p class="hint">备注仅作记录，不构成来源许可证明。</p>
+            <details class="inline-help">
+              <summary>备注说明</summary>
+              <p class="hint">备注仅作记录，不构成来源许可证明。</p>
+            </details>
 
             <details class="group" id="provenance-group">
               <summary>

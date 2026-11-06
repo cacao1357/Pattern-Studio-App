@@ -657,7 +657,7 @@ const dom = {
 };
 
 const state = {
-  view: "workspace",
+  view: "home",
   datasetAudit: null,
   datasetAuditLoading: false,
   libraryQuery: "",
@@ -1794,6 +1794,7 @@ function renderVersions() {
 }
 
 const VIEW_LABELS = {
+  home: ["首页", "Pattern Studio"],
   dashboard: ["工作台", "概览"],
   library: ["纹样库", "全部版本"],
   workspace: ["工作台", "图像处理"]
@@ -1816,10 +1817,11 @@ function openUploadPicker() {
 }
 
 function setView(view) {
-  const next = ["dashboard", "library", "workspace"].includes(view) ? view : "workspace";
+  const next = ["home", "dashboard", "library", "workspace"].includes(view) ? view : "home";
   state.view = next;
   $("app-view")?.classList.toggle("is-workspace", next === "workspace");
-  for (const name of ["dashboard", "library", "workspace"]) {
+  $("app-view")?.classList.toggle("is-home", next === "home");
+  for (const name of ["home", "dashboard", "library", "workspace"]) {
     const node = $("view-" + name);
     if (node) node.hidden = name !== next;
   }
@@ -1829,6 +1831,7 @@ function setView(view) {
     void activeView.offsetWidth;
     activeView.classList.add("view-enter");
   }
+  document.dispatchEvent(new CustomEvent("ps:viewchange", { detail: { view: next } }));
   document.querySelectorAll(".side-nav-item[data-view]").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.view === next);
   });
