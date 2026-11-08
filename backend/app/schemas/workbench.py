@@ -95,7 +95,13 @@ class LineartOptions(StrictModel):
 
 
 class LineartRequest(InputRequest, LineartOptions):
-    pass
+    method: Literal["opencv", "model"] = "opencv"
+
+    @model_validator(mode="after")
+    def model_has_no_opencv_options(self):
+        if self.method == "model" and self.model_fields_set.intersection(LineartOptions.model_fields):
+            raise ValueError("OpenCV options are only available with method=opencv")
+        return self
 
 
 class PipelineRequest(InputRequest):

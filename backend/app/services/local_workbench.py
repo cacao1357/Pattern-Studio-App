@@ -132,6 +132,10 @@ class LocalWorkbench:
         values = payload.model_dump(mode="json")
         self.safe_text(key + canonical_json(values))
         input_id = values.pop("input_asset_id", None)
+        if kind == "lineart":
+            method = values.pop("method")
+            if method == "model":
+                values = {"method": method}
         if kind == "export":
             total = 0
             unconfirmed = []
@@ -323,9 +327,17 @@ def execute_local(store: WorkbenchStore, job_id, token):
     if kind == "lineart":
         store.step(job_id, token, "lineart", "running")
         source, image = _read_image(store, job["input_asset_id"])
-        result = extract_lineart(image, **params)
+        extra = {}
+        if params.get("method") == "model":
+            from app.services.model_lineart import extract_model_lineart
+
+            result = extract_model_lineart(image)
+            extra.update(algorithm_version=result.metadata["algorithm"], ai_inferred=True, geometry_verified=False)
+        else:
+            result = extract_lineart(image, **params)
         store.publish(job_id, token, "lineart", [
             _output(result.image, "lineart", source, job_id, extra={
+                **extra,
                 "parameters": result.metadata,
                 "parents": [{"asset_id": source["asset_id"], "role": "lineart_rgb"}],
             })

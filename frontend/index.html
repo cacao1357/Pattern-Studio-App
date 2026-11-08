@@ -837,11 +837,18 @@
             <details class="group" id="lineart-group">
               <summary>
                 <span class="group-label">线稿</span>
-                <span class="group-meta">结构线 · 本地</span>
+                <span class="group-meta">OpenCV · 本地模型</span>
                 <svg class="icon group-chevron" aria-hidden="true"><use href="#i-chevron"></use></svg>
               </summary>
               <div class="group-body">
-                <p class="hint">从当前输入生成透明底黑线结构稿；局部对比路径补亮区，中值核与面积门槛随尺寸自动缩放。结果可继续矢量化。</p>
+                <fieldset class="fieldset">
+                  <legend class="field-label">线稿方式</legend>
+                  <div class="choices">
+                    <label class="choice"><input type="radio" name="lineart-method" value="local" checked><span><strong>OpenCV 结构线</strong><small>默认 · 无需模型权重</small></span></label>
+                    <label class="choice"><input type="radio" name="lineart-method" value="model"><span><strong>本地线稿模型</strong><small>可选 · 512×512 · 需已安装模型权重</small></span></label>
+                  </div>
+                </fieldset>
+                <p class="hint" id="lineart-hint">从当前输入生成透明底黑线结构稿；局部对比路径补亮区，中值核与面积门槛随尺寸自动缩放。结果可继续矢量化。</p>
                 <button class="btn btn-line btn-wide" id="lineart-button" type="button" disabled>生成线稿</button>
                 <p class="field-error" id="lineart-error" role="alert" hidden></p>
               </div>

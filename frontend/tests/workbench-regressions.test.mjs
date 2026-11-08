@@ -419,3 +419,86 @@ test("tile ZIP export re-checks state after the async licence dialog", async () 
   assert.equal(stale.calls.submissions.length, 0);
   assert.ok(stale.calls.errors.some((entry) => /已变化/.test(entry.message)));
 });
+
+function lineartRequestHarness(overrides) {
+  const opts = overrides || {};
+  const lineartError = { hidden: true, textContent: "" };
+  const dom = { lineartError, lineartGroup: { open: false } };
+  const api = loadFunctions(["lineartMethod", "buildLineartRequest"], {
+    dom: dom,
+    checkedValue: (name) => (name === "lineart-method" ? (opts.method || "local") : ""),
+    currentAsset: () => (opts.asset === null ? null : { asset_id: "asset-1" }),
+    requireProcessReady: () => opts.ready !== false
+  });
+  return { api, dom };
+}
+
+test("lineart keeps the existing OpenCV request and payload", () => {
+  const harness = lineartRequestHarness();
+  const request = harness.api.buildLineartRequest();
+  assert.equal(request.ok, true);
+  assert.equal(request.path, "/jobs/lineart");
+  assert.equal(request.kind, "lineart");
+  assert.equal(request.label, "线稿");
+  assert.equal(request.errorNode, harness.dom.lineartError);
+  assert.deepEqual(request.payload, { input_asset_id: "asset-1", local: true });
+});
+
+test("lineart model entry submits only the input and method", () => {
+  const harness = lineartRequestHarness({ method: "model" });
+  const request = harness.api.buildLineartRequest();
+  assert.equal(request.label, "模型线稿");
+  assert.equal(request.path, "/jobs/lineart");
+  assert.deepEqual(request.payload, { input_asset_id: "asset-1", method: "model" });
+  assert.equal("local" in request.payload, false);
+});
+
+test("lineart requests refuse an empty workspace or busy workbench", () => {
+  assert.deepEqual(lineartRequestHarness({ asset: null }).api.buildLineartRequest(), {
+    ok: false,
+    error: "请先选择当前输入。"
+  });
+  assert.deepEqual(lineartRequestHarness({ ready: false }).api.buildLineartRequest(), {
+    ok: false,
+    handled: true
+  });
+});
+
+function lineartFailureHarness() {
+  const calls = { errors: [] };
+  const lineartError = { hidden: true, textContent: "" };
+  const lineartGroup = { open: false };
+  const api = loadFunctions(
+    ["normalizeKind", "lineartModelUnavailableText", "lineartFailureText", "reportLineartFailure"],
+    {
+      dom: { lineartError, lineartGroup },
+      setError: (node, message) => {
+        calls.errors.push({ node, message });
+        node.textContent = message || "";
+        node.hidden = !message;
+      }
+    }
+  );
+  return { api, calls, lineartError, lineartGroup };
+}
+
+test("lineart model failure is shown in the normal entry", () => {
+  const harness = lineartFailureHarness();
+  harness.api.reportLineartFailure({
+    kind: "lineart",
+    state: "failed",
+    error: { code: "LINEART_MODEL_UNAVAILABLE", message: "weights missing" }
+  });
+  assert.equal(harness.lineartError.hidden, false);
+  assert.match(harness.lineartError.textContent, /模型不可用/);
+  assert.match(harness.lineartError.textContent, /OpenCV/);
+  assert.match(harness.lineartError.textContent, /weights missing/);
+  assert.equal(harness.lineartGroup.open, true);
+});
+
+test("lineart failure reporting ignores other job kinds", () => {
+  const harness = lineartFailureHarness();
+  harness.api.reportLineartFailure({ kind: "extract", error: { code: "EXTRACT_FAILED" } });
+  assert.equal(harness.calls.errors.length, 0);
+  assert.equal(harness.lineartGroup.open, false);
+});

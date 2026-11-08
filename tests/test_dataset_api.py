@@ -77,6 +77,11 @@ def test_lineart_job_publishes_a_lineart_asset(tmp_path):
                                headers={"X-Pattern-Studio": "local", "Idempotency-Key": "p1_" + "d" * 16})
         assert response.status_code == 202, response.text
         job_id = response.json()["job_id"]
+        replay = client.post("/api/v1/jobs/lineart",
+                             json={"input_asset_id": asset_id, "local": True, "method": "opencv"},
+                             headers={"X-Pattern-Studio": "local", "Idempotency-Key": "p1_" + "d" * 16})
+        assert replay.status_code == 202, replay.text
+        assert replay.json()["job_id"] == job_id
         job = None
         for _ in range(80):
             job = client.get("/api/v1/jobs/" + job_id).json()

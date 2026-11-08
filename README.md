@@ -50,6 +50,17 @@ macOS / Linux（未实机验证）：
 
 接口、字段、限制与验证命令见 [docs/p1-lineart-dataset.md](docs/p1-lineart-dataset.md)。
 
+### 可选的本地线稿模型
+
+把 Stage D 模型包的 `model.pt` 和 `inference.json` 放在项目根目录的 `model/` 下。依赖要安装到运行工作台的同一个 Python 3.11 环境。下面以项目虚拟环境安装 CPU 版为例。如果该环境已有匹配的 GPU 版 PyTorch 和 torchvision，只需补装缺失的分割模型库。
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install torch==2.9.1 torchvision==0.24.1 --index-url https://download.pytorch.org/whl/cpu
+.\.venv\Scripts\python.exe -m pip install segmentation-models-pytorch==0.5.0
+```
+
+重启工作台后，在「线稿」组选择本地模型。OpenCV 仍是默认选项。CUDA 可用时直接在 GPU 上推理，CUDA 不可用或运行时显存分配失败时回退到 CPU。产物记录实际推理设备。模型将所选图像缩放到 512×512 推理，再把概率图映射回所选图像尺寸，以 0.5 阈值生成透明底黑线 PNG。模型任务串行运行，系统内存限额为 4 GiB，默认超时 90 秒。预览并应用线稿后，可选「轮廓单线」转为 SVG。长宽比悬殊或细节密集的素材可先裁出纹样单元。
+
 ## 数据与限制
 
 - 上传及结果保存于自动创建的 storage/api/，包含 SQLite 历史；保留该目录即可保留本地数据。

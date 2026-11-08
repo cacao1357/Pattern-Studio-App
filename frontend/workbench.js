@@ -456,6 +456,8 @@ const dom = {
   maxHoleArea: $("max-hole-area"),
   previewMode: $("preview-mode"),
   autoPreviewEnhance: $("auto-preview-enhance"),
+  lineartGroup: $("lineart-group"),
+  lineartHint: $("lineart-hint"),
   lineartButton: $("lineart-button"),
   lineartError: $("lineart-error"),
   vectorButton: $("vector-button"),
@@ -983,6 +985,9 @@ function friendlyError(error) {
   if (!error) return "操作未完成，请重试。";
   if (error.code === "LICENSE_REVIEW_REQUIRED") {
     return "导出前需要确认来源授权：所选版本有未登记或“未确认”的授权。请回到版本区检查后再次导出。";
+  }
+  if (error.code === "LINEART_MODEL_UNAVAILABLE") {
+    return lineartModelUnavailableText(error.message);
   }
   let message = error.message || String(error);
   message = message.replace(/\s+/g, " ").trim();
@@ -3451,17 +3456,49 @@ function buildExtractRequest() {
   };
 }
 
+function lineartMethod() {
+  return checkedValue("lineart-method") === "model" ? "model" : "local";
+}
+
+function lineartModelUnavailableText(detail) {
+  const note = detail ? String(detail).replace(/\s+/g, " ").trim() : "";
+  return "本地线稿模型不可用。请检查模型文件和推理依赖，或改用“OpenCV 结构线”。" + (note ? "（" + note + "）" : "");
+}
+
+function lineartFailureText(job) {
+  const error = job && job.error && typeof job.error === "object" ? job.error : null;
+  const code = String((error && error.code) || "");
+  const message = error && error.message ? String(error.message).replace(/\s+/g, " ").trim() : "";
+  if (code === "LINEART_MODEL_UNAVAILABLE") return lineartModelUnavailableText(message);
+  if (message) return "线稿失败：" + message;
+  if (code) return "线稿失败：" + code;
+  return "线稿任务失败，未返回原因；可改回“OpenCV 结构线”重试。";
+}
+
+// 线稿失败必须回到正常入口：错误写在“线稿”组内，并展开该组，让失败原因可见。
+function reportLineartFailure(job) {
+  if (normalizeKind(job && job.kind) !== "lineart") return;
+  const message = lineartFailureText(job);
+  setError(dom.lineartError, message);
+  if (dom.lineartGroup) dom.lineartGroup.open = true;
+}
+
 function buildLineartRequest() {
   if (!requireProcessReady()) return { ok: false, handled: true };
   const asset = currentAsset();
   if (!asset) return { ok: false, error: "请先选择当前输入。" };
+  const model = lineartMethod() === "model";
+  // 模型入口只提交输入与方法；传统 OpenCV 请求保持原样，不带模型参数。
+  const payload = model
+    ? { input_asset_id: asset.asset_id, method: "model" }
+    : { input_asset_id: asset.asset_id, local: true };
   return {
     ok: true,
     path: "/jobs/lineart",
-    label: "线稿",
+    label: model ? "模型线稿" : "线稿",
     kind: "lineart",
     errorNode: dom.lineartError,
-    payload: { input_asset_id: asset.asset_id, local: true }
+    payload: payload
   };
 }
 
@@ -3863,9 +3900,11 @@ async function completePreviewJob(job) {
   if (jobState === "failed") {
     if (owns) {
       state.previewSession.fail(
-        job.error && (job.error.message || job.error.code)
-          ? (job.error.message || "预览任务失败。")
-          : "预览任务失败。"
+        normalizeKind(job.kind) === "lineart"
+          ? lineartFailureText(job)
+          : job.error && (job.error.message || job.error.code)
+            ? (job.error.message || "预览任务失败。")
+            : "预览任务失败。"
       );
       renderPreviewUi();
       updateActionState();
@@ -4203,6 +4242,9 @@ function readParamsSnapshot() {
       corner: dom.vectorCorner.value.trim() === "" ? null : Number(dom.vectorCorner.value),
       splice: dom.vectorSplice.value.trim() === "" ? null : Number(dom.vectorSplice.value)
     },
+    lineart: {
+      method: lineartMethod()
+    },
     enhance: readEnhanceDraft(),
     prepare: {
       rotation: Number(dom.prepareRotation.value),
@@ -4236,6 +4278,9 @@ function applyParamsSnapshot(snapshot) {
   dom.vectorCorner.value = Number.isFinite(vector.corner) ? String(vector.corner) : "";
   dom.vectorSplice.value = Number.isFinite(vector.splice) ? String(vector.splice) : "";
 
+  const lineart = params.lineart && typeof params.lineart === "object" ? params.lineart : {};
+  if (["local", "model"].includes(lineart.method)) setRadio("lineart-method", lineart.method);
+
   const enhance = params.enhance && typeof params.enhance === "object" ? params.enhance : {};
   if (Number.isFinite(enhance.brightness)) dom.brightnessValue.value = String(enhance.brightness);
   if (Number.isFinite(enhance.contrast)) dom.contrastValue.value = String(enhance.contrast);
@@ -4258,6 +4303,7 @@ function applyParamsSnapshot(snapshot) {
   }
   syncPairedControlValues();
   updateComposeSummary();
+  renderLineartOptions();
 }
 
 function captureWorkspace() {
@@ -4466,12 +4512,27 @@ function scheduleAutoPreview() {
 
 function syncActionLabels() {
   const previewFirst = Boolean(dom.previewMode.checked);
+  const lineartModel = lineartMethod() === "model";
   setButtonLabel(dom.oneclickButton, previewFirst ? "预览本地一键" : "开始本地一键");
   setButtonLabel(dom.extractButton, previewFirst ? "预览提取" : "仅执行提取");
   setButtonLabel(dom.vectorButton, previewFirst ? "预览矢量化" : "仅重新矢量化");
-  setButtonLabel(dom.lineartButton, previewFirst ? "预览线稿" : "生成线稿");
+  setButtonLabel(dom.lineartButton, lineartModel
+    ? (previewFirst ? "预览模型线稿" : "生成模型线稿")
+    : (previewFirst ? "预览线稿" : "生成线稿"));
   setButtonLabel(dom.enhanceButton, previewFirst ? "预览轻增强" : "仅执行轻增强");
   setButtonLabel(dom.prepareButton, previewFirst ? "预览准备版本" : "生成准备版本");
+}
+
+function renderLineartOptions() {
+  const model = lineartMethod() === "model";
+  setText(dom.lineartHint, model
+    ? "使用本机 512×512 线稿模型：只在本机推理，不联网、不上传；成果保持当前输入的尺寸与坐标。模型依赖或权重缺失时任务会失败，原因显示在下方，不会自动改用 OpenCV。"
+    : "从当前输入生成透明底黑线结构稿；局部对比路径补亮区，中值核与面积门槛随尺寸自动缩放。结果可继续矢量化。");
+  if (dom.lineartButton) {
+    dom.lineartButton.title = model
+      ? "按本地 512×512 线稿模型提交；模型不可用时会直接失败并显示原因"
+      : "按现有 OpenCV 结构线流程提交";
+  }
 }
 
 function versionHas(kindTest) {
@@ -5022,6 +5083,8 @@ async function finishJobOnce(job) {
     return;
   }
 
+  if (String(job.state || "").toLowerCase() === "failed") reportLineartFailure(job);
+
   if (state.previewJobIds.has(job.job_id)) {
     try {
       await completePreviewJob(job);
@@ -5308,9 +5371,12 @@ function renderTask() {
     dom.taskSteps.append(li);
   }
 
-  const jobError = job.error && (job.error.message || job.error.code)
-    ? (job.error.message || "任务失败，可查看历史后重试。")
-    : "";
+  const jobError = String(job.state || "").toLowerCase() === "failed" &&
+    normalizeKind(job.kind) === "lineart"
+    ? lineartFailureText(job)
+    : job.error && (job.error.message || job.error.code)
+      ? (job.error.message || "任务失败，可查看历史后重试。")
+      : "";
   setError(dom.taskError, jobError);
   dom.taskError.classList.toggle("is-notice", jobState === "cancelled");
   setHidden(dom.taskCancelNote, !state.cancelNote);
@@ -9752,6 +9818,8 @@ function restoreParameters(job) {
     dom.includeEnhance.checked = Boolean(params.enhance);
   } else if (kind === "extract") {
     extract = params;
+  } else if (kind === "lineart") {
+    setRadio("lineart-method", params.method === "model" ? "model" : "local");
   } else if (kind === "vectorize") {
     vector = params;
   } else if (kind === "enhance" || kind === "enhanced") {
@@ -9896,6 +9964,7 @@ function renderAll() {
   renderWorkingProjection();
   renderPendingBanner();
   updateComposeSummary();
+  renderLineartOptions();
   updateActionState();
   renderSidebarContext();
   if (state.view === "dashboard") renderDashboard();
@@ -10524,6 +10593,13 @@ function wireEvents() {
   dom.extractButton.addEventListener("click", handleExtract);
   dom.vectorButton.addEventListener("click", handleVectorize);
   dom.lineartButton.addEventListener("click", handleLineart);
+  document.querySelectorAll('input[name="lineart-method"]').forEach((node) => {
+    node.addEventListener("change", () => {
+      setError(dom.lineartError, "");
+      renderLineartOptions();
+      handleParamsChanged();
+    });
+  });
   dom.enhanceButton.addEventListener("click", handleEnhance);
   dom.includeEnhance.addEventListener("change", () => handleParamsChanged({ autoEnhance: true }));
   dom.iterations.addEventListener("input", handleParamsChanged);

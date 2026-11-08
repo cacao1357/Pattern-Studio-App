@@ -32,6 +32,7 @@ label_status, missing_meta
 - 输出：透明背景、黑色墨线的 RGBA PNG，`kind=lineart`，可继续作为矢量化输入。
 - 元数据：`ink_ratio`、`ink_bright`、`local_gain`、`edges_px`、`components`、`med`、`min_area` 与算法版本 `lineart-global-local-v2`。
 - 说明：这是可编辑线稿草稿，不替代人工修线；实验中的 Zhang-Suen 骨架化因断线问题未开放。
+- 同一接口可提交 `{"input_asset_id":"…","method":"model"}` 启用本地模型，安装方式见 [README](../README.md#可选的本地线稿模型)。模型模式只接收输入资产和方法。省略 `method` 或提交 `"opencv"` 均走传统算法。模型成果保持输入坐标系，记录模型版本、权重标识、缩放方式、阈值和实际推理设备 `inference_device`（`cuda` 或 `cpu`），供人工预览与复核。
 
 已知限制：
 
