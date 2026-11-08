@@ -1,8 +1,15 @@
+from io import BytesIO
+
+import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
+from app.schemas.contracts import ProcessingError
 from app.schemas.workbench import LineartRequest
+from app.services import model_lineart
 from app.services.lineart import extract_lineart
+from app.services.local_workbench import LocalWorkbench, execute_local
+from app.workbench_store import WorkbenchStore
 
 
 def test_extract_lineart_returns_white_background_black_ink():
@@ -39,3 +46,50 @@ def test_lineart_request_rejects_even_or_too_large_median():
     request = LineartRequest(input_asset_id="00000000-0000-0000-0000-000000000000", med=9, local=False)
     assert request.med == 9
     assert request.local is False
+
+
+def test_model_request_rejects_opencv_options():
+    with pytest.raises(ValueError, match="OpenCV options"):
+        LineartRequest(input_asset_id="00000000-0000-0000-0000-000000000000", method="model", local=True)
+
+
+def test_model_lineart_job_preserves_coordinates_and_exports_ink_as_alpha(tmp_path, monkeypatch):
+    probability = np.tile(np.linspace(0, 1, 512, dtype=np.float32), (512, 1))
+    monkeypatch.setattr(model_lineart, "_predict", lambda image: (probability, "cuda"))
+    store = WorkbenchStore(tmp_path)
+    service = LocalWorkbench(store)
+    image = Image.new("RGB", (80, 40), "white")
+    data = BytesIO()
+    image.save(data, format="PNG")
+    uploaded, _, _ = service.upload(data.getvalue(), "pattern.png", "test", "upload-lineart-model")
+    source = uploaded["normalized"]
+    input_id = source["asset_id"]
+    request = LineartRequest(input_asset_id=input_id, method="model")
+    submitted = service.submit("lineart", request, "test-lineart-model")
+    assert submitted["parameters"] == {"method": "model"}
+
+    job, token = store.claim()
+    execute_local(store, job["job_id"], token)
+    store.finish_job(job["job_id"], token)
+    [asset] = store.get_job(job["job_id"])["result"]["assets"]
+    assert asset["kind"] == "lineart"
+    assert asset["coordinate_space_id"] == source["coordinate_space_id"]
+    assert asset["parents"] == [{"asset_id": input_id, "role": "lineart_rgb"}]
+    assert asset["algorithm_version"] == model_lineart.MODEL_VERSION
+    assert asset["parameters"]["inference_device"] == "cuda"
+    assert asset["ai_inferred"] is True
+    assert asset["geometry_verified"] is False
+
+    _, png = store.read_asset(asset["asset_id"])
+    with Image.open(BytesIO(png)) as result:
+        assert result.size == image.size
+        assert result.mode == "RGBA"
+        assert result.getpixel((0, 0)) == (0, 0, 0, 0)
+        assert result.getpixel((79, 39)) == (0, 0, 0, 255)
+
+
+def test_missing_model_files_report_installation_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(model_lineart, "MODEL_DIR", tmp_path)
+    with pytest.raises(ProcessingError) as exc:
+        model_lineart.extract_model_lineart(Image.new("RGB", (8, 8), "white"))
+    assert exc.value.code == "LINEART_MODEL_UNAVAILABLE"

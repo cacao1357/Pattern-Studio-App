@@ -338,11 +338,14 @@
         <div class="library-toolbar">
           <label class="library-search">
             <svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg>
-            <input id="library-search" type="search" placeholder="搜索版本名称、类型或编号" aria-label="搜索纹样库">
+            <input id="library-search" type="search" maxlength="200" placeholder="搜索版本名称、类型或编号" aria-label="搜索纹样库">
           </label>
           <span class="library-count" id="library-count">0 个版本</span>
+          <button class="btn btn-line btn-xs" id="library-refresh" type="button">刷新</button>
         </div>
+        <p class="hint" id="library-status" role="status" hidden></p>
         <div class="library-grid" id="library-grid"></div>
+        <button class="btn btn-line btn-sm" id="library-more" type="button" hidden>加载更多</button>
         <div class="empty-state library-empty" id="library-empty">
           <svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg>
           <strong>纹样库还是空的</strong>
@@ -429,8 +432,9 @@
             <span class="chip grade-chip" id="grade-chip" hidden>—</span>
             <span class="chip chip-fill" id="preview-mode-badge" hidden>成果预览</span>
             <span class="chip chip-mark" id="pending-preview-badge" hidden>预览未应用</span>
-            <button class="btn btn-quiet btn-sm" id="undo-button" type="button" disabled title="撤销当前图片的上一步编辑（Ctrl+Z）">撤销</button>
-            <button class="btn btn-quiet btn-sm" id="redo-button" type="button" disabled title="重做当前图片的下一步编辑（Ctrl+Shift+Z）">重做</button>
+            <button class="btn btn-quiet btn-sm" id="undo-button" type="button" disabled title="撤销本页操作（Ctrl+Z）">撤销</button>
+            <button class="btn btn-quiet btn-sm" id="redo-button" type="button" disabled title="重做本页操作（Ctrl+Shift+Z）">重做</button>
+            <button class="btn btn-quiet btn-sm" id="clear-stage-button" type="button" disabled>清空本页处理</button>
             <button class="btn btn-line btn-sm" id="compare-button" type="button" disabled>
               <svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg>
               <span>对比</span>
@@ -727,12 +731,19 @@
             <div class="oneclick">
               <div class="oneclick-top">
                 <span class="oneclick-tag">推荐</span>
-                <span class="oneclick-skip">不调用 AI</span>
+                <span class="oneclick-skip">本机运行</span>
               </div>
-              <h3 class="oneclick-title" id="oneclick-title">提取 → 矢量化</h3>
-              <p class="oneclick-copy">保留当前尺寸、跳过轻增强。完成后可预览并下载每一步成果。</p>
-              <p class="recipe" id="one-click-recipe">Otsu · 深色 · 阈值 128 → 彩色 · 8 色 · 中细节</p>
-              <label class="check-row">
+              <h3 class="oneclick-title" id="oneclick-title">线稿 → 矢量化</h3>
+              <label class="field" for="oneclick-method">
+                <span class="field-label">一键处理路线</span>
+                <select id="oneclick-method">
+                  <option value="model_lineart" selected>本地模型线稿</option>
+                  <option value="color">保留颜色</option>
+                </select>
+              </label>
+              <p class="oneclick-copy">使用当前输入，保留输入尺寸。可预览并下载每一步成果。</p>
+              <p class="recipe" id="one-click-recipe">本地线稿模型 · GPU 优先 → 黑白 SVG</p>
+              <label class="check-row" id="oneclick-enhance-row" hidden>
                 <input type="checkbox" id="include-enhance">
                 <span><strong>本次包含轻增强</strong><small>默认关闭</small></span>
               </label>
@@ -743,7 +754,7 @@
             <div class="banner banner-info" id="preview-block-hint" hidden>
               <span class="banner-mark"><svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg></span>
               <div class="banner-copy">
-                <p>画布正在预览成果。处理只作用于当前输入 —— 先回到当前输入，或在版本区“设为输入”。</p>
+                <p>画布正在显示成果。一键和线稿使用当前输入。需要在画布上操作时，请回到当前输入或在版本栏切换输入。</p>
               </div>
             </div>
             <p class="field-error" id="compose-error" role="alert" hidden></p>
@@ -837,11 +848,18 @@
             <details class="group" id="lineart-group">
               <summary>
                 <span class="group-label">线稿</span>
-                <span class="group-meta">结构线 · 本地</span>
+                <span class="group-meta">OpenCV · 本地模型</span>
                 <svg class="icon group-chevron" aria-hidden="true"><use href="#i-chevron"></use></svg>
               </summary>
               <div class="group-body">
-                <p class="hint">从当前输入生成透明底黑线结构稿；局部对比路径补亮区，中值核与面积门槛随尺寸自动缩放。结果可继续矢量化。</p>
+                <fieldset class="fieldset">
+                  <legend class="field-label">线稿方式</legend>
+                  <div class="choices">
+                    <label class="choice"><input type="radio" name="lineart-method" value="local" checked><span><strong>OpenCV 结构线</strong><small>默认 · 无需模型权重</small></span></label>
+                    <label class="choice"><input type="radio" name="lineart-method" value="model"><span><strong>本地线稿模型</strong><small>可选 · 512×512 · 需已安装模型权重</small></span></label>
+                  </div>
+                </fieldset>
+                <p class="hint" id="lineart-hint">从当前输入生成透明底黑线结构稿；局部对比路径补亮区，中值核与面积门槛随尺寸自动缩放。结果可继续矢量化。</p>
                 <button class="btn btn-line btn-wide" id="lineart-button" type="button" disabled>生成线稿</button>
                 <p class="field-error" id="lineart-error" role="alert" hidden></p>
               </div>
@@ -1264,12 +1282,12 @@
 
           <section class="stage-panel" id="tile-panel" data-stage="7" aria-labelledby="tile-heading">
             <h2 class="tools-title" id="tile-heading">平铺</h2>
-            <p class="tools-note">整数复制，不自动消缝。复用现有裁切单元，再按整数位移复制。</p>
+            <p class="tools-note">选择已保存的 PNG 单元，查看重复排列并记录横向、纵向接缝。</p>
 
             <label class="field" for="tile-unit">
-              <span class="field-label">裁切单元</span>
+              <span class="field-label">平铺单元</span>
               <select id="tile-unit">
-                <option value="">请选择已保存的裁切单元</option>
+                <option value="">请选择要重复的 PNG 版本</option>
               </select>
             </label>
             <div class="row">
@@ -1280,10 +1298,10 @@
 
             <div class="unit-preview" id="tile-unit-preview" hidden>
               <div class="unit-thumb">
-                <img id="tile-unit-image" alt="裁切单元预览">
+                <img id="tile-unit-image" alt="平铺单元预览">
               </div>
               <div class="unit-copy">
-                <strong id="tile-unit-name">裁切单元</strong>
+                <strong id="tile-unit-name">平铺单元</strong>
                 <p id="tile-unit-meta">—</p>
               </div>
             </div>

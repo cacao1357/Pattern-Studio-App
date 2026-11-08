@@ -95,14 +95,27 @@ class LineartOptions(StrictModel):
 
 
 class LineartRequest(InputRequest, LineartOptions):
-    pass
+    method: Literal["opencv", "model"] = "opencv"
+
+    @model_validator(mode="after")
+    def model_has_no_opencv_options(self):
+        if self.method == "model" and self.model_fields_set.intersection(LineartOptions.model_fields):
+            raise ValueError("OpenCV options are only available with method=opencv")
+        return self
 
 
 class PipelineRequest(InputRequest):
+    recipe: Literal["color", "model_lineart"] = "color"
     extract: ExtractOptions = Field(default_factory=ExtractOptions)
     vector: VectorOptions = Field(default_factory=VectorOptions)
     enhance: EnhanceOptions | None = None
     working_max_pixels: int | None = Field(default=None, ge=10_000, le=1_000_000, strict=True)
+
+    @model_validator(mode="after")
+    def model_recipe_options(self):
+        if self.recipe == "model_lineart" and ({"extract", "enhance"} & self.model_fields_set):
+            raise ValueError("The model line-art recipe uses the input directly")
+        return self
 
 
 class ExportRequest(StrictModel):

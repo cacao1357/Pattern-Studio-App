@@ -1,0 +1,25 @@
+{
+  "architecture": "unetpp-resnet34",
+  "family": "unetpp",
+  "decoder_class": "UnetPlusPlus",
+  "encoder": "resnet34",
+  "encoder_weights": "imagenet",
+  "input_channels": 3,
+  "output_channels": 1,
+  "input_size": 512,
+  "normalization_mean": [
+    0.485,
+    0.456,
+    0.406
+  ],
+  "normalization_std": [
+    0.229,
+    0.224,
+    0.225
+  ],
+  "threshold": 0.5,
+  "output": "white_background_black_lines",
+  "best_epoch": 19,
+  "selection_rule": "guarded_robust",
+  "evaluation_scope": "validation_is_synthetic_old_only; holdout_new200(40)_and_holdout_silk100(20)_are_external_tests"
+}

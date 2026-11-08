@@ -25,6 +25,20 @@
 - 分支任务和历史记录包含 `ai_pipeline_id`、`parent_job_id`、`workflow_action`；刷新后通过任务记录也能恢复原流程。原流程状态保留，分支分别展示自己的状态，不覆盖原成功或失败记录。
 - 调整提示词、模型或云端输入需创建新 AI 流程，继续要求上传/付费确认。超时与未知结果不自动重试。
 
+## 素材库与平铺观察
+
+平铺单元可选已保存的裁切图、透明 PNG、线稿 PNG 或已接受的修复图。每个生成结果独立保存接缝观察。
+
+- `GET /api/v1/assets` 按登记顺序从新到旧返回 `items` 和 `next_cursor`。`limit` 默认 20，最大 50。`q` 在整个素材库匹配登记名称、资产 ID、类型和评级，可重复传 `kind` 匹配本地化类型名。结果包含上传和历史任务保存的预览，使用 `generated_by_job_id`、`repair_job_id` 或 `provider_call_id` 标记来源。旧记录无法区分预览是否曾被应用。
+- `PUT /api/v1/assets/{asset_id}/seam-observation` 接收 `seam_observation` 和 `revision`，返回更新后的平铺资产元数据。旧结果没有 `seam_observation_revision` 时用 0。修订冲突返回 409，客户端可重新读取资产。更新同步历史任务成果和之后生成的 ZIP 清单，平铺图像及已导出的文件保留原版本。
+
+## 本地一键处理
+
+- `POST /api/v1/pipelines` 使用现有本地写标记和 `Idempotency-Key`。请求携带 `input_asset_id` 和可选的 `vector`、`working_max_pixels`。
+- 工作台默认发送 `recipe: "model_lineart"`。模型路线直接处理输入或显式工作副本，拒绝 `extract` 和 `enhance` 字段，并将 SVG 模式设为黑白。任务依次发布 `lineart` PNG 和 SVG。SVG 的矢量输入指向该 PNG。
+- 线稿资产记录模型版本、权重标识和实际推理设备。矢量化失败时，任务历史和纹样库仍可查阅已发布的线稿 PNG。
+- API 省略 `recipe` 或显式选择 `"color"` 时，沿用前景提取、可选轻增强及矢量化的旧请求语义。
+
 ## B/C 接入
 
 选层策略通过 `app.services.workflow.select_candidate_layers` 接入。默认返回需要人工确认及原因；B 可实现确定性的选择规则并给出所选 layer IDs、策略版本与理由，A 不以图层数量代替判断。

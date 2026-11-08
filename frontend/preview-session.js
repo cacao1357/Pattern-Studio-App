@@ -45,6 +45,8 @@ export function createPreviewSession(options = {}) {
     session = {
       id: input.id || idFactory(),
       inputAssetId: String(input.inputAssetId || ""),
+      returnAssetId: String(input.returnAssetId || input.inputAssetId || ""),
+      stage: String(input.stage || ""),
       baseAssetId: String(input.baseAssetId || ""),
       revision: Number(input.revision) || 0,
       params: cloneJson(input.params || {}),

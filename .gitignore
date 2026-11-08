@@ -6,6 +6,9 @@ __pycache__/
 .env.*
 !.env.example
 storage/
+/model/*
+!/model/inference.json
+!/model/model.pt
 _qa/
 node_modules/
 frontend/dist/

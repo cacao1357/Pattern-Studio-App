@@ -1,6 +1,6 @@
 # A 实施与交接记录
 
-日期：2026-11-01
+基础交接日期为 2026-11-01。2026-11-08 工作台更新记录见下文。
 
 ## 完成范围
 
@@ -35,6 +35,28 @@
 - 修改共享前端文件或参数合同前协调归属。本次沿用 B/C 负责的提取及矢量算法。
 
 ## 验证
+
+### 2026-11-08 工作台回归
+
+工作台默认使用 GPU 优先的一键模型路线，并按标签页记录撤销、重做和清空。处理结果进入现有资产与任务历史。纹样库可加载透明图的关联蒙版，平铺复用处理后的 PNG，并按结果保存接缝观察。操作说明见 [README](../README.md#工作台操作)，接口见 [接口合同](a-interface-contract.md#本地一键处理)。
+
+| 检查 | 结果 | 覆盖 |
+| --- | --- | --- |
+| 后端定向回归 | 24 项及 2 个子测试通过 | 一键模型产物与来源关系、旧接口兼容、蒙版与工作流恢复、平铺接缝及 ZIP |
+| 前端模块回归 | 30 项通过 | 标签页编辑状态、预览、来源与导出保护、设置 |
+| 隔离 Edge 与真实 CUDA | 20 项检查通过 | 默认模型一键产物、按页清空与重做、失败浮窗、裁切历史、关联蒙版、平铺规格及已有候选流程 |
+
+在仓库根目录使用现有 Python 环境运行以下命令。Edge 脚本运行归档候选回归，GPU 一键和标签页操作是在同一隔离夹具中另外验证的。
+
+```powershell
+python -B -m pytest -q -p no:cacheprovider tests/test_dataset_api.py tests/test_api_p0.py tests/test_vector_c.py::test_local_rerun_preview_download_recolor_and_zip backend/tests/test_a_workflow.py
+node --test frontend/tests/workbench-regressions.test.mjs frontend/tests/settings.test.mjs
+node scripts/validate_a_browser.mjs (Get-Command python).Source
+```
+
+GPU 推理使用已安装的 Stage D 权重和合成图。云端候选使用隔离归档夹具。真实素材保真、外部 SVG 编辑器验收和实际云端调用仍按协作计划验证。
+
+### 2026-11-01 基础交接
 
 | 检查 | 结果 | 覆盖 |
 | --- | --- | --- |

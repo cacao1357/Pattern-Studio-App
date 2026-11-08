@@ -1,6 +1,9 @@
 import csv
 import io
+import json
 import time
+from uuid import uuid4
+from zipfile import ZipFile
 
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
@@ -8,6 +11,11 @@ from pydantic import SecretStr
 
 from app.config import Settings
 from app.main import create_app
+from app.schemas.workbench import PipelineRequest
+from app.services.lineart import LineartResult
+from app.services.local_workbench import LocalWorkbench, execute_local
+from app.storage import png_bytes
+from app.workbench_store import WorkbenchStore
 
 
 def checkerboard(width=700, height=500, block=32):
@@ -77,6 +85,11 @@ def test_lineart_job_publishes_a_lineart_asset(tmp_path):
                                headers={"X-Pattern-Studio": "local", "Idempotency-Key": "p1_" + "d" * 16})
         assert response.status_code == 202, response.text
         job_id = response.json()["job_id"]
+        replay = client.post("/api/v1/jobs/lineart",
+                             json={"input_asset_id": asset_id, "local": True, "method": "opencv"},
+                             headers={"X-Pattern-Studio": "local", "Idempotency-Key": "p1_" + "d" * 16})
+        assert replay.status_code == 202, replay.text
+        assert replay.json()["job_id"] == job_id
         job = None
         for _ in range(80):
             job = client.get("/api/v1/jobs/" + job_id).json()
@@ -89,3 +102,86 @@ def test_lineart_job_publishes_a_lineart_asset(tmp_path):
         assert lineart["parameters"]["algorithm"] == "lineart-global-local-v2"
         assert lineart["width"] == 700 and lineart["height"] == 500
         assert lineart["content_id"] == uploaded["meta"]["content_id"]
+
+    with client_for(tmp_path) as client:
+        first_page = client.get("/api/v1/assets", params={"limit": 1}).json()
+        assert first_page["items"][0]["asset_id"] == lineart["asset_id"]
+        assert first_page["items"][0]["generated_by_job_id"] == job_id
+        next_page = client.get("/api/v1/assets", params={"cursor": first_page["next_cursor"]}).json()
+        assert {asset["asset_id"] for asset in next_page["items"]} == {asset_id, uploaded["original"]["asset_id"]}
+        matched = client.get("/api/v1/assets", params={"q": "规范输入", "kind": "normalized_input"}).json()
+        assert [asset["asset_id"] for asset in matched["items"]] == [asset_id]
+        assert client.get("/api/v1/assets", params={"cursor": "invalid"}).status_code == 422
+
+
+def test_model_pipeline_traces_lineart_without_color_extraction(tmp_path, monkeypatch):
+    store = WorkbenchStore(tmp_path / "api")
+    local = LocalWorkbench(store)
+    image = Image.new("RGBA", (64, 64), "white")
+    record, _, _ = local.upload(png_bytes(image), "pipeline-input.png", "", uuid4().hex)
+    input_id = record["normalized"]["asset_id"]
+
+    def lineart(source):
+        assert source.size == image.size
+        result = Image.new("RGBA", source.size)
+        ImageDraw.Draw(result).rectangle((10, 12, 48, 40), fill="black")
+        return LineartResult(result, {"algorithm": "test-lineart", "inference_device": "cuda"})
+
+    monkeypatch.setattr("app.services.model_lineart.extract_model_lineart", lineart)
+    key = uuid4().hex
+    payload = PipelineRequest(input_asset_id=input_id, recipe="model_lineart")
+    submitted = local.submit("pipeline", payload, key)
+    assert local.submit("pipeline", payload, key)["job_id"] == submitted["job_id"]
+    job, token = store.claim()
+    execute_local(store, job["job_id"], token)
+    store.finish_job(job["job_id"], token)
+    result = store.get_job(job["job_id"])["result"]
+    assert [step["name"] for step in result["steps"]] == ["lineart", "vectorize"]
+    lineart_asset, svg = result["assets"]
+    assert lineart_asset["source_asset_id"] == input_id
+    assert svg["source_asset_id"] == lineart_asset["asset_id"]
+    assert svg["parameters"]["options"]["mode"] == "monochrome"
+    assert svg["ai_inferred"] is True
+
+
+def test_tile_observation_is_saved_to_history_and_subsequent_zip(tmp_path):
+    with client_for(tmp_path) as client:
+        headers = {"X-Pattern-Studio": "local"}
+
+        def complete(path, payload):
+            response = client.post("/api/v1/" + path, json=payload,
+                                   headers={**headers, "Idempotency-Key": uuid4().hex})
+            assert response.status_code == 202, response.text
+            url = "/api/v1/jobs/" + response.json()["job_id"]
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                job = client.get(url).json()
+                if job["state"] in {"succeeded", "failed", "cancelled"}:
+                    break
+                time.sleep(0.1)
+            assert job["state"] == "succeeded", job
+            return job["result"]["assets"][0], url
+
+        source = upload(client, uuid4().hex).json()["normalized"]
+        unit, _ = complete("jobs/lineart", {"input_asset_id": source["asset_id"], "local": True})
+        tile, job_url = complete("jobs/tile-preview", {"unit_asset_id": unit["asset_id"]})
+        asset_url = "/api/v1/assets/" + tile["asset_id"]
+        url = asset_url + "/seam-observation"
+        payload = {"seam_observation": "visible", "revision": 0}
+        updated = client.put(url, json=payload, headers=headers)
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["sha256"] == tile["sha256"]
+        assert updated.json()["seam_observation_revision"] == 1
+        assert client.put(url, json=payload, headers=headers).json() == updated.json()
+        conflict = client.put(url, json={"seam_observation": "not_obvious", "revision": 0}, headers=headers)
+        assert conflict.status_code == 409
+        assert client.get(asset_url).json()["seam_observation"] == "visible"
+        restored = client.get(job_url).json()
+        assert restored["parameters"]["seam_observation"] == "not_reviewed"
+        assert restored["result"]["assets"][0]["seam_observation"] == "visible"
+
+        archive, _ = complete("exports", {"asset_ids": [unit["asset_id"], tile["asset_id"]], "license_acknowledged": True})
+        payload = client.get("/api/v1/assets/" + archive["asset_id"] + "/download").content
+        with ZipFile(io.BytesIO(payload)) as zipped:
+            manifest = json.loads(zipped.read("manifest.json"))
+        assert manifest["selected_assets"][1]["seam_observation"] == "visible"

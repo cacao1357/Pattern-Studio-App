@@ -50,6 +50,12 @@ document.querySelectorAll("[data-home-action]").forEach((button) => {
     const stage = action === "extract" ? "1" : action === "lineart" ? "3" : "4";
     window.setTimeout(() => {
       document.querySelector('.rail-step[data-stage="' + stage + '"]')?.click();
+      if (action === "lineart") {
+        const group = document.getElementById("lineart-group");
+        if (!group) return;
+        group.open = true;
+        group.scrollIntoView({ block: "start" });
+      }
     }, 0);
   });
 });

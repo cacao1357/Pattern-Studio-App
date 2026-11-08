@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-from app.schemas.finishing import RepairRequest, RepairDecision, TileRequest
+from app.schemas.finishing import RepairRequest, RepairDecision, TileRequest, TileSeamObservation
 
 
 def mount_finishing(app, current_service):
@@ -29,3 +29,7 @@ def mount_finishing(app, current_service):
     @app.post("/api/v1/jobs/tile-preview", status_code=202)
     def tile(payload: TileRequest, request: Request):
         return JSONResponse(current_service().tile(payload, key(request)), status_code=202)
+
+    @app.put("/api/v1/assets/{asset_id}/seam-observation")
+    def tile_observation(asset_id: UUID, payload: TileSeamObservation):
+        return current_service().store.set_tile_observation(str(asset_id), payload.seam_observation, payload.revision)
