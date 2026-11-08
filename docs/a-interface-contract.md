@@ -34,7 +34,10 @@
 
 ## 本地一键处理
 
-`POST /api/v1/pipelines` 可选择 `recipe: "model_lineart"`。它直接读取输入，发布线稿 PNG，再以黑白模式发布 SVG。模型的设备和版本记录在线稿资产中。旧请求省略 `recipe` 时仍走前景提取与矢量化。工作台默认选择模型路线。
+- `POST /api/v1/pipelines` 使用现有本地写标记和 `Idempotency-Key`。请求携带 `input_asset_id` 和可选的 `vector`、`working_max_pixels`。
+- 工作台默认发送 `recipe: "model_lineart"`。模型路线直接处理输入或显式工作副本，拒绝 `extract` 和 `enhance` 字段，并将 SVG 模式设为黑白。任务依次发布 `lineart` PNG 和 SVG。SVG 的矢量输入指向该 PNG。
+- 线稿资产记录模型版本、权重标识和实际推理设备。矢量化失败时，任务历史和纹样库仍可查阅已发布的线稿 PNG。
+- API 省略 `recipe` 或显式选择 `"color"` 时，沿用前景提取、可选轻增强及矢量化的旧请求语义。
 
 ## B/C 接入
 
