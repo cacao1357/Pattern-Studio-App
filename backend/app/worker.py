@@ -179,7 +179,10 @@ class LocalWorker:
         backend = Path(__file__).resolve().parents[1]
         env = {k: os.environ[k] for k in ("SYSTEMROOT", "WINDIR", "PATH", "TEMP", "TMP") if k in os.environ}
         env.update(PYTHONPATH=str(backend), PYTHONDONTWRITEBYTECODE="1", PYTHONUTF8="1")
-        model_lineart = job["kind"] == "lineart" and job["parameters"].get("method") == "model"
+        model_lineart = (
+            (job["kind"] == "lineart" and job["parameters"].get("method") == "model")
+            or (job["kind"] == "pipeline" and job["parameters"].get("recipe") == "model_lineart")
+        )
         memory_mib = LINEART_MODEL_MEMORY_MIB if model_lineart else LOCAL_MEMORY_MIB
         command = [sys.executable, "-B", "-m", "app.worker", str(self.store.root), job["job_id"], token,
                    str(os.getpid()), str(memory_mib)]

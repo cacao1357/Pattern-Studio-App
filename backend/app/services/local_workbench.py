@@ -136,6 +136,14 @@ class LocalWorkbench:
             method = values.pop("method")
             if method == "model":
                 values = {"method": method}
+        if kind == "pipeline":
+            if values["recipe"] == "color":
+                # Preserve the request hash and parameters of existing color pipelines.
+                values.pop("recipe")
+            else:
+                values.pop("extract")
+                values.pop("enhance")
+                values["vector"]["mode"] = "monochrome"
         if kind == "export":
             total = 0
             unconfirmed = []
@@ -165,7 +173,7 @@ class LocalWorkbench:
                 output_size = prepared_output_size(size, payload.rotation, payload.straighten)
                 if output_size[0] * output_size[1] > DEFAULT_LIMITS.max_vector_pixels:
                     raise ServiceError("PREPARED_IMAGE_PIXEL_LIMIT", "Rotating and straightening would exceed the 1 megapixel local processing limit; choose a smaller working copy", 413)
-            if kind == "extract" or kind == "pipeline":
+            if kind == "extract" or (kind == "pipeline" and payload.recipe == "color"):
                 options = payload.extract if kind == "pipeline" else payload
                 if options.bbox:
                     options.bbox.within(size)
@@ -252,6 +260,20 @@ def _output(image, kind, source, job_id, *, space=None, extra=None, asset_id=Non
         **inherited, "algorithm_version": versions.algorithm_version(kind), **payload}}
 
 
+def _model_lineart_output(store, job_id, token, image, source):
+    from app.services.model_lineart import extract_model_lineart
+
+    store.step(job_id, token, "lineart", "running")
+    result = extract_model_lineart(image)
+    asset = store.publish(job_id, token, "lineart", [
+        _output(result.image, "lineart", source, job_id, extra={
+            "algorithm_version": result.metadata["algorithm"], "ai_inferred": True,
+            "geometry_verified": False, "parameters": result.metadata,
+        }, parents=[{"asset_id": source["asset_id"], "role": "lineart_rgb"}])
+    ])[0]
+    return asset, result.image
+
+
 def execute_local(store: WorkbenchStore, job_id, token):
     """Called only by a bounded child. Each step publishes files and state together."""
     job = store.get_job(job_id)
@@ -325,19 +347,14 @@ def execute_local(store: WorkbenchStore, job_id, token):
         return
 
     if kind == "lineart":
-        store.step(job_id, token, "lineart", "running")
         source, image = _read_image(store, job["input_asset_id"])
-        extra = {}
         if params.get("method") == "model":
-            from app.services.model_lineart import extract_model_lineart
-
-            result = extract_model_lineart(image)
-            extra.update(algorithm_version=result.metadata["algorithm"], ai_inferred=True, geometry_verified=False)
-        else:
-            result = extract_lineart(image, **params)
+            _model_lineart_output(store, job_id, token, image, source)
+            return
+        store.step(job_id, token, "lineart", "running")
+        result = extract_lineart(image, **params)
         store.publish(job_id, token, "lineart", [
             _output(result.image, "lineart", source, job_id, extra={
-                **extra,
                 "parameters": result.metadata,
                 "parents": [{"asset_id": source["asset_id"], "role": "lineart_rgb"}],
             })
@@ -345,7 +362,10 @@ def execute_local(store: WorkbenchStore, job_id, token):
         return
 
     source, image = _read_image(store, job["input_asset_id"])
-    extraction = dict(params["extract"]) if kind == "pipeline" else dict(params) if kind == "extract" else None
+    model_recipe = kind == "pipeline" and params.get("recipe") == "model_lineart"
+    extraction = params.get("extract") if kind == "pipeline" else params if kind == "extract" else None
+    if extraction is not None:
+        extraction = dict(extraction)
 
     def publish(name, outputs):
         return store.publish(job_id, token, name, outputs)
@@ -420,6 +440,9 @@ def execute_local(store: WorkbenchStore, job_id, token):
         source, image = assets[1], separated.rgba
         if kind == "extract":
             return
+
+    if model_recipe:
+        source, image = _model_lineart_output(store, job_id, token, image, source)
 
     if kind in {"pipeline", "vectorize"}:
         store.step(job_id, token, "vectorize", "running")

@@ -706,7 +706,7 @@ const state = {
   currentHasTransparency: false,
   extractModeTouched: false,
   extractModeAutoSet: false,
-  workspaceHistory: createEditHistory({ limit: 80 }),
+  stageHistories: new Map(),
   previewSession: createPreviewSession({ ttlMs: PREVIEW_TTL_MS }),
   previewJobIds: new Set(),
   submissionSnapshots: new Map(),
@@ -1295,10 +1295,10 @@ async function sendSubmission(submission) {
       showToast("提交结果未知。页面不会自动重发，请用同一请求重试。", "warning", 7000);
     } else {
       if (state.pendingSubmission === submission) state.pendingSubmission = null;
-      if (submission.onError) {
-        submission.onError(error);
-      } else {
-        showToast(friendlyError(error), "error");
+      const previousToast = dom.toastRegion.lastElementChild;
+      if (submission.onError) submission.onError(error);
+      if (dom.toastRegion.lastElementChild === previousToast) {
+        showToast(submission.label + "失败：" + friendlyError(error), "error", 7500);
       }
       renderPendingBanner();
     }
@@ -1405,7 +1405,7 @@ function resetWorkspace(options) {
   state.previewSession.clear();
   state.previewJobIds.clear();
   state.submissionSnapshots.clear();
-  state.workspaceHistory.reset(null);
+  state.stageHistories.clear();
   state.lastCommittedSnapshot = null;
   state.suppressHistory = false;
   state.cancelBusy = false;
@@ -1563,7 +1563,7 @@ function assetDisplayName(asset) {
   }
   if (!label) label = "成果";
   if (kind === "svg" || kind.includes("svg") || kind === "vector") {
-    const mode = (asset.parameters && asset.parameters.mode) ||
+    const mode = (asset.parameters && (asset.parameters.mode || asset.parameters.options?.mode)) ||
       (context.jobParameters && context.jobParameters.vector && context.jobParameters.vector.mode) ||
       (context.jobKind === "vectorize" && context.jobParameters && context.jobParameters.mode);
     if (mode === "monochrome") label = "黑白 SVG";
@@ -2217,6 +2217,7 @@ async function setPreview(assetId, options) {
     clearBBox();
   }
 
+  const before = captureWorkspace();
   if (currentChanged) {
     state.currentInputId = assetId;
     if (opts.sourceLabel) {
@@ -2249,7 +2250,7 @@ async function setPreview(assetId, options) {
   if (previewChanged) state.previewId = assetId;
   renderAll();
   if (currentChanged) {
-    commitWorkspace({ label: opts.historyLabel || "切换当前输入" });
+    commitWorkspace({ stage: opts.stage || "1", before, label: opts.historyLabel || "切换当前输入" });
   }
   await loadPreview();
   return true;
@@ -2655,6 +2656,7 @@ async function cancelBboxWithPrompt() {
   const ok = await guardUnsavedBBox("取消框选");
   if (!ok) return;
   clearBBox();
+  commitWorkspace({ label: "取消框选", fields: ["bbox", "bboxDirty"] });
   showToast("框选已取消。", "info", 2500);
 }
 
@@ -3131,6 +3133,12 @@ function updateComposeSummary() {
     ? (isNeutralEnhance(enhanceDraft) ? " + 轻增强（中性）" : " + " + describeEnhanceParams(enhanceDraft))
     : "";
   setText(dom.oneClickRecipe, extractPart + " → " + vectorPart + enhancePart);
+  const modelRecipe = $("oneclick-method").value === "model_lineart";
+  setHidden($("oneclick-enhance-row"), modelRecipe);
+  setText($("oneclick-title"), modelRecipe ? "线稿 → 矢量化" : "提取 → 矢量化");
+  if (modelRecipe) {
+    setText(dom.oneClickRecipe, "本地线稿模型 · GPU 优先 → 黑白 SVG · " + detailLabels[detail]);
+  }
   setText(dom.extractHint, info.hint);
   updateExtractParamVisibility();
   renderAiVectorSummary();
@@ -3313,6 +3321,8 @@ function submitJob(path, payload, label, options) {
   const opts = options || {};
   const errorNode = opts.errorNode || dom.composeError;
   if (!opts.skipReady && !requireProcessReady()) return false;
+  flushParamsCommit();
+  const before = captureWorkspace();
   setError(errorNode, "");
   const bodyText = JSON.stringify(payload);
   return startSubmission({
@@ -3324,7 +3334,7 @@ function submitJob(path, payload, label, options) {
     onSuccess: async (data) => {
       const job = extractJobFromResponse(data);
       if (!job) throw new ApiError("任务响应缺少 job_id。", { status: 202 });
-      state.submissionSnapshots.set(job.job_id, state.lastCommittedSnapshot || captureWorkspace());
+      state.submissionSnapshots.set(job.job_id, before);
       if (opts.onJob) {
         try {
           opts.onJob(job);
@@ -3514,6 +3524,16 @@ function lineartFailureText(job) {
   return "线稿任务失败，未返回原因；可改回“OpenCV 结构线”重试。";
 }
 
+function jobFailureText(job) {
+  if (normalizeKind(job.kind) === "lineart" || job.error?.code === "LINEART_MODEL_UNAVAILABLE") {
+    return lineartFailureText(job);
+  }
+  const step = job.result?.steps?.find((item) => item.state === "failed");
+  const stepName = step ? (STEP_LABELS[step.name] || STEP_LABELS[step.step] || step.name || step.step) : "";
+  const detail = job.error?.message || job.error?.code || "请查看任务详情后重试。";
+  return jobLabel(job.kind) + (stepName ? " · " + stepName : "") + "失败：" + detail;
+}
+
 // 线稿失败必须回到正常入口：错误写在“线稿”组内，并展开该组，让失败原因可见。
 function reportLineartFailure(job) {
   if (normalizeKind(job && job.kind) !== "lineart") return;
@@ -3558,23 +3578,30 @@ function buildVectorRequest() {
 }
 
 function buildOneClickRequest() {
-  if (!requireProcessReady()) return { ok: false, handled: true };
+  if (!requireProcessReady({ useCurrentInput: true })) return { ok: false, handled: true };
   const asset = currentAsset();
   if (!asset) return { ok: false, error: "请先选择当前输入。" };
-  const extract = readExtractParams(false);
-  if (!extract.ok) return extract;
   const vector = readVectorParams();
   if (!vector.ok) return vector;
+  const base = {
+    ok: true, path: "/pipelines", label: "本地一键", kind: "pipeline", useCurrentInput: true
+  };
+  if ($("oneclick-method").value === "model_lineart") {
+    return { ...base, payload: {
+      input_asset_id: asset.asset_id,
+      recipe: "model_lineart",
+      vector: { ...vectorPayloadFrom(vector), mode: "monochrome" }
+    } };
+  }
+  const extract = readExtractParams(false);
+  if (!extract.ok) return extract;
   let enhance = null;
   if (dom.includeEnhance.checked) {
     enhance = readEnhanceParams();
     if (!enhance.ok) return enhance;
   }
   return {
-    ok: true,
-    path: "/pipelines",
-    label: "本地一键",
-    kind: "pipeline",
+    ...base,
     markBboxClean: Boolean(extract.payload.bbox),
     payload: {
       input_asset_id: asset.asset_id,
@@ -3619,6 +3646,7 @@ function markRecolorParamsChanged() {
   invalidatePreviewForParams();
   renderPreviewUi();
   updateRecolorActions();
+  commitWorkspace({ stage: "3", fields: ["recolor"], label: "调整换色" });
 }
 
 function renderRecolorPanel(force) {
@@ -3764,13 +3792,12 @@ function applyRecolorSnapshot(snapshot) {
   for (const row of dom.recolorList.querySelectorAll(".recolor-row")) {
     const source = String(row.dataset.source || "").toUpperCase();
     const target = mapping[source] || mapping[source.toLowerCase()];
-    if (!target) continue;
     const enable = row.querySelector(".recolor-enable");
     const input = row.querySelector(".recolor-target");
-    if (enable) enable.checked = true;
+    if (enable) enable.checked = Boolean(target);
     if (input) {
-      input.disabled = false;
-      input.value = String(target).toUpperCase();
+      input.disabled = !target;
+      input.value = String(target || source).toUpperCase();
     }
   }
   updateRecolorActions();
@@ -3837,12 +3864,16 @@ async function startPreviewRequest(request) {
   if (state.previewSession.current()) {
     await discardPreview({ silent: true, reason: "replace" });
   }
+  flushParamsCommit();
+  const before = captureWorkspace();
   const revision = state.paramsRevision;
   state.previewSession.begin({
     inputAssetId: subjectId,
+    returnAssetId: state.previewId,
+    stage: operationStage(request.kind, request.targetAssetId && state.ai.pipeline && request.kind !== "recolor-svg"),
     baseAssetId: request.baseAssetId || "",
     revision: revision,
-    params: readParamsSnapshot(),
+    params: { ...before.params, bbox: before.bbox, recolor: before.recolor },
     label: request.label,
     kind: request.kind,
     scale: 1,
@@ -3869,7 +3900,7 @@ async function startPreviewRequest(request) {
       }
       state.previewSession.attachJob(job.job_id);
       state.previewJobIds.add(job.job_id);
-      state.submissionSnapshots.set(job.job_id, state.lastCommittedSnapshot || captureWorkspace());
+      state.submissionSnapshots.set(job.job_id, before);
       await adoptJob(job, { announce: false, preview: true });
     },
     onError: (error) => {
@@ -3948,7 +3979,7 @@ async function completePreviewJob(job) {
       );
       renderPreviewUi();
       updateActionState();
-      showToast("预览失败，工作区未改变。可调整参数后重新预览。", "error", 6500);
+      showToast(jobFailureText(job), "error", 7500);
     }
     state.previewJobIds.delete(job.job_id);
     state.submissionSnapshots.delete(job.job_id);
@@ -4063,6 +4094,7 @@ async function applyPreview() {
   if (makeCurrent && state.bboxDirty && !(await guardUnsavedBBox("应用该预览并切换当前输入"))) {
     return false;
   }
+  const before = captureWorkspace();
   promoteAssetsToVersions(session.assetIds);
   if (makeCurrent && target && assetIsInputCapable(target)) {
     state.currentInputId = target.asset_id;
@@ -4078,6 +4110,9 @@ async function applyPreview() {
     state.recolor.assetId = target.asset_id;
     state.recolor.signature = "";
   }
+  if (session.kind === "refine_mask" && target?.source_mask_asset_id) {
+    state.brush.selectedPairKey = target.source_mask_asset_id + "|" + target.source_rgb_asset_id;
+  }
   clearPreviewExpiry();
   if (state.autoPreviewTimer) {
     window.clearTimeout(state.autoPreviewTimer);
@@ -4087,7 +4122,8 @@ async function applyPreview() {
   state.previewJobIds.delete(job.job_id);
   state.submissionSnapshots.delete(job.job_id);
   renderAll();
-  commitWorkspace({ label: "应用「" + session.label + "」" });
+  const fields = session.kind === "refine_mask" ? ["previewId", "maskPair"] : undefined;
+  commitWorkspace({ before, fields, stage: session.stage || jobStage(job), label: "应用「" + session.label + "」" });
   await loadPreview();
   showToast("已应用预览「" + session.label + "」。可用撤销回到处理前。", "success", 6500);
   return true;
@@ -4114,7 +4150,7 @@ async function discardPreview(options) {
     cancelFailed = !cancelled;
   }
   clearPreviewExpiry();
-  if (state.previewId !== state.currentInputId) state.previewId = state.currentInputId;
+  state.previewId = state.assets.has(session.returnAssetId) ? session.returnAssetId : state.currentInputId;
   releasePreviewAssets(session);
   state.previewSession.clear();
   renderAll();
@@ -4285,6 +4321,7 @@ function readParamsSnapshot() {
       straighten: numberValue(dom.straightenValue, 0)
     },
     includeEnhance: Boolean(dom.includeEnhance.checked),
+    oneClickRecipe: $("oneclick-method").value,
     workingMax: integerValue(dom.workingMax),
     previewMode: Boolean(dom.previewMode.checked),
     autoPreviewEnhance: Boolean(dom.autoPreviewEnhance.checked)
@@ -4330,6 +4367,9 @@ function applyParamsSnapshot(snapshot) {
   }
 
   if (dom.includeEnhance) dom.includeEnhance.checked = Boolean(params.includeEnhance);
+  if (["model_lineart", "color"].includes(params.oneClickRecipe)) {
+    $("oneclick-method").value = params.oneClickRecipe;
+  }
   dom.previewMode.checked = params.previewMode !== false;
   dom.autoPreviewEnhance.checked = Boolean(params.autoPreviewEnhance);
   if (Number.isInteger(params.workingMax)) {
@@ -4345,15 +4385,24 @@ function captureWorkspace() {
   return {
     currentInputId: state.currentInputId,
     // A preview is transient and is never part of an applied workspace state.
-    previewId: session ? (session.inputAssetId || state.currentInputId) : state.previewId,
+    previewId: session ? (session.returnAssetId || state.currentInputId) : state.previewId,
     sourceLabel: state.sourceLabel,
     sourceNote: state.sourceNote,
     sourceOriginal: state.sourceOriginal,
     imageId: state.imageId,
     uploadMeta: state.uploadMeta,
     bbox: state.bbox ? Object.assign({}, state.bbox) : null,
+    bboxDirty: state.bboxDirty,
     params: readParamsSnapshot(),
     recolor: readRecolorSnapshot(),
+    maskPair: state.brush.selectedPairKey,
+    tile: {
+      unitId: state.tile.unitId, rows: state.tile.rows, cols: state.tile.cols,
+      resultAssetId: state.tile.resultAssetId, jobId: state.tile.jobId
+    },
+    repair: { record: state.repair.record, jobId: state.repair.jobId, selectedAssetId: state.repair.selectedAssetId },
+    ai: { pipeline: state.ai.pipeline, layers: state.ai.layers, layerKey: state.ai.layerKey,
+      selectedLayerIds: Array.from(state.ai.selectedLayerIds), processingKey: state.ai.processingKey },
     preview: null,
     paramsRevision: state.paramsRevision
   };
@@ -4368,31 +4417,51 @@ function snapshotsEqual(left, right) {
   }
 }
 
+function currentStage() {
+  return document.documentElement.dataset.stage || "1";
+}
+
+function operationStage(kind, ai) {
+  if (ai) return "4";
+  return ({ crop: "2", prepare: "2", working_copy: "1", refine_mask: "5",
+    repair: "6", tile_preview: "7", compose_layers: "4", decompose_layers: "4", export: "1" })[normalizeKind(kind)] || "3";
+}
+
+function jobStage(job) {
+  if (job?._stage) return job._stage;
+  if (job && job.job_id === state.tile.pendingCropJobId) return "7";
+  return operationStage(job?.kind, job?.ai_pipeline_id);
+}
+
 function resetEditHistory() {
-  const snapshot = captureWorkspace();
-  state.workspaceHistory.reset(snapshot, { label: "当前状态" });
-  state.lastCommittedSnapshot = snapshot;
+  state.stageHistories.clear();
+  state.lastCommittedSnapshot = captureWorkspace();
   renderUndoRedo();
 }
 
-function commitWorkspace(options) {
-  const opts = options || {};
+function commitWorkspace(options = {}) {
   if (state.suppressHistory) return;
-  if (!currentAsset()) return;
   const next = captureWorkspace();
-  if (state.lastCommittedSnapshot && snapshotsEqual(state.lastCommittedSnapshot, next)) {
-    state.lastCommittedSnapshot = next;
-    return;
-  }
-  if (!state.workspaceHistory.size()) {
-    state.workspaceHistory.reset(next, { label: "当前状态" });
-  } else {
-    state.workspaceHistory.push(next, {
-      label: opts.label || "编辑",
-      mergeKey: opts.mergeKey || ""
-    });
-  }
+  const previous = options.before || state.lastCommittedSnapshot;
   state.lastCommittedSnapshot = next;
+  if (!previous || !currentAsset()) return;
+  const stage = options.stage || currentStage();
+  const fields = options.fields || ["currentInputId", "previewId", "sourceLabel", "sourceNote",
+    "sourceOriginal", "imageId", "uploadMeta", "bbox", "bboxDirty", "recolor"];
+  const before = { inputBinding: previous.currentInputId };
+  const after = { inputBinding: next.currentInputId };
+  for (const key of fields) {
+    if (snapshotsEqual(previous[key], next[key])) continue;
+    before[key] = previous[key];
+    after[key] = next[key];
+  }
+  if (Object.keys(after).length === 1) return;
+  let history = state.stageHistories.get(stage);
+  if (!history) {
+    history = createEditHistory({ limit: 80 }).reset({});
+    state.stageHistories.set(stage, history);
+  }
+  history.push({ before, after }, { label: options.label || "编辑" });
   renderUndoRedo();
 }
 
@@ -4416,11 +4485,11 @@ async function restoreWorkspaceSnapshot(snapshot, options) {
     );
     state.previewId = snapshot.previewId || snapshot.currentInputId || null;
     state.bbox = snapshot.bbox ? Object.assign({}, snapshot.bbox) : null;
-    state.bboxDirty = false;
+    state.bboxDirty = Boolean(snapshot.bboxDirty);
     fillBboxInputs(state.bbox);
     applyParamsSnapshot(snapshot.params || {});
-    if (recolorSnapshot && recolorSnapshot.assetId && state.assets.get(recolorSnapshot.assetId)) {
-      state.recolor.assetId = recolorSnapshot.assetId;
+    if (recolorSnapshot) {
+      state.recolor.assetId = state.assets.has(recolorSnapshot.assetId) ? recolorSnapshot.assetId : "";
       state.recolor.signature = "";
     }
     state.previewSession.restore(snapshot.preview);
@@ -4443,73 +4512,164 @@ async function restoreWorkspaceSnapshot(snapshot, options) {
   return true;
 }
 
-async function undoWorkspace() {
-  if (state.requestInFlight || state.pendingSubmission || state.taskRunning || state.cancelBusy || state.duplicateSwitching) {
-    showToast("当前有提交或任务正在处理，完成后再撤销。", "warning");
-    return;
-  }
-  if (state.brush.open) {
-    undoBrushAction();
-    return;
-  }
-  const entry = state.workspaceHistory.undo();
-  if (!entry) {
-    showToast("当前图片没有可撤销的编辑。", "info", 3500);
-    return;
-  }
-  await restoreWorkspaceSnapshot(entry.state, {
-    message: "已撤销：" + entry.label + "。"
-  });
-  renderUndoRedo();
+function stageEditBusy(stage) {
+  return state.requestInFlight || state.pendingSubmission || state.taskRunning || state.cancelBusy ||
+    state.duplicateSwitching || state.repair.loading || state.repair.decisionBusy ||
+    (stage === "4" && state.ai.pipeline && isAiActive(state.ai.pipeline));
 }
 
-async function redoWorkspace() {
-  if (state.requestInFlight || state.pendingSubmission || state.taskRunning || state.cancelBusy || state.duplicateSwitching) {
-    showToast("当前有提交或任务正在处理，完成后再重做。", "warning");
-    return;
+function stageSnapshot(snapshot, from, to, redo) {
+  const sameInput = snapshot.currentInputId === from.inputBinding;
+  for (const key of Object.keys(to)) {
+    if (key === "inputBinding") continue;
+    if (key === "params") {
+      for (const [name, value] of Object.entries(to.params)) {
+        if (snapshotsEqual(snapshot.params[name], from.params[name])) snapshot.params[name] = value;
+      }
+    } else if (key === "previewId" ? (redo || snapshot.previewId === from.previewId) :
+      (["tile", "repair", "ai", "maskPair", "recolor"].includes(key) || sameInput) &&
+      snapshotsEqual(snapshot[key], from[key])) {
+      snapshot[key] = to[key];
+    }
   }
+}
+
+async function applyStageSnapshot(snapshot, message) {
+  const tile = snapshot.tile;
+  if (!snapshotsEqual(captureWorkspace().tile, tile)) {
+    Object.assign(state.tile, tile, { job: state.tasks.get(tile.jobId) || null, error: "" });
+    state.tile.seamObservation = state.assets.get(tile.resultAssetId)?.seam_observation ||
+      state.tile.job?.parameters?.seam_observation || "not_reviewed";
+  }
+  Object.assign(state.repair, snapshot.repair);
+  if (state.ai.pipeline !== snapshot.ai.pipeline) resetAiState();
+  Object.assign(state.ai, snapshot.ai, { selectedLayerIds: new Set(snapshot.ai.selectedLayerIds) });
+  state.brush.selectedPairKey = snapshot.maskPair;
+  await restoreWorkspaceSnapshot(snapshot, { message });
+}
+
+async function editStage(action) {
   if (state.brush.open) {
-    redoBrushAction();
+    if (action === "redo") redoBrushAction();
+    else if (action === "clear") await requestCloseBrushEditor();
+    else undoBrushAction();
     return;
   }
-  const entry = state.workspaceHistory.redo();
+  const stage = currentStage();
+  if (stageEditBusy(stage)) {
+    showToast("请等待当前任务完成后再编辑本页。", "warning");
+    return;
+  }
+  const session = state.previewSession.current();
+  if (session) {
+    if (session.stage !== stage) {
+      showToast("请先到生成预览的页面应用或放弃预览。", "warning");
+      return;
+    }
+    if (action === "redo" || !(await discardPreview({ confirm: true }))) return;
+    if (action === "undo") return;
+  }
+  flushParamsCommit();
+  const history = state.stageHistories.get(stage);
+  const snapshot = captureWorkspace();
+  if (action === "clear") {
+    if (stage === "3" && state.autoPreviewTimer) {
+      window.clearTimeout(state.autoPreviewTimer);
+      state.autoPreviewTimer = null;
+    }
+    while (history?.canUndo()) {
+      const entry = history.current().state;
+      stageSnapshot(snapshot, entry.after, entry.before, false);
+      history.undo();
+    }
+    state.stageHistories.delete(stage);
+    if (stage === "7") {
+      resetTileState();
+      snapshot.tile = captureWorkspace().tile;
+    } else if (stage === "6") {
+      resetRepairState();
+      snapshot.repair = captureWorkspace().repair;
+    } else if (stage === "4") {
+      resetAiState();
+      snapshot.ai = captureWorkspace().ai;
+    }
+    const task = activeTaskRecord();
+    if (task && jobStage(task) === stage) {
+      state.activeJobId = null;
+      assignFeedbackJob(null);
+    }
+    for (const node of ({ "1": [dom.workingError], "2": [dom.bboxError],
+      "3": [dom.composeError, dom.lineartError, dom.recolorError], "4": [dom.aiError, dom.aiRerunError]
+    })[stage] || []) if (node) setError(node, "");
+    await applyStageSnapshot(snapshot, "已清空「" + STAGE_LABELS[stage] + "」本次处理。历史成果仍可查看。");
+    return;
+  }
+  const fromEntry = history?.current();
+  const redo = action === "redo";
+  const entry = redo ? history?.redo() : history?.undo();
   if (!entry) {
-    showToast("当前图片没有可重做的编辑。", "info", 3500);
+    showToast("本页没有可" + (redo ? "重做" : "撤销") + "的操作。", "info", 3500);
     return;
   }
-  await restoreWorkspaceSnapshot(entry.state, {
-    message: "已重做：" + entry.label + "。"
-  });
-  renderUndoRedo();
+  const change = redo ? entry.state : fromEntry.state;
+  stageSnapshot(snapshot, redo ? change.before : change.after, redo ? change.after : change.before, redo);
+  await applyStageSnapshot(snapshot, "已" + (redo ? "重做" : "撤销") + "「" + entry.label + "」。");
+}
+
+function undoWorkspace() {
+  return editStage("undo");
+}
+
+function redoWorkspace() {
+  return editStage("redo");
 }
 
 function renderUndoRedo() {
-  const busy = state.requestInFlight || state.pendingSubmission || state.taskRunning || state.cancelBusy ||
-    state.duplicateSwitching;
-  const canUndo = !busy && state.workspaceHistory.canUndo();
-  const canRedo = !busy && state.workspaceHistory.canRedo();
+  const stage = currentStage();
+  const history = state.stageHistories.get(stage);
+  const session = state.previewSession.current();
+  const ownsPreview = session && session.stage === stage;
+  const busy = stageEditBusy(stage) || (session && !ownsPreview);
+  const canUndo = !busy && (ownsPreview || history?.canUndo());
+  const canRedo = !busy && !session && history?.canRedo();
+  const task = activeTaskRecord();
   setDisabled(dom.undoButton, !canUndo);
   setDisabled(dom.redoButton, !canRedo);
+  setDisabled($("clear-stage-button"), Boolean(busy || !(ownsPreview || history?.canUndo() || history?.canRedo() ||
+    (task && jobStage(task) === stage) || (stage === "4" && state.ai.pipeline) ||
+    (stage === "6" && state.repair.record) || (stage === "7" && (state.tile.resultAssetId || state.tile.unitId)))));
   dom.undoButton.title = canUndo
-    ? "撤销：" + state.workspaceHistory.undoLabel() + "（Ctrl+Z）"
-    : "当前图片暂无可撤销的编辑";
+    ? (ownsPreview ? "放弃本页待应用预览" : "撤销：" + history.undoLabel()) + "（Ctrl+Z）"
+    : "本页暂无可撤销的操作";
   dom.redoButton.title = canRedo
-    ? "重做：" + state.workspaceHistory.redoLabel() + "（Ctrl+Y）"
-    : "当前图片暂无可重做的编辑";
+    ? "重做：" + history.redoLabel() + "（Ctrl+Y）"
+    : "本页暂无可重做的操作";
+}
+
+function flushParamsCommit() {
+  if (!state.paramsCommitTimer) return;
+  window.clearTimeout(state.paramsCommitTimer);
+  state.paramsCommitTimer = null;
+  commitWorkspace({ label: "调整参数", fields: ["params"] });
 }
 
 function scheduleParamsCommit() {
   if (state.suppressHistory) return;
   if (state.paramsCommitTimer) window.clearTimeout(state.paramsCommitTimer);
-  state.paramsCommitTimer = window.setTimeout(() => {
-    state.paramsCommitTimer = null;
-    commitWorkspace({ label: "调整参数", mergeKey: "params" });
-  }, PREVIEW_REVISION_DELAY);
+  state.paramsCommitTimer = window.setTimeout(flushParamsCommit, PREVIEW_REVISION_DELAY);
 }
 
 function previewRevision(session) {
-  // Line-art has only one editable option. Other settings cannot change its request.
+  // A pending preview follows the parameters used by its own operation.
   if (session?.kind === "lineart" && session.params.lineart?.method === lineartMethod()) return session.revision;
+  if (session?.kind === "extract") {
+    const current = readExtractDraft();
+    if (snapshotsEqual(session.params.extract, current) &&
+      (current.mode !== "grabcut" || snapshotsEqual(session.params.bbox, state.bbox))) return session.revision;
+  }
+  if (session?.kind === "recolor-svg" && snapshotsEqual(session.params.recolor, readRecolorSnapshot())) {
+    return session.revision;
+  }
   return state.paramsRevision;
 }
 
@@ -4538,7 +4698,7 @@ function handleBboxChanged() {
   invalidatePreviewForParams();
   renderPreviewUi();
   updateActionState();
-  commitWorkspace({ label: "调整框选", mergeKey: "bbox" });
+  commitWorkspace({ label: "调整框选", fields: ["bbox", "bboxDirty"] });
 }
 
 function scheduleAutoPreview() {
@@ -4661,8 +4821,8 @@ function renderGuide() {
     hasSvg: versionHas((item) => assetIsSvg(item)),
     hasResult: state.versionIds.length > 0,
     versionCount: state.versionIds.length,
-    canUndo: state.workspaceHistory.canUndo(),
-    canRedo: state.workspaceHistory.canRedo(),
+    canUndo: Boolean(state.stageHistories.get(currentStage())?.canUndo()),
+    canRedo: Boolean(state.stageHistories.get(currentStage())?.canRedo()),
     blocked: blocked
   });
 
@@ -5036,6 +5196,7 @@ async function adoptJob(rawJob, options) {
   if (!job) throw new ApiError("任务响应缺少 job_id。", { status: 202 });
   const previous = state.tasks.get(job.job_id);
   const merged = Object.assign({}, previous || {}, job);
+  merged._stage = jobStage(merged);
   state.tasks.set(job.job_id, merged);
   state.activeJobId = job.job_id;
   state.completedJobs.delete(job.job_id);
@@ -5202,9 +5363,6 @@ async function finishJobOnce(job) {
       await loadRepairRecord(job.job_id, { preserveSelection: false, switchAccepted: false });
     }
     if (isTileJobKind(job.kind)) {
-      state.tile.jobId = job.job_id;
-      state.tile.job = job;
-      state.tile.resultAssetId = "";
       state.tile.error = job.error && (job.error.message || job.error.code)
         ? (job.error.message || "平铺任务失败。")
         : "平铺任务失败。可明确重试本地平铺，不会产生模型费用。";
@@ -5215,7 +5373,7 @@ async function finishJobOnce(job) {
     renderTask();
     renderFeedback();
     updateActionState();
-    showToast(jobLabel(job.kind) + "失败。原因已显示在任务卡中。", "error", 6500);
+    showToast(jobFailureText(job), "error", 7500);
     return;
   }
 
@@ -5250,12 +5408,16 @@ async function processSuccessfulJob(job) {
   }
 
   const kind = normalizeKind(job.kind);
+  const stage = jobStage(job);
+  const before = state.submissionSnapshots.get(job.job_id) || captureWorkspace();
   if (isRepairJobKind(kind)) {
     await completeRepairJob(job);
+    commitWorkspace({ stage, before, fields: ["repair"], label: "载入修复结果" });
     return;
   }
   if (isTileJobKind(kind)) {
     await completeTileJob(job);
+    commitWorkspace({ stage, before, fields: ["tile"], label: "生成平铺预览" });
     return;
   }
 
@@ -5274,6 +5436,9 @@ async function processSuccessfulJob(job) {
     state.recolor.assetId = target.asset_id;
     state.recolor.signature = "";
   }
+  if (kind === "refine_mask" && target?.source_mask_asset_id) {
+    state.brush.selectedPairKey = target.source_mask_asset_id + "|" + target.source_rgb_asset_id;
+  }
 
   const pendingTileCrop = state.tile.pendingCrop && state.tile.pendingCropJobId === job.job_id;
   if (pendingTileCrop) {
@@ -5290,7 +5455,9 @@ async function processSuccessfulJob(job) {
 
   renderAll();
   if (kind !== "export" && target) {
-    commitWorkspace({ label: "应用「" + jobLabel(job.kind) + "」" });
+    const fields = pendingTileCrop ? ["currentInputId", "previewId", "bbox", "bboxDirty", "tile"] :
+      kind === "refine_mask" ? ["previewId", "maskPair"] : undefined;
+    commitWorkspace({ stage, before, fields, label: "应用「" + jobLabel(job.kind) + "」" });
   }
   if (target && assetIsPreviewable(target)) {
     await loadPreview();
@@ -6344,11 +6511,13 @@ function buildAiLayerCard(layer, asset) {
     checkbox.click();
   });
   checkbox.addEventListener("change", () => {
+    const before = captureWorkspace();
     if (checkbox.checked) state.ai.selectedLayerIds.add(layerId);
     else state.ai.selectedLayerIds.delete(layerId);
     card.classList.toggle("is-selected", checkbox.checked);
     updateAiSelectionActions();
     if (state.ai.filter === "selected" && !checkbox.checked) renderAiCandidates();
+    commitWorkspace({ stage: "4", before, fields: ["ai"], label: "调整候选选层" });
   });
   card.append(visual);
 
@@ -6641,6 +6810,7 @@ async function processAiResult(pipeline) {
   const raws = Array.isArray(result.assets) ? result.assets : [];
   const processingKey = id + ":" + String(pipeline.updated_at || "") + ":" + String(pipeline.revision || "");
   if (!raws.length || state.ai.processingKey === processingKey) return;
+  const before = captureWorkspace();
   const localFallback = pipeline.decision && pipeline.decision.action === "use_local";
   const assets = await registerAssets(raws, {
     context: {
@@ -6660,9 +6830,11 @@ async function processAiResult(pipeline) {
     : (assets.find((asset) => normalizeKind(asset.kind) === "composed_candidate") ||
       findSvgAsset(assets, { parameters: pipeline.vector || {} }) ||
       assets.find((asset) => assetIsInputCapable(asset)) || null);
-  if (preferred && assetIsPreviewable(preferred)) {
+  if (preferred && assetIsPreviewable(preferred) && !state.previewSession.current() &&
+      !state.taskRunning && state.currentInputId === pipeline.input_asset_id) {
     state.previewId = preferred.asset_id;
     renderAll();
+    commitWorkspace({ stage: "4", before, fields: ["previewId"], label: "显示候选合成结果" });
     await loadPreview();
   } else {
     renderAll();
@@ -7136,7 +7308,7 @@ async function switchToAcceptedRepair(record, options) {
   }
   const changed = state.currentInputId !== acceptedId;
   await setPreview(acceptedId, { makeCurrent: true, skipGuard: true, historyLabel: "使用已接受修复",
-    sourceLabel: "已接受修复 " + shortId(acceptedId) });
+    stage: "6", sourceLabel: "已接受修复 " + shortId(acceptedId) });
   if (changed && opts.announce !== false) {
     showToast("已接受修复并切换到新分支；可继续使用现有提取、SVG 与 ZIP。", "success", 5500);
   }
@@ -7668,6 +7840,7 @@ function selectRepairCandidate(assetId) {
   if (!record || String(record.state || "").toLowerCase() !== "waiting_user") return;
   const allowed = [repairAssetId(record, "candidate_asset"), repairAssetId(record, "composited_asset")].filter(Boolean);
   if (!allowed.includes(assetId)) return;
+  const before = captureWorkspace();
   state.repair.selectedAssetId = assetId;
   if (assetId !== repairAssetId(record, "candidate_asset")) {
     state.repair.acceptFull = false;
@@ -7676,6 +7849,7 @@ function selectRepairCandidate(assetId) {
   setRepairError("");
   renderRepairPanel();
   updateActionState();
+  commitWorkspace({ stage: "6", before, fields: ["repair"], label: "选择修复候选" });
 }
 
 async function startRepair() {
@@ -8018,12 +8192,16 @@ async function renderRepairEditView(record, seq) {
   setText(dom.repairCompareNote, "编辑区域是矩形二值掩膜；实际羽化权重单独保存，框外必须保持原输入。");
 }
 
-function croppedUnitAssets() {
+function isTileUnit(asset) {
+  return ["cropped", "crop", "transparent_png", "lineart", "accepted_repair"].includes(normalizeKind(asset?.kind));
+}
+
+function tileUnitAssets() {
   const units = [];
   for (const id of state.versionIds) {
     const asset = state.assets.get(id);
     if (!asset) continue;
-    if (!["cropped", "crop"].includes(normalizeKind(asset.kind))) continue;
+    if (!isTileUnit(asset)) continue;
     units.push(asset);
   }
   return units;
@@ -8041,18 +8219,18 @@ function renderTilePreset() {
 }
 
 function renderTileUnits() {
-  const units = croppedUnitAssets();
+  const units = tileUnitAssets();
   const signature = units.map((asset) => asset.asset_id).join("|");
   if (!units.some((asset) => asset.asset_id === state.tile.unitId)) state.tile.unitId = "";
   if (signature !== state.tile.unitSignature) {
     state.tile.unitSignature = signature;
     dom.tileUnit.replaceChildren();
-    const placeholder = element("option", "", units.length ? "请选择已保存的裁切单元" : "尚无裁切单元，请先裁切");
+    const placeholder = element("option", "", units.length ? "请选择要重复的 PNG 版本" : "先保存裁切、提取、线稿或修复成果");
     placeholder.value = "";
     dom.tileUnit.append(placeholder);
     for (const unit of units) {
       const option = element("option", "",
-        "#" + shortId(unit.asset_id) + " · " + formatDimensions(assetWidth(unit), assetHeight(unit)));
+        assetDisplayName(unit) + " · #" + shortId(unit.asset_id) + " · " + formatDimensions(assetWidth(unit), assetHeight(unit)));
       option.value = unit.asset_id;
       dom.tileUnit.append(option);
     }
@@ -8061,7 +8239,7 @@ function renderTileUnits() {
   const unit = selectedTileUnit();
   setHidden(dom.tileUnitPreview, !unit);
   if (unit) {
-    setText(dom.tileUnitName, "裁切单元 #" + shortId(unit.asset_id));
+    setText(dom.tileUnitName, assetDisplayName(unit) + " #" + shortId(unit.asset_id));
     const bbox = unit.bbox || (unit.parameters && unit.parameters.bbox) ||
       (unit.transform && unit.transform.bbox) || null;
     setText(dom.tileUnitMeta,
@@ -8090,8 +8268,7 @@ function tileBlockReason() {
   if (state.pendingSubmission) return "请先处理结果未知的上一次提交。";
   if (state.taskRunning) return "已有任务处理中，完成后再生成平铺。";
   const unit = selectedTileUnit();
-  if (!unit) return "请先选择一个已保存的裁切单元。";
-  if (!["cropped", "crop"].includes(normalizeKind(unit.kind))) return "平铺只接受 cropped 裁切资产。";
+  if (!unit || !isTileUnit(unit)) return "请选择一个已保存的 PNG 平铺单元。";
   if (![2, 3].includes(state.tile.rows) || state.tile.rows !== state.tile.cols) {
     return "请选择 2×2 或 3×3 预设。";
   }
@@ -8153,6 +8330,8 @@ function updateTileActions() {
   const unit = selectedTileUnit();
   const busy = Boolean(state.requestInFlight || state.pendingSubmission || state.taskRunning || state.duplicateSwitching);
   const reason = tileBlockReason();
+  setDisabled(dom.tileUnit, busy);
+  document.querySelectorAll('input[name="tile-preset"]').forEach((node) => setDisabled(node, busy));
   setDisabled(dom.tileGenerate, Boolean(reason));
   setDisabled(dom.tileCrop, busy || !currentAsset() || !isPreviewCurrent() ||
     !state.bbox || !validBboxForAsset(state.bbox, currentAsset()));
@@ -8206,6 +8385,7 @@ async function handleTileCrop() {
   const asset = currentAsset();
   if (!asset || !isPreviewCurrent()) {
     setError(dom.tileError, "请先回到当前输入。");
+    showToast("请先回到当前输入再裁切平铺单元。", "warning");
     return;
   }
   if (!state.bbox || !validBboxForAsset(state.bbox, asset)) {
@@ -8215,6 +8395,7 @@ async function handleTileCrop() {
   }
   setError(dom.tileError, "");
   state.tile.error = "";
+  const before = captureWorkspace();
   const bodyText = JSON.stringify({ input_asset_id: asset.asset_id, bbox: Object.assign({}, state.bbox) });
   startSubmission({
     path: "/jobs/crop",
@@ -8227,6 +8408,7 @@ async function handleTileCrop() {
       if (!job) throw new ApiError("裁切任务响应缺少编号。", { status: 202 });
       state.tile.pendingCrop = true;
       state.tile.pendingCropJobId = job.job_id;
+      state.submissionSnapshots.set(job.job_id, before);
       await adoptJob(job, { announce: true });
       if (!state.tile.unitId) {
         showToast("正在保存裁切单元；完成后会自动选中。", "info", 4500);
@@ -8262,9 +8444,8 @@ async function startTilePreview() {
     seam_observation: state.tile.seamObservation
   };
   const bodyText = JSON.stringify(payload);
+  const before = captureWorkspace();
   state.tile.error = "";
-  state.tile.resultAssetId = "";
-  state.tile.job = null;
   setError(dom.tileError, "");
   startSubmission({
     path: "/jobs/tile-preview",
@@ -8274,7 +8455,7 @@ async function startTilePreview() {
     onSuccess: async (data) => {
       const job = extractJobFromResponse(data);
       if (!job) throw new ApiError("平铺任务响应缺少编号。", { status: 202 });
-      state.tile.jobId = job.job_id;
+      state.submissionSnapshots.set(job.job_id, before);
       await adoptJob(job, { announce: true });
       const latest = state.tasks.get(job.job_id);
       if (isJobActive(latest)) {
@@ -8347,6 +8528,7 @@ async function completeRepairJob(job) {
   if (!record) {
     state.repair.error = "修复任务已完成，但修复记录读取失败。请点击修复面板的刷新，不要重复提交收费请求。";
     renderRepairPanel();
+    showToast(state.repair.error, "error", 7500);
     return;
   }
   const repairState = String(record.state || "").toLowerCase();
@@ -8395,6 +8577,7 @@ async function completeTileJob(job) {
     state.tile.error = "平铺任务已完成，但没有返回 tile_preview 资产。可刷新历史后重试。";
     renderTilePanel();
     renderVersions();
+    showToast(state.tile.error, "error", 7500);
     return;
   }
   state.tile.resultAssetId = asset.asset_id;
@@ -9830,13 +10013,18 @@ async function restoreJob(jobId) {
       : null;
   }
 
-  let target = findSvgAsset(resultAssets, latest) || findTransparentAsset(resultAssets) ||
-    resultAssets.find((asset) => assetIsInputCapable(asset)) || null;
+  state.previewId = state.currentInputId;
+  const before = captureWorkspace();
+  const { target: selected, makeCurrent } = selectTargetForJob(latest, resultAssets);
+  let target = selected;
   if (isRepairJobKind(latest.kind) && inputAsset) target = inputAsset;
   if (isTileJobKind(latest.kind) && inputAsset) target = inputAsset;
   if (!target && inputAsset) target = inputAsset;
   if (target && assetIsPreviewable(target)) state.previewId = target.asset_id;
-  if (!state.currentInputId && target && assetIsInputCapable(target)) state.currentInputId = target.asset_id;
+  if ((!state.currentInputId || makeCurrent) && target && assetIsInputCapable(target)) {
+    state.currentInputId = target.asset_id;
+    state.currentHasTransparency = Boolean(target.normalization?.has_transparency);
+  }
   if (!state.previewId && state.currentInputId) state.previewId = state.currentInputId;
 
   state.activeJobId = latest.job_id;
@@ -9846,14 +10034,13 @@ async function restoreJob(jobId) {
   assignFeedbackJob(isJobEnded(latest) ? latest.job_id : null);
   state.taskRunning = isJobActive(latest);
   restoreParameters(latest);
+  if (makeCurrent) clearBBox();
   state.extractModeAutoSet = false;
   state.paramsRevision = 1;
   resetEditHistory();
   renderAll();
-  const kind = normalizeKind(latest.kind);
-  const stages = { crop: 2, prepare: 2, working_copy: 1, export: 1, refine_mask: 5,
-    decompose_layers: 4, compose_layers: 4, repair: 6, tile_preview: 7 };
-  openWorkspace(latest.ai_pipeline_id ? 4 : stages[kind] || 3);
+  const stage = jobStage(latest);
+  openWorkspace(stage);
   renderFeedback();
   if (state.previewId) await loadPreview();
   if (isJobActive(latest)) {
@@ -9868,6 +10055,11 @@ async function restoreJob(jobId) {
   }
   if (isTileJobKind(latest.kind)) {
     await restoreTileFromJob(latest);
+  }
+  if (latest.state === "succeeded") {
+    const fields = stage === "7" ? ["tile"] : stage === "6" ? ["repair", "currentInputId", "previewId"] :
+      stage === "4" ? ["ai", "previewId"] : undefined;
+    commitWorkspace({ stage, before, fields, label: "恢复「" + jobLabel(latest.kind) + "」" });
   }
   showToast("已恢复历史任务 #" + shortId(latest.job_id) + " 的输入、参数与可见成果。", "success", 5500);
 }
@@ -9903,8 +10095,10 @@ function restoreParameters(job) {
   let vector = null;
   let enhance = null;
   if (kind === "pipeline") {
+    $("oneclick-method").value = params.recipe === "model_lineart" ? "model_lineart" : "color";
     extract = params.extract || null;
-    vector = params.vector || null;
+    vector = params.recipe === "model_lineart" && params.vector
+      ? { ...params.vector, mode: null } : params.vector || null;
     enhance = params.enhance || null;
     dom.includeEnhance.checked = Boolean(params.enhance);
   } else if (kind === "extract") {
@@ -10089,9 +10283,11 @@ function updateActionState() {
   setDisabled(dom.uploadSubmit, !state.uploadFile || Boolean(writeReason));
   setDisabled(dom.duplicateUse, Boolean(duplicateSwitchBlockReason()));
 
-  const oneClickGrabcutMissing = extractMode === "grabcut" && !hasBbox;
-  setDisabled(dom.oneclickButton, Boolean(processReason) || oneClickGrabcutMissing);
-  setDisabled(dom.extractButton, Boolean(processReason) || oneClickGrabcutMissing);
+  const grabcutMissing = extractMode === "grabcut" && !hasBbox;
+  const oneClickGrabcutMissing = $("oneclick-method").value === "color" && grabcutMissing;
+  const oneClickReason = currentProcessBlock({ useCurrentInput: true });
+  setDisabled(dom.oneclickButton, Boolean(oneClickReason) || oneClickGrabcutMissing);
+  setDisabled(dom.extractButton, Boolean(processReason) || grabcutMissing);
   setDisabled(dom.vectorButton, Boolean(processReason));
   setDisabled(dom.lineartButton, Boolean(currentProcessBlock({ useCurrentInput: true })));
   setDisabled(dom.enhanceButton, Boolean(processReason));
@@ -10163,23 +10359,21 @@ function updateActionState() {
 
   const previewSessionActive = state.previewSession.isActive();
   dom.previewBlockHint.hidden = !(asset && !previewCurrent && !previewSessionActive);
-  dom.oneclickBlock.classList.toggle("is-warning", Boolean(processReason || oneClickGrabcutMissing));
+  dom.oneclickBlock.classList.toggle("is-warning", Boolean(oneClickReason || oneClickGrabcutMissing));
   if (writeReason) {
     setText(dom.oneclickBlock, writeReason);
   } else if (!asset) {
     setText(dom.oneclickBlock, "上传后可开始。");
   } else if (previewSessionActive) {
     setText(dom.oneclickBlock, "当前有未应用预览；开始新处理会先放弃旧预览。");
-  } else if (!previewCurrent) {
-    setText(dom.oneclickBlock, "画布正在预览成果，请先回到当前输入。");
   } else if (tooLarge) {
     setText(dom.oneclickBlock, "大图需先创建工作副本。");
   } else if (oneClickGrabcutMissing) {
     setText(dom.oneclickBlock, "GrabCut 需要有效框选。");
   } else {
     setText(dom.oneclickBlock, dom.previewMode.checked
-      ? "先生成预览；满意后应用，放弃不会写入版本。"
-      : "提交后显示真实任务状态，不会自动重试。");
+      ? "处理当前输入 #" + shortId(asset.asset_id) + "。生成预览后可应用或放弃。"
+      : "处理当前输入 #" + shortId(asset.asset_id) + "。提交后显示任务状态。");
   }
   syncActionLabels();
   updateExtractParamVisibility();
@@ -10537,7 +10731,19 @@ function wireEvents() {
       if (!state.assets.has(asset.asset_id)) state.assets.set(asset.asset_id, asset);
       if (!(await setPreview(asset.asset_id, { makeCurrent: true, sourceLabel: assetDisplayName(asset) }))) return;
       promoteAssetsToVersions([asset.asset_id]);
-      renderVersions();
+      if (asset.source_mask_asset_id && asset.source_rgb_asset_id) {
+        try {
+          const pair = await registerAssets([asset.source_mask_asset_id, asset.source_rgb_asset_id], { includeInVersions: false });
+          if (state.currentInputId === asset.asset_id && pair.every((item) => !item._metaError)) {
+            state.brush.selectedPairKey = asset.source_mask_asset_id + "|" + asset.source_rgb_asset_id;
+          } else if (pair.some((item) => item._metaError)) {
+            showToast("透明图已打开，关联蒙版或原图读取失败。可从任务历史恢复。", "warning", 7500);
+          }
+        } catch (error) {
+          showToast("关联蒙版读取失败：" + friendlyError(error), "error", 7500);
+        }
+      }
+      renderAll();
       openWorkspace(1);
     } else if (button.dataset.libraryAction === "download") {
       await downloadAsset(asset, button);
@@ -10688,6 +10894,7 @@ function wireEvents() {
   dom.compareDialog.addEventListener("close", () => dom.compareGrid.replaceChildren());
 
   dom.oneclickButton.addEventListener("click", handleOneClick);
+  $("oneclick-method").addEventListener("change", () => handleParamsChanged());
   dom.extractButton.addEventListener("click", handleExtract);
   dom.vectorButton.addEventListener("click", handleVectorize);
   dom.lineartButton.addEventListener("click", handleLineart);
@@ -10734,12 +10941,14 @@ function wireEvents() {
     renderRecolorPanel(true);
     renderPreviewUi();
     updateActionState();
+    commitWorkspace({ stage: "3", fields: ["recolor"], label: "选择换色目标" });
   });
   dom.recolorReset.addEventListener("click", resetRecolorColors);
   dom.recolorButton.addEventListener("click", handleRecolor);
 
   dom.undoButton.addEventListener("click", () => void undoWorkspace());
   dom.redoButton.addEventListener("click", () => void redoWorkspace());
+  $("clear-stage-button").addEventListener("click", () => void editStage("clear"));
   dom.previewApply.addEventListener("click", () => void applyPreview());
   dom.previewDiscard.addEventListener("click", () => void discardPreview({ confirm: true }));
 
@@ -10888,23 +11097,33 @@ function wireEvents() {
   });
 
   dom.tileUnit.addEventListener("change", () => {
+    const before = captureWorkspace();
     state.tile.unitId = dom.tileUnit.value;
     state.tile.error = "";
     state.tile.resultAssetId = "";
+    state.tile.jobId = null;
+    state.tile.job = null;
+    state.tile.seamObservation = "not_reviewed";
     renderTilePanel();
     updateActionState();
+    commitWorkspace({ stage: "7", before, fields: ["tile"], label: "更换平铺单元" });
   });
   document.querySelectorAll('input[name="tile-preset"]').forEach((node) => {
     node.addEventListener("change", () => {
       if (!node.checked) return;
       const size = Number(node.value);
       if ([2, 3].includes(size)) {
+        const before = captureWorkspace();
         state.tile.rows = size;
         state.tile.cols = size;
         state.tile.resultAssetId = "";
+        state.tile.jobId = null;
+        state.tile.job = null;
+        state.tile.seamObservation = "not_reviewed";
         state.tile.error = "";
         renderTilePanel();
         updateActionState();
+        commitWorkspace({ stage: "7", before, fields: ["tile"], label: "更换平铺规格" });
       }
     });
   });
@@ -10936,6 +11155,7 @@ function wireEvents() {
     const pair = selectedMaskPair();
     setText(dom.maskPairNote, pair ? pair.detail : "只能编辑同一来源、同一尺寸的蒙版。");
     updateActionState();
+    commitWorkspace({ stage: "5", fields: ["maskPair"], label: "选择前景蒙版" });
   });
   dom.maskOpen.addEventListener("click", () => void openMaskBrush());
   dom.brushClose.addEventListener("click", () => void requestCloseBrushEditor());
@@ -11154,8 +11374,10 @@ const __psShell = (function createStageShell() {
     const next = String(value);
     if (!/^[1-7]$/.test(next)) return;
     if (html.getAttribute("data-stage") !== next) {
+      flushParamsCommit();
       html.setAttribute("data-stage", next);
       syncRail(next);
+      renderUndoRedo();
     }
     if (resetScroll) scrollToolsToTop();
   }

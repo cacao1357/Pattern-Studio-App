@@ -514,3 +514,24 @@ test("lineart failure reporting ignores other job kinds", () => {
   assert.equal(harness.calls.errors.length, 0);
   assert.equal(harness.lineartGroup.open, false);
 });
+
+test("tab history reverts its own parameter changes and leaves other inputs and results alone", () => {
+  const { stageSnapshot } = loadFunctions(["stageSnapshot", "snapshotsEqual"], {});
+  const view = {
+    currentInputId: "later-crop", previewId: "later-output", bbox: { left: 8 },
+    params: { oneClickRecipe: "color", workingMax: 500_000 }
+  };
+  const after = {
+    inputBinding: "first-crop", currentInputId: "first-crop", previewId: "first-output", bbox: { left: 8 },
+    params: { oneClickRecipe: "color", workingMax: 1_000_000 }
+  };
+  const before = {
+    inputBinding: "original", currentInputId: "original", previewId: "original", bbox: null,
+    params: { oneClickRecipe: "model_lineart", workingMax: 1_000_000 }
+  };
+  stageSnapshot(view, after, before, false);
+  assert.deepEqual(view, {
+    currentInputId: "later-crop", previewId: "later-output", bbox: { left: 8 },
+    params: { oneClickRecipe: "model_lineart", workingMax: 500_000 }
+  });
+});

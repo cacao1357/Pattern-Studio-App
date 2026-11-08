@@ -27,8 +27,14 @@
 
 ## 素材库与平铺观察
 
+平铺单元可选已保存的裁切图、透明 PNG、线稿 PNG 或已接受的修复图。每个生成结果独立保存接缝观察。
+
 - `GET /api/v1/assets` 按登记顺序从新到旧返回 `items` 和 `next_cursor`。`limit` 默认 20，最大 50。`q` 在整个素材库匹配登记名称、资产 ID、类型和评级，可重复传 `kind` 匹配本地化类型名。结果包含上传和历史任务保存的预览，使用 `generated_by_job_id`、`repair_job_id` 或 `provider_call_id` 标记来源。旧记录无法区分预览是否曾被应用。
 - `PUT /api/v1/assets/{asset_id}/seam-observation` 接收 `seam_observation` 和 `revision`，返回更新后的平铺资产元数据。旧结果没有 `seam_observation_revision` 时用 0。修订冲突返回 409，客户端可重新读取资产。更新同步历史任务成果和之后生成的 ZIP 清单，平铺图像及已导出的文件保留原版本。
+
+## 本地一键处理
+
+`POST /api/v1/pipelines` 可选择 `recipe: "model_lineart"`。它直接读取输入，发布线稿 PNG，再以黑白模式发布 SVG。模型的设备和版本记录在线稿资产中。旧请求省略 `recipe` 时仍走前景提取与矢量化。工作台默认选择模型路线。
 
 ## B/C 接入
 

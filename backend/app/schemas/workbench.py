@@ -105,10 +105,17 @@ class LineartRequest(InputRequest, LineartOptions):
 
 
 class PipelineRequest(InputRequest):
+    recipe: Literal["color", "model_lineart"] = "color"
     extract: ExtractOptions = Field(default_factory=ExtractOptions)
     vector: VectorOptions = Field(default_factory=VectorOptions)
     enhance: EnhanceOptions | None = None
     working_max_pixels: int | None = Field(default=None, ge=10_000, le=1_000_000, strict=True)
+
+    @model_validator(mode="after")
+    def model_recipe_options(self):
+        if self.recipe == "model_lineart" and ({"extract", "enhance"} & self.model_fields_set):
+            raise ValueError("The model line-art recipe uses the input directly")
+        return self
 
 
 class ExportRequest(StrictModel):

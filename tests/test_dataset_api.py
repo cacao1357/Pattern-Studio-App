@@ -11,6 +11,11 @@ from pydantic import SecretStr
 
 from app.config import Settings
 from app.main import create_app
+from app.schemas.workbench import PipelineRequest
+from app.services.lineart import LineartResult
+from app.services.local_workbench import LocalWorkbench, execute_local
+from app.storage import png_bytes
+from app.workbench_store import WorkbenchStore
 
 
 def checkerboard(width=700, height=500, block=32):
@@ -109,6 +114,36 @@ def test_lineart_job_publishes_a_lineart_asset(tmp_path):
         assert client.get("/api/v1/assets", params={"cursor": "invalid"}).status_code == 422
 
 
+def test_model_pipeline_traces_lineart_without_color_extraction(tmp_path, monkeypatch):
+    store = WorkbenchStore(tmp_path / "api")
+    local = LocalWorkbench(store)
+    image = Image.new("RGBA", (64, 64), "white")
+    record, _, _ = local.upload(png_bytes(image), "pipeline-input.png", "", uuid4().hex)
+    input_id = record["normalized"]["asset_id"]
+
+    def lineart(source):
+        assert source.size == image.size
+        result = Image.new("RGBA", source.size)
+        ImageDraw.Draw(result).rectangle((10, 12, 48, 40), fill="black")
+        return LineartResult(result, {"algorithm": "test-lineart", "inference_device": "cuda"})
+
+    monkeypatch.setattr("app.services.model_lineart.extract_model_lineart", lineart)
+    key = uuid4().hex
+    payload = PipelineRequest(input_asset_id=input_id, recipe="model_lineart")
+    submitted = local.submit("pipeline", payload, key)
+    assert local.submit("pipeline", payload, key)["job_id"] == submitted["job_id"]
+    job, token = store.claim()
+    execute_local(store, job["job_id"], token)
+    store.finish_job(job["job_id"], token)
+    result = store.get_job(job["job_id"])["result"]
+    assert [step["name"] for step in result["steps"]] == ["lineart", "vectorize"]
+    lineart_asset, svg = result["assets"]
+    assert lineart_asset["source_asset_id"] == input_id
+    assert svg["source_asset_id"] == lineart_asset["asset_id"]
+    assert svg["parameters"]["options"]["mode"] == "monochrome"
+    assert svg["ai_inferred"] is True
+
+
 def test_tile_observation_is_saved_to_history_and_subsequent_zip(tmp_path):
     with client_for(tmp_path) as client:
         headers = {"X-Pattern-Studio": "local"}
@@ -128,8 +163,7 @@ def test_tile_observation_is_saved_to_history_and_subsequent_zip(tmp_path):
             return job["result"]["assets"][0], url
 
         source = upload(client, uuid4().hex).json()["normalized"]
-        unit, _ = complete("jobs/crop", {"input_asset_id": source["asset_id"],
-                                        "bbox": {"left": 0, "top": 0, "right": 64, "bottom": 64}})
+        unit, _ = complete("jobs/lineart", {"input_asset_id": source["asset_id"], "local": True})
         tile, job_url = complete("jobs/tile-preview", {"unit_asset_id": unit["asset_id"]})
         asset_url = "/api/v1/assets/" + tile["asset_id"]
         url = asset_url + "/seam-observation"

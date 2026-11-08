@@ -432,8 +432,9 @@
             <span class="chip grade-chip" id="grade-chip" hidden>—</span>
             <span class="chip chip-fill" id="preview-mode-badge" hidden>成果预览</span>
             <span class="chip chip-mark" id="pending-preview-badge" hidden>预览未应用</span>
-            <button class="btn btn-quiet btn-sm" id="undo-button" type="button" disabled title="撤销当前图片的上一步编辑（Ctrl+Z）">撤销</button>
-            <button class="btn btn-quiet btn-sm" id="redo-button" type="button" disabled title="重做当前图片的下一步编辑（Ctrl+Shift+Z）">重做</button>
+            <button class="btn btn-quiet btn-sm" id="undo-button" type="button" disabled title="撤销本页操作（Ctrl+Z）">撤销</button>
+            <button class="btn btn-quiet btn-sm" id="redo-button" type="button" disabled title="重做本页操作（Ctrl+Shift+Z）">重做</button>
+            <button class="btn btn-quiet btn-sm" id="clear-stage-button" type="button" disabled>清空本页处理</button>
             <button class="btn btn-line btn-sm" id="compare-button" type="button" disabled>
               <svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg>
               <span>对比</span>
@@ -730,12 +731,19 @@
             <div class="oneclick">
               <div class="oneclick-top">
                 <span class="oneclick-tag">推荐</span>
-                <span class="oneclick-skip">不调用 AI</span>
+                <span class="oneclick-skip">本机运行</span>
               </div>
-              <h3 class="oneclick-title" id="oneclick-title">提取 → 矢量化</h3>
-              <p class="oneclick-copy">保留当前尺寸、跳过轻增强。完成后可预览并下载每一步成果。</p>
-              <p class="recipe" id="one-click-recipe">Otsu · 深色 · 阈值 128 → 彩色 · 8 色 · 中细节</p>
-              <label class="check-row">
+              <h3 class="oneclick-title" id="oneclick-title">线稿 → 矢量化</h3>
+              <label class="field" for="oneclick-method">
+                <span class="field-label">一键处理路线</span>
+                <select id="oneclick-method">
+                  <option value="model_lineart" selected>本地模型线稿</option>
+                  <option value="color">保留颜色</option>
+                </select>
+              </label>
+              <p class="oneclick-copy">使用当前输入，保留输入尺寸。可预览并下载每一步成果。</p>
+              <p class="recipe" id="one-click-recipe">本地线稿模型 · GPU 优先 → 黑白 SVG</p>
+              <label class="check-row" id="oneclick-enhance-row" hidden>
                 <input type="checkbox" id="include-enhance">
                 <span><strong>本次包含轻增强</strong><small>默认关闭</small></span>
               </label>
@@ -746,7 +754,7 @@
             <div class="banner banner-info" id="preview-block-hint" hidden>
               <span class="banner-mark"><svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg></span>
               <div class="banner-copy">
-                <p>画布正在显示成果，线稿仍可处理当前输入。其他处理可先点「回到当前输入」，或在版本栏切换输入。</p>
+                <p>画布正在显示成果。一键和线稿使用当前输入。需要在画布上操作时，请回到当前输入或在版本栏切换输入。</p>
               </div>
             </div>
             <p class="field-error" id="compose-error" role="alert" hidden></p>
@@ -1274,12 +1282,12 @@
 
           <section class="stage-panel" id="tile-panel" data-stage="7" aria-labelledby="tile-heading">
             <h2 class="tools-title" id="tile-heading">平铺</h2>
-            <p class="tools-note">整数复制，不自动消缝。复用现有裁切单元，再按整数位移复制。</p>
+            <p class="tools-note">选择已保存的 PNG 单元，查看重复排列并记录横向、纵向接缝。</p>
 
             <label class="field" for="tile-unit">
-              <span class="field-label">裁切单元</span>
+              <span class="field-label">平铺单元</span>
               <select id="tile-unit">
-                <option value="">请选择已保存的裁切单元</option>
+                <option value="">请选择要重复的 PNG 版本</option>
               </select>
             </label>
             <div class="row">
@@ -1290,10 +1298,10 @@
 
             <div class="unit-preview" id="tile-unit-preview" hidden>
               <div class="unit-thumb">
-                <img id="tile-unit-image" alt="裁切单元预览">
+                <img id="tile-unit-image" alt="平铺单元预览">
               </div>
               <div class="unit-copy">
-                <strong id="tile-unit-name">裁切单元</strong>
+                <strong id="tile-unit-name">平铺单元</strong>
                 <p id="tile-unit-meta">—</p>
               </div>
             </div>
