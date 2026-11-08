@@ -338,11 +338,14 @@
         <div class="library-toolbar">
           <label class="library-search">
             <svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg>
-            <input id="library-search" type="search" placeholder="搜索版本名称、类型或编号" aria-label="搜索纹样库">
+            <input id="library-search" type="search" maxlength="200" placeholder="搜索版本名称、类型或编号" aria-label="搜索纹样库">
           </label>
           <span class="library-count" id="library-count">0 个版本</span>
+          <button class="btn btn-line btn-xs" id="library-refresh" type="button">刷新</button>
         </div>
+        <p class="hint" id="library-status" role="status" hidden></p>
         <div class="library-grid" id="library-grid"></div>
+        <button class="btn btn-line btn-sm" id="library-more" type="button" hidden>加载更多</button>
         <div class="empty-state library-empty" id="library-empty">
           <svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg>
           <strong>纹样库还是空的</strong>
@@ -743,7 +746,7 @@
             <div class="banner banner-info" id="preview-block-hint" hidden>
               <span class="banner-mark"><svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg></span>
               <div class="banner-copy">
-                <p>画布正在预览成果。处理只作用于当前输入 —— 先回到当前输入，或在版本区“设为输入”。</p>
+                <p>画布正在显示成果，线稿仍可处理当前输入。其他处理可先点「回到当前输入」，或在版本栏切换输入。</p>
               </div>
             </div>
             <p class="field-error" id="compose-error" role="alert" hidden></p>

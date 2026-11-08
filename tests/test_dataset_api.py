@@ -1,6 +1,9 @@
 import csv
 import io
+import json
 import time
+from uuid import uuid4
+from zipfile import ZipFile
 
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
@@ -94,3 +97,57 @@ def test_lineart_job_publishes_a_lineart_asset(tmp_path):
         assert lineart["parameters"]["algorithm"] == "lineart-global-local-v2"
         assert lineart["width"] == 700 and lineart["height"] == 500
         assert lineart["content_id"] == uploaded["meta"]["content_id"]
+
+    with client_for(tmp_path) as client:
+        first_page = client.get("/api/v1/assets", params={"limit": 1}).json()
+        assert first_page["items"][0]["asset_id"] == lineart["asset_id"]
+        assert first_page["items"][0]["generated_by_job_id"] == job_id
+        next_page = client.get("/api/v1/assets", params={"cursor": first_page["next_cursor"]}).json()
+        assert {asset["asset_id"] for asset in next_page["items"]} == {asset_id, uploaded["original"]["asset_id"]}
+        matched = client.get("/api/v1/assets", params={"q": "规范输入", "kind": "normalized_input"}).json()
+        assert [asset["asset_id"] for asset in matched["items"]] == [asset_id]
+        assert client.get("/api/v1/assets", params={"cursor": "invalid"}).status_code == 422
+
+
+def test_tile_observation_is_saved_to_history_and_subsequent_zip(tmp_path):
+    with client_for(tmp_path) as client:
+        headers = {"X-Pattern-Studio": "local"}
+
+        def complete(path, payload):
+            response = client.post("/api/v1/" + path, json=payload,
+                                   headers={**headers, "Idempotency-Key": uuid4().hex})
+            assert response.status_code == 202, response.text
+            url = "/api/v1/jobs/" + response.json()["job_id"]
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                job = client.get(url).json()
+                if job["state"] in {"succeeded", "failed", "cancelled"}:
+                    break
+                time.sleep(0.1)
+            assert job["state"] == "succeeded", job
+            return job["result"]["assets"][0], url
+
+        source = upload(client, uuid4().hex).json()["normalized"]
+        unit, _ = complete("jobs/crop", {"input_asset_id": source["asset_id"],
+                                        "bbox": {"left": 0, "top": 0, "right": 64, "bottom": 64}})
+        tile, job_url = complete("jobs/tile-preview", {"unit_asset_id": unit["asset_id"]})
+        asset_url = "/api/v1/assets/" + tile["asset_id"]
+        url = asset_url + "/seam-observation"
+        payload = {"seam_observation": "visible", "revision": 0}
+        updated = client.put(url, json=payload, headers=headers)
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["sha256"] == tile["sha256"]
+        assert updated.json()["seam_observation_revision"] == 1
+        assert client.put(url, json=payload, headers=headers).json() == updated.json()
+        conflict = client.put(url, json={"seam_observation": "not_obvious", "revision": 0}, headers=headers)
+        assert conflict.status_code == 409
+        assert client.get(asset_url).json()["seam_observation"] == "visible"
+        restored = client.get(job_url).json()
+        assert restored["parameters"]["seam_observation"] == "not_reviewed"
+        assert restored["result"]["assets"][0]["seam_observation"] == "visible"
+
+        archive, _ = complete("exports", {"asset_ids": [unit["asset_id"], tile["asset_id"]], "license_acknowledged": True})
+        payload = client.get("/api/v1/assets/" + archive["asset_id"] + "/download").content
+        with ZipFile(io.BytesIO(payload)) as zipped:
+            manifest = json.loads(zipped.read("manifest.json"))
+        assert manifest["selected_assets"][1]["seam_observation"] == "visible"

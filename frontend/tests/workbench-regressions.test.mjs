@@ -449,8 +449,20 @@ test("lineart model entry submits only the input and method", () => {
   const request = harness.api.buildLineartRequest();
   assert.equal(request.label, "模型线稿");
   assert.equal(request.path, "/jobs/lineart");
+  assert.equal(request.useCurrentInput, true);
   assert.deepEqual(request.payload, { input_asset_id: "asset-1", method: "model" });
   assert.equal("local" in request.payload, false);
+});
+
+test("lineart preview survives unrelated edits and becomes stale when its method changes", () => {
+  const state = { paramsRevision: 8 };
+  let method = "model";
+  const { previewRevision } = loadFunctions(["previewRevision"], { state, lineartMethod: () => method });
+  const preview = { kind: "lineart", revision: 7, params: { lineart: { method } } };
+  assert.equal(previewRevision(preview), 7);
+  method = "local";
+  assert.equal(previewRevision(preview), 8);
+  assert.equal(previewRevision({ ...preview, kind: "vectorize" }), 8);
 });
 
 test("lineart requests refuse an empty workspace or busy workbench", () => {

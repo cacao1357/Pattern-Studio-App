@@ -76,6 +76,11 @@ def mount_workbench(app, current_store, current_service, current_worker):
     def images(limit: int = Query(default=20, ge=1, le=50), cursor: str | None = Query(default=None, max_length=18)):
         return current_store().page("images", limit, cursor)
 
+    @app.get("/api/v1/assets")
+    def assets(limit: int = Query(default=20, ge=1, le=50), cursor: str | None = Query(default=None, max_length=18),
+               q: str = Query(default="", max_length=200), kind: list[str] | None = Query(default=None, max_length=50)):
+        return current_store().page_assets(limit, cursor, q.strip(), kind or [])
+
     @app.get("/api/v1/assets/{asset_id}")
     def asset_info(asset_id: UUID):
         return current_store().get_asset(str(asset_id))[0]

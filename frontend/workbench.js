@@ -662,7 +662,7 @@ const state = {
   view: "home",
   datasetAudit: null,
   datasetAuditLoading: false,
-  libraryQuery: "",
+  library: { items: [], cursor: null, loading: false, error: "", controller: null, searchTimer: null },
   health: null,
   healthError: "",
   healthBusy: false,
@@ -1795,7 +1795,6 @@ function renderVersions() {
   updateSelectionBar();
   renderSidebarContext();
   if (state.view === "dashboard") renderDashboard();
-  if (state.view === "library") renderLibrary();
 }
 
 const VIEW_LABELS = {
@@ -1844,7 +1843,7 @@ function setView(view) {
   setText($("breadcrumb-root"), labels[0]);
   setText($("breadcrumb-current"), labels[1]);
   if (next === "dashboard") renderDashboard();
-  if (next === "library") renderLibrary();
+  if (next === "library") void loadLibrary(true);
   renderSidebarContext();
 }
 
@@ -1942,44 +1941,63 @@ function renderDashboard() {
   ensureDatasetAudit();
 }
 
-function libraryMatches(asset) {
-  const query = state.libraryQuery.trim().toLowerCase();
-  if (!query) return true;
-  const haystack = [
-    assetDisplayName(asset), asset.kind || "", asset.asset_id || "",
-    asset.grade || "", asset.source_name || ""
-  ].join(" ").toLowerCase();
-  return haystack.includes(query);
+async function loadLibrary(reset) {
+  const library = state.library;
+  if (!reset && (library.loading || !library.cursor)) return;
+  library.controller?.abort();
+  const controller = new AbortController();
+  library.controller = controller;
+  const query = $("library-search").value.trim().toLowerCase();
+  const params = new URLSearchParams({ limit: "20", q: query });
+  for (const [kind, label] of Object.entries(KIND_LABELS)) {
+    if (query && label.toLowerCase().includes(query)) params.append("kind", kind);
+  }
+  if (reset) {
+    library.items = [];
+    library.cursor = null;
+  } else {
+    params.set("cursor", library.cursor);
+  }
+  library.loading = true;
+  library.error = "";
+  renderLibrary();
+  try {
+    const { data } = await requestJson("/assets?" + params.toString(), { signal: controller.signal });
+    if (library.controller !== controller) return;
+    library.items = library.items.concat(data.items);
+    library.cursor = data.next_cursor;
+  } catch (error) {
+    if (library.controller === controller) library.error = "素材库读取失败：" + friendlyError(error);
+  } finally {
+    if (library.controller === controller) {
+      library.loading = false;
+      renderLibrary();
+    }
+  }
 }
 
 function renderLibrary() {
   const grid = $("library-grid");
   if (!grid) return;
-  const query = state.libraryQuery;
-  const allIds = state.versionIds.filter((id) => state.assets.has(id));
-  const ids = allIds.filter((id) => libraryMatches(state.assets.get(id)));
+  const { items, cursor, loading, error } = state.library;
+  const query = $("library-search").value.trim();
   grid.replaceChildren();
-  setHidden($("library-empty"), allIds.length > 0);
-  const countText = query
-    ? ids.length + " / " + allIds.length + " 个版本"
-    : allIds.length + " 个版本";
-  setText($("library-count"), countText);
-  if (!ids.length && allIds.length) {
-    const empty = element("div", "empty-state library-empty");
-    empty.append(icon("search"), element("strong", "", "没有匹配的版本"),
-      element("p", "", "换一个名称、类型或编号试试。"));
-    grid.append(empty);
-    return;
-  }
-  for (const id of ids) {
-    const asset = state.assets.get(id);
-    if (!asset) continue;
+  setHidden($("library-empty"), Boolean(items.length || query || loading || error));
+  setText($("library-count"), (cursor ? "已载入 " : "") + items.length + " 个版本");
+  const status = error || (loading ? "正在读取素材库…" : !items.length && query ? "没有匹配的版本。" : "");
+  setText($("library-status"), status);
+  setHidden($("library-status"), !status);
+  setHidden($("library-more"), !cursor);
+  setDisabled($("library-more"), loading);
+  for (const asset of items) {
+    const id = asset.asset_id;
     const card = element("article", "library-card");
     const thumb = element("div", "library-thumb");
     if (assetIsPreviewable(asset)) {
       const image = element("img");
       image.alt = "";
-      loadThumb(image, asset);
+      image.loading = "lazy";
+      image.src = API_BASE + "/assets/" + encodeURIComponent(id) + "/preview";
       thumb.append(image);
     } else {
       thumb.append(icon(assetIsArchive(asset) ? "zip" : "image"));
@@ -1992,13 +2010,18 @@ function renderLibrary() {
     if (asset.grade) meta.push(asset.grade + " 级");
     meta.push("#" + shortId(id));
     copy.append(element("small", "", meta.join(" · ")));
+    const jobId = asset.generated_by_job_id || asset.repair_job_id;
+    const origin = jobId ? "任务成果 · #" + shortId(jobId)
+      : asset.provider_call_id ? "归档候选 · #" + shortId(asset.provider_call_id)
+      : asset.image_id ? "上传素材 · #" + shortId(asset.image_id) : "本地登记版本";
+    copy.append(element("small", "", origin));
     const actions = element("div", "library-actions");
     const preview = element("button", "btn btn-line btn-xs", "查看");
     preview.type = "button";
     preview.dataset.libraryAction = "preview";
     preview.dataset.assetId = id;
     actions.append(preview);
-    if (assetIsInputCapable(asset)) {
+    if (assetIsInputCapable(asset) && normalizeKind(asset.kind) !== "edit_candidate") {
       const use = element("button", "btn btn-line btn-xs", "设为输入");
       use.type = "button";
       use.dataset.libraryAction = "input";
@@ -2196,6 +2219,17 @@ async function setPreview(assetId, options) {
 
   if (currentChanged) {
     state.currentInputId = assetId;
+    if (opts.sourceLabel) {
+      state.sourceLabel = opts.sourceLabel;
+      state.sourceNote = asset.source_note || "";
+      const width = Number(asset.original_width || asset.source_width || 0);
+      const height = Number(asset.original_height || asset.source_height || 0);
+      state.sourceOriginal = width > 0 && height > 0 ? { width, height, assetId: asset.original_asset_id || assetId } : null;
+      if (state.imageId !== (asset.image_id || null)) {
+        state.imageId = asset.image_id || null;
+        state.uploadMeta = null;
+      }
+    }
     state.currentHasTransparency = Boolean(
       asset.normalization && asset.normalization.has_transparency === true
     );
@@ -2214,10 +2248,10 @@ async function setPreview(assetId, options) {
   }
   if (previewChanged) state.previewId = assetId;
   renderAll();
-  await loadPreview();
   if (currentChanged) {
-    commitWorkspace({ label: "切换当前输入" });
+    commitWorkspace({ label: opts.historyLabel || "切换当前输入" });
   }
+  await loadPreview();
   return true;
 }
 
@@ -3184,7 +3218,12 @@ function readEnhanceParams() {
   return Object.assign({ ok: true }, result.value, { payload: enhancePayload(result.value).payload });
 }
 
-function currentProcessBlock() {
+function isViewingOperationPreview() {
+  const session = state.previewSession.current();
+  return Boolean(session && (state.previewSession.isActive() || (session.targetId && session.targetId === state.previewId)));
+}
+
+function currentProcessBlock(options = {}) {
   if (state.requestInFlight) return "正在提交，请稍候。";
   if (state.duplicateSwitching) return "正在切换已有版本，请稍候。";
   if (state.cancelBusy) return "正在请求取消，等待服务端终态。";
@@ -3192,17 +3231,17 @@ function currentProcessBlock() {
   if (state.taskRunning) return "任务处理中，完成后再继续。";
   const asset = currentAsset();
   if (!asset) return "请先上传并选择当前输入。";
-  if (!isPreviewCurrent() && !state.previewSession.isActive()) {
+  if (!options.useCurrentInput && !isPreviewCurrent() && !isViewingOperationPreview()) {
     return "画布正在预览其他版本，请先回到当前输入。";
   }
   if (assetPixels(asset) > PROCESS_PIXEL_LIMIT) return "大图需要先创建工作副本。";
   return "";
 }
 
-function requireProcessReady() {
-  const reason = currentProcessBlock();
+function requireProcessReady(options = {}) {
+  const reason = currentProcessBlock(options);
   if (reason) {
-    setError(dom.composeError, reason);
+    setError(options.errorNode || dom.composeError, reason);
     showToast(reason, "warning");
     return false;
   }
@@ -3249,7 +3288,7 @@ function operationBlockReason(request) {
   const target = targetId ? state.assets.get(targetId) : null;
   if (!target) return "请先选择要处理的版本。";
   if (!request || !request.targetAssetId) {
-    if (!isPreviewCurrent() && !state.previewSession.isActive()) {
+    if (!request?.useCurrentInput && !isPreviewCurrent() && !isViewingOperationPreview()) {
       return "画布正在预览其他版本，请先回到当前输入。";
     }
     if (assetPixels(target) > PROCESS_PIXEL_LIMIT) return "大图需要先创建工作副本。";
@@ -3484,7 +3523,7 @@ function reportLineartFailure(job) {
 }
 
 function buildLineartRequest() {
-  if (!requireProcessReady()) return { ok: false, handled: true };
+  if (!requireProcessReady({ useCurrentInput: true, errorNode: dom.lineartError })) return { ok: false, handled: true };
   const asset = currentAsset();
   if (!asset) return { ok: false, error: "请先选择当前输入。" };
   const model = lineartMethod() === "model";
@@ -3497,6 +3536,7 @@ function buildLineartRequest() {
     path: "/jobs/lineart",
     label: model ? "模型线稿" : "线稿",
     kind: "lineart",
+    useCurrentInput: true,
     errorNode: dom.lineartError,
     payload: payload
   };
@@ -3775,7 +3815,7 @@ async function runLocalRequest(request, options) {
   }
   return submitJob(request.path, request.payload, request.label, {
     markBboxClean: Boolean(request.markBboxClean),
-    skipReady: Boolean(request.targetAssetId),
+    skipReady: Boolean(request.targetAssetId || request.useCurrentInput),
     errorNode: errorNode,
     onJob: request.onJob || null
   });
@@ -3939,7 +3979,7 @@ async function completePreviewJob(job) {
   const { target } = selectTargetForJob(job, assets);
   const resolution = state.previewSession.resolve({
     jobId: job.job_id,
-    revision: state.paramsRevision,
+    revision: previewRevision(session),
     inputAssetId: previewBindingId(session),
     baseAssetId: currentRefineMaskId(session),
     assetIds: assets.map((asset) => asset.asset_id),
@@ -3985,7 +4025,7 @@ async function applyPreview() {
   }
   const activePreview = state.previewSession.current();
   const check = state.previewSession.canApply({
-    revision: state.paramsRevision,
+    revision: previewRevision(activePreview),
     inputAssetId: previewBindingId(activePreview),
     baseAssetId: currentRefineMaskId(activePreview)
   });
@@ -4038,13 +4078,6 @@ async function applyPreview() {
     state.recolor.assetId = target.asset_id;
     state.recolor.signature = "";
   }
-  const previewModeEnabled = dom.previewMode.checked;
-  const autoPreviewEnhance = dom.autoPreviewEnhance.checked;
-  applyParamsSnapshot(session.params);
-  // Preview mode is a UI preference, not part of the applied algorithm result.
-  dom.previewMode.checked = previewModeEnabled;
-  dom.autoPreviewEnhance.checked = autoPreviewEnhance;
-  state.paramsRevision = session.revision;
   clearPreviewExpiry();
   if (state.autoPreviewTimer) {
     window.clearTimeout(state.autoPreviewTimer);
@@ -4170,6 +4203,7 @@ function renderPreviewUi() {
   setHidden(dom.previewBar, !session);
   setHidden(dom.pendingPreviewBadge, !session);
   if (!session) {
+    setDisabled(dom.previewApply, true);
     if (dom.previewWatermarkLabel) dom.previewWatermarkLabel.textContent = "成果预览 · 非当前输入";
     return;
   }
@@ -4182,7 +4216,7 @@ function renderPreviewUi() {
   const labels = {
     pending: "生成中",
     ready: "待应用",
-    stale: "已过期",
+    stale: "已失效",
     expired: "已过期",
     failed: "失败",
     cancelled: "已取消",
@@ -4215,7 +4249,7 @@ function renderPreviewUi() {
 
   const busy = state.requestInFlight || state.pendingSubmission || state.taskRunning || state.cancelBusy ||
     state.duplicateSwitching;
-  const revisionMatch = session.revision === state.paramsRevision;
+  const revisionMatch = session.revision === previewRevision(session);
   const inputMatch = previewBindingMatches(session);
   const canApply = stateName === "ready" && !busy && revisionMatch && inputMatch;
   setDisabled(dom.previewApply, !canApply);
@@ -4312,6 +4346,11 @@ function captureWorkspace() {
     currentInputId: state.currentInputId,
     // A preview is transient and is never part of an applied workspace state.
     previewId: session ? (session.inputAssetId || state.currentInputId) : state.previewId,
+    sourceLabel: state.sourceLabel,
+    sourceNote: state.sourceNote,
+    sourceOriginal: state.sourceOriginal,
+    imageId: state.imageId,
+    uploadMeta: state.uploadMeta,
     bbox: state.bbox ? Object.assign({}, state.bbox) : null,
     params: readParamsSnapshot(),
     recolor: readRecolorSnapshot(),
@@ -4366,6 +4405,11 @@ async function restoreWorkspaceSnapshot(snapshot, options) {
     : null;
   try {
     state.currentInputId = snapshot.currentInputId || null;
+    state.sourceLabel = snapshot.sourceLabel || "";
+    state.sourceNote = snapshot.sourceNote || "";
+    state.sourceOriginal = snapshot.sourceOriginal || null;
+    state.imageId = snapshot.imageId || null;
+    state.uploadMeta = snapshot.uploadMeta || null;
     const inputAsset = state.currentInputId ? state.assets.get(state.currentInputId) : null;
     state.currentHasTransparency = Boolean(
       inputAsset && inputAsset.normalization && inputAsset.normalization.has_transparency === true
@@ -4463,10 +4507,16 @@ function scheduleParamsCommit() {
   }, PREVIEW_REVISION_DELAY);
 }
 
+function previewRevision(session) {
+  // Line-art has only one editable option. Other settings cannot change its request.
+  if (session?.kind === "lineart" && session.params.lineart?.method === lineartMethod()) return session.revision;
+  return state.paramsRevision;
+}
+
 function invalidatePreviewForParams() {
   const session = state.previewSession.current();
   if (!session) return;
-  if (session.revision !== state.paramsRevision) {
+  if (session.revision !== previewRevision(session)) {
     state.previewSession.invalidate("stale");
     clearPreviewExpiry();
   }
@@ -4525,9 +4575,12 @@ function syncActionLabels() {
 
 function renderLineartOptions() {
   const model = lineartMethod() === "model";
-  setText(dom.lineartHint, model
-    ? "使用本机 512×512 线稿模型：只在本机推理，不联网、不上传；成果保持当前输入的尺寸与坐标。模型依赖或权重缺失时任务会失败，原因显示在下方，不会自动改用 OpenCV。"
-    : "从当前输入生成透明底黑线结构稿；局部对比路径补亮区，中值核与面积门槛随尺寸自动缩放。结果可继续矢量化。");
+  const asset = currentAsset();
+  const input = asset ? "处理输入：" + assetDisplayName(asset) + " · #" + shortId(asset.asset_id) + "。" : "";
+  const methodHint = model
+    ? "使用本机 512×512 线稿模型，成果保持输入的尺寸与坐标。"
+    : "生成透明底黑线结构稿，结果可继续矢量化。";
+  setText(dom.lineartHint, input + methodHint);
   if (dom.lineartButton) {
     dom.lineartButton.title = model
       ? "按本地 512×512 线稿模型提交；模型不可用时会直接失败并显示原因"
@@ -7082,18 +7135,8 @@ async function switchToAcceptedRepair(record, options) {
     return false;
   }
   const changed = state.currentInputId !== acceptedId;
-  state.currentInputId = acceptedId;
-  state.previewId = acceptedId;
-  state.sourceNote = asset.source_note || "";
-  const originalWidth = Number(asset.original_width || asset.source_width || 0);
-  const originalHeight = Number(asset.original_height || asset.source_height || 0);
-  state.sourceOriginal = originalWidth > 0 && originalHeight > 0
-    ? { width: originalWidth, height: originalHeight, assetId: acceptedId }
-    : null;
-  state.sourceLabel = "已接受修复 " + shortId(acceptedId);
-  clearBBox();
-  renderAll();
-  await loadPreview();
+  await setPreview(acceptedId, { makeCurrent: true, skipGuard: true, historyLabel: "使用已接受修复",
+    sourceLabel: "已接受修复 " + shortId(acceptedId) });
   if (changed && opts.announce !== false) {
     showToast("已接受修复并切换到新分支；可继续使用现有提取、SVG 与 ZIP。", "success", 5500);
   }
@@ -8114,11 +8157,48 @@ function updateTileActions() {
   setDisabled(dom.tileCrop, busy || !currentAsset() || !isPreviewCurrent() ||
     !state.bbox || !validBboxForAsset(state.bbox, currentAsset()));
   setDisabled(dom.tileUnit, busy || state.tile.loading);
+  setDisabled(dom.tileSeam, busy);
   setDisabled(dom.tileUnitDownload, Boolean(busy || !unit));
   const result = state.tile.resultAssetId ? state.assets.get(state.tile.resultAssetId) : null;
   setDisabled(dom.tileDownload, Boolean(busy || !result));
   setDisabled(dom.tileZip, Boolean(busy || !unit || !result));
   if (reason && unit) setText(dom.tileGenerate, "生成平铺预览");
+}
+
+function changeTileSeamObservation() {
+  const value = dom.tileSeam.value;
+  if (!SEAM_LABELS[value]) return;
+  const asset = state.assets.get(state.tile.resultAssetId);
+  if (!asset) {
+    state.tile.seamObservation = value;
+    return;
+  }
+  const started = startSubmission({
+    path: "/assets/" + encodeURIComponent(asset.asset_id) + "/seam-observation",
+    method: "PUT",
+    label: "保存接缝观察",
+    bodyFactory: () => JSON.stringify({ seam_observation: value, revision: asset.seam_observation_revision || 0 }),
+    onSuccess: (saved) => {
+      state.assets.set(asset.asset_id, Object.assign({}, asset, saved));
+      if (state.tile.resultAssetId === asset.asset_id) {
+        state.tile.seamObservation = saved.seam_observation;
+        state.tile.error = "";
+        renderTilePanel();
+      }
+      showToast("接缝观察已保存。", "success");
+    },
+    onError: (error) => {
+      state.tile.error = error.status === 409
+        ? "接缝观察已在别处更新。请从历史重新打开平铺任务再修改。"
+        : "接缝观察未保存：" + friendlyError(error);
+      renderTilePanel();
+    },
+    onUnknown: () => {
+      state.tile.error = "接缝观察的保存结果未知。请重试当前提交，或重新打开历史任务核对。";
+      renderTilePanel();
+    }
+  });
+  if (!started) renderTilePreset();
 }
 
 async function handleTileCrop() {
@@ -8366,6 +8446,7 @@ async function restoreTileFromJob(job) {
     }
   }
   state.tile.resultAssetId = preview ? preview.asset_id : "";
+  if (preview && SEAM_LABELS[preview.seam_observation]) state.tile.seamObservation = preview.seam_observation;
   renderVersions();
   renderTilePanel();
   updateActionState();
@@ -9562,13 +9643,11 @@ function buildHistoryItem(job) {
   item.append(top);
 
   const actions = element("div", "history-actions");
-  const blocked = state.taskRunning || state.requestInFlight || Boolean(state.pendingSubmission);
   const restore = element("button", "btn btn-outline", "恢复");
   restore.type = "button";
   restore.dataset.historyAction = "restore";
   restore.dataset.jobId = job.job_id;
-  restore.disabled = blocked;
-  restore.title = blocked ? "当前有任务或提交处理中，完成后再恢复。" : "恢复此任务的工作区";
+  updateHistoryAction(restore);
   actions.append(restore);
 
   if (job.state === "failed" && jobAllowsRetry(job)) {
@@ -9576,8 +9655,7 @@ function buildHistoryItem(job) {
     retry.type = "button";
     retry.dataset.historyAction = "retry";
     retry.dataset.jobId = job.job_id;
-    retry.disabled = blocked;
-    retry.title = blocked ? "当前有任务或提交处理中，完成后再重试。" : "创建新的重试任务，旧记录不变";
+    updateHistoryAction(retry);
     actions.append(retry);
   }
   if (isJobEnded(job)) {
@@ -9585,11 +9663,21 @@ function buildHistoryItem(job) {
     evaluate.type = "button";
     evaluate.dataset.historyAction = "evaluate";
     evaluate.dataset.jobId = job.job_id;
-    evaluate.disabled = state.requestInFlight || Boolean(state.pendingSubmission);
+    updateHistoryAction(evaluate);
     actions.append(evaluate);
   }
   item.append(actions);
   return item;
+}
+
+function updateHistoryAction(button) {
+  const action = button.dataset.historyAction;
+  const reason = action === "evaluate"
+    ? (state.requestInFlight || state.pendingSubmission ? "请先处理当前提交。" : "")
+    : duplicateSwitchBlockReason();
+  setDisabled(button, Boolean(reason));
+  button.title = reason || (action === "restore" ? "恢复此任务的工作区" :
+    action === "retry" ? "创建新的重试任务，旧记录不变" : "评价此任务");
 }
 
 function summarizeJob(job) {
@@ -9762,7 +9850,10 @@ async function restoreJob(jobId) {
   state.paramsRevision = 1;
   resetEditHistory();
   renderAll();
-  setView("workspace");
+  const kind = normalizeKind(latest.kind);
+  const stages = { crop: 2, prepare: 2, working_copy: 1, export: 1, refine_mask: 5,
+    decompose_layers: 4, compose_layers: 4, repair: 6, tile_preview: 7 };
+  openWorkspace(latest.ai_pipeline_id ? 4 : stages[kind] || 3);
   renderFeedback();
   if (state.previewId) await loadPreview();
   if (isJobActive(latest)) {
@@ -9968,7 +10059,6 @@ function renderAll() {
   updateActionState();
   renderSidebarContext();
   if (state.view === "dashboard") renderDashboard();
-  if (state.view === "library") renderLibrary();
 }
 
 function assignFeedbackJob(jobId) {
@@ -10003,7 +10093,7 @@ function updateActionState() {
   setDisabled(dom.oneclickButton, Boolean(processReason) || oneClickGrabcutMissing);
   setDisabled(dom.extractButton, Boolean(processReason) || oneClickGrabcutMissing);
   setDisabled(dom.vectorButton, Boolean(processReason));
-  setDisabled(dom.lineartButton, Boolean(processReason));
+  setDisabled(dom.lineartButton, Boolean(currentProcessBlock({ useCurrentInput: true })));
   setDisabled(dom.enhanceButton, Boolean(processReason));
   const prepareOutput = preparePrediction();
   const prepareBlocked = Boolean(asset) && (!prepareOutput || prepareOutput.overLimit);
@@ -10096,6 +10186,7 @@ function updateActionState() {
   renderRecolorPanel();
   renderPreviewUi();
   renderUndoRedo();
+  if (state.historyOpen) dom.historyList.querySelectorAll("[data-history-action]").forEach(updateHistoryAction);
   renderGuide();
   renderBboxOverlay();
   renderBboxControls();
@@ -10428,19 +10519,25 @@ function wireEvents() {
   $("library-open-workspace")?.addEventListener("click", () => openWorkspace());
   $("dashboard-dataset")?.addEventListener("click", openDatasetDialog);
   $("dashboard-history")?.addEventListener("click", openHistory);
-  $("library-search")?.addEventListener("input", (event) => {
-    state.libraryQuery = event.target.value || "";
-    renderLibrary();
+  $("library-search")?.addEventListener("input", () => {
+    window.clearTimeout(state.library.searchTimer);
+    state.library.searchTimer = window.setTimeout(() => void loadLibrary(true), 150);
   });
+  $("library-refresh")?.addEventListener("click", () => void loadLibrary(true));
+  $("library-more")?.addEventListener("click", () => void loadLibrary(false));
   $("library-grid")?.addEventListener("click", async (event) => {
     const button = event.target.closest("button[data-library-action]");
     if (!button) return;
-    const asset = state.assets.get(button.dataset.assetId);
+    const asset = state.library.items.find((item) => item.asset_id === button.dataset.assetId);
     if (!asset) return;
     if (button.dataset.libraryAction === "preview") {
       openAssetPreview(asset, "纹样库");
     } else if (button.dataset.libraryAction === "input") {
-      await setPreview(asset.asset_id, { makeCurrent: true });
+      if (!assetIsInputCapable(asset) || normalizeKind(asset.kind) === "edit_candidate") return;
+      if (!state.assets.has(asset.asset_id)) state.assets.set(asset.asset_id, asset);
+      if (!(await setPreview(asset.asset_id, { makeCurrent: true, sourceLabel: assetDisplayName(asset) }))) return;
+      promoteAssetsToVersions([asset.asset_id]);
+      renderVersions();
       openWorkspace(1);
     } else if (button.dataset.libraryAction === "download") {
       await downloadAsset(asset, button);
@@ -10493,7 +10590,8 @@ function wireEvents() {
       const job = findHistoryJob(jobId);
       if (!job) return;
       state.tasks.set(job.job_id, Object.assign({}, state.tasks.get(job.job_id) || {}, job));
-      closeHistory({ restoreFocus: false });
+      closeHistory({ restoreFocus: false, immediate: true });
+      setView("workspace");
       setFeedbackJob(job.job_id, { focus: true });
     }
   });
@@ -10632,8 +10730,7 @@ function wireEvents() {
     state.recolor.assetId = dom.recolorSvgSelect.value;
     state.recolor.signature = "";
     state.paramsRevision += 1;
-    state.previewSession.invalidate("stale");
-    clearPreviewExpiry();
+    invalidatePreviewForParams();
     renderRecolorPanel(true);
     renderPreviewUi();
     updateActionState();
@@ -10811,13 +10908,7 @@ function wireEvents() {
       }
     });
   });
-  dom.tileSeam.addEventListener("change", () => {
-    const value = dom.tileSeam.value;
-    if (SEAM_LABELS[value]) {
-      state.tile.seamObservation = value;
-      updateActionState();
-    }
-  });
+  dom.tileSeam.addEventListener("change", changeTileSeamObservation);
   dom.tileCrop.addEventListener("click", () => void handleTileCrop());
   dom.tileGenerate.addEventListener("click", () => void startTilePreview());
   dom.tileUnitDownload.addEventListener("click", () => {

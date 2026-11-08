@@ -53,3 +53,8 @@ class TileRequest(StrictModel):
         if type(self.rows) is not int or type(self.cols) is not int or self.rows != self.cols:
             raise ValueError("Choose the 2x2 or 3x3 preset")
         return self
+
+
+class TileSeamObservation(StrictModel):
+    seam_observation: Literal["not_reviewed", "visible", "not_obvious"]
+    revision: int = Field(ge=0, strict=True)
