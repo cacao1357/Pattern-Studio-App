@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 800 800" fill="none">
+  <title>云鹤团花 · 原图</title>
+  <defs><filter id="crane-original-noise" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="3" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter></defs>
+  <rect width="800" height="800" fill="#22304F"/>
+  <circle cx="400" cy="400" r="336" stroke-width="2.4" stroke="#E8DFC8"/>
+  <circle cx="400" cy="400" r="316" stroke-width="6" stroke="#E8DFC8" stroke-dasharray="0.1 26.4" stroke-linecap="round"/>
+  <path d="M299.3 318A30.7 30.7 0 0 0 246.2 297.1A40.1 40.1 0 0 0 177.8 297.1A30.7 30.7 0 0 0 124.7 318C164.8 333.3 259.2 333.3 299.3 318Z" fill="#E8DFC8"/>
+  <path d="M299.3 319.2A20.1 20.1 0 0 0 339.4 319.2A11.6 11.6 0 0 0 316.2 319.2A6.7 6.7 0 0 0 329.7 319.2" fill="#E8DFC8"/>
+  <path d="M124.7 319.2A20.1 20.1 0 0 1 84.6 319.2A11.6 11.6 0 0 1 107.8 319.2A6.7 6.7 0 0 1 94.3 319.2" fill="#E8DFC8"/>
+  <path d="M516.5 400A26.5 26.5 0 0 1 562.4 381.9A34.7 34.7 0 0 1 621.6 381.9A26.5 26.5 0 0 1 667.5 400C632.8 413.3 551.2 413.3 516.5 400Z" fill="#E8DFC8"/>
+  <path d="M516.5 401A17.3 17.3 0 0 0 481.8 401A10.1 10.1 0 0 0 502 401A5.8 5.8 0 0 0 490.3 401" fill="#E8DFC8"/>
+  <path d="M667.5 401A17.3 17.3 0 0 1 702.2 401A10.1 10.1 0 0 1 682 401A5.8 5.8 0 0 1 693.7 401" fill="#E8DFC8"/>
+  <path d="M346.7 176A18.7 18.7 0 0 1 379.1 163.2A24.5 24.5 0 0 1 420.9 163.2A18.7 18.7 0 0 1 453.3 176C428.8 185.4 371.2 185.4 346.7 176Z" fill="#E8DFC8"/>
+  <path d="M346.7 176.7A12.2 12.2 0 0 0 322.2 176.7A7.1 7.1 0 0 0 336.4 176.7A4.1 4.1 0 0 0 328.2 176.7" fill="#E8DFC8"/>
+  <path d="M453.3 176.7A12.2 12.2 0 0 1 477.8 176.7A7.1 7.1 0 0 1 463.6 176.7A4.1 4.1 0 0 1 471.8 176.7" fill="#E8DFC8"/>
+  <path d="M248.3 700A53.3 53.3 0 0 1 340.6 663.6A69.7 69.7 0 0 1 459.4 663.6A53.3 53.3 0 0 1 551.7 700C482 726.6 318 726.6 248.3 700Z" fill="#E8DFC8"/>
+  <path d="M352 522C330 546 314 574 302 600M360 528C342 552 330 580 322 606M370 532C356 556 348 582 344 606" fill="none" stroke="#E8DFC8" stroke-width="5.5" stroke-linecap="round"/>
+  <path d="M339.9 523.5C334.1 500.2 357.4 473.8 391.4 465.3C425.3 456.8 458.3 469.2 464.1 492.5C469.9 515.8 446.6 542.2 412.6 550.7C378.7 559.2 345.7 546.8 339.9 523.5Z" fill="#E8DFC8"/>
+  <path d="M446 486C440 452 444 416 452 386C458 362 462 336 464 320C464 310 468 300 476 296C484 292 492 296 494 304L544 314L494 320C486 322 480 330 476 340C470 366 464 400 462 486Z" fill="#E8DFC8"/>
+  <ellipse cx="466" cy="288" rx="8" ry="5" fill="#B13A2B"/>
+  <circle cx="483" cy="307" r="3" fill="#22304F"/>
+  <path d="M420 492C406 502 392 514 380 524M430 502C418 512 406 522 396 530M438 514C428 522 418 530 410 536" fill="none" stroke="#22304F" stroke-width="2.2"/>
+  <g fill="none" stroke="#E8DFC8" stroke-width="5.5" stroke-linecap="round">
+    <path d="M394 540C390 570 386 604 388 632"/>
+    <path d="M414 537C412 568 410 604 412 630"/>
+  </g>
+  <g fill="none" stroke="#E8DFC8" stroke-width="4.2" stroke-linecap="round">
+    <path d="M388 632C380 638 370 642 362 646M388 632C388 640 388 648 388 654M388 632C396 638 404 643 412 647"/>
+    <path d="M412 630C404 636 394 642 386 646M412 630C412 638 412 646 412 652M412 630C420 636 428 641 436 645"/>
+  </g>
+  <rect width="800" height="800" filter="url(#crane-original-noise)" opacity=".05"/>
+</svg>

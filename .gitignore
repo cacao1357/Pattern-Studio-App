@@ -27,3 +27,7 @@ Thumbs.db
 
 # Local IDE workspace
 .idea/
+
+# Superseded frontend drafts kept only on this machine, not part of the repo
+/frontend/next/
+/frontend/next-v2-backup-20261110/

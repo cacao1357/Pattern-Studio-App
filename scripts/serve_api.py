@@ -38,7 +38,7 @@ def main() -> int:
     if settings.blockers():
         print("Seedream blockers: " + ", ".join(settings.blockers()) + ". Key validity is not checked on startup.")
     uvicorn.run(create_app(settings), host="127.0.0.1", port=8765, workers=1, http="h11", ws="none",
-                proxy_headers=False, access_log=False, log_level="warning", limit_concurrency=8,
+                proxy_headers=False, access_log=False, log_level="warning", limit_concurrency=32,
                 h11_max_incomplete_event_size=16 * 1024)
     return 0
 

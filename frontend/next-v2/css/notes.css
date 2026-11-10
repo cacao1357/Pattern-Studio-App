@@ -1,0 +1,440 @@
+/* notes.css — 本稿说明：评审叙事、参考来源、边界与接入路线。 */
+
+.notes-hero {
+  padding-block: clamp(44px, 6vw, 84px) clamp(28px, 4vw, 48px);
+}
+
+.notes-hero__title {
+  margin-top: 16px;
+  max-width: 13em;
+  text-wrap: balance;
+}
+
+.notes-hero__lead {
+  margin-top: 20px;
+}
+
+.notes-hero__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 26px;
+}
+
+.notes-hero__chips .chip .icon {
+  width: 13px;
+  height: 13px;
+}
+
+/* 为什么 */
+
+.notes-why {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.notes-why__card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px;
+  border-radius: var(--r-lg);
+}
+.notes-why__card--accent {
+  border-color: var(--cinnabar-line);
+  background: radial-gradient(100% 120% at 0% 0%, rgba(223, 84, 60, 0.10), rgba(243, 239, 229, 0.012));
+}
+
+.notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.notes-list li {
+  position: relative;
+  padding-left: 16px;
+  color: var(--text-2);
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+.notes-list li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 9px;
+  width: 5px;
+  height: 1px;
+  background: var(--cinnabar);
+}
+
+/* 参考 */
+
+.refs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.refs__item {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-lg);
+  background: linear-gradient(180deg, rgba(243, 239, 229, 0.03), rgba(243, 239, 229, 0.01));
+  transition: border-color var(--dur-2), transform var(--dur-3) var(--ease-out);
+}
+.refs__item:hover {
+  border-color: var(--line-2);
+  transform: translateY(-2px);
+}
+
+.refs__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.refs__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12.5px;
+  color: var(--text-4);
+  transition: color var(--dur-2);
+}
+.refs__link:hover {
+  color: var(--cinnabar-hi);
+}
+.refs__link .icon {
+  width: 12px;
+  height: 12px;
+}
+
+.refs__take {
+  color: var(--text-2);
+  font-size: 13.5px;
+  line-height: 1.7;
+  flex: 1;
+}
+.refs__used {
+  padding-top: 12px;
+  border-top: 1px solid var(--line-1);
+  color: var(--text-3);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.refs__used .label {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 12px;
+  color: var(--cinnabar-hi);
+}
+
+/* 走一遍 */
+
+.stops {
+  border-top: 1px solid var(--line-1);
+}
+.stops__item {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 20px;
+  padding: 20px 4px;
+  border-bottom: 1px solid var(--line-1);
+  transition: background var(--dur-2);
+}
+.stops__item:hover {
+  background: rgba(243, 239, 229, 0.02);
+}
+.stops__no {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  letter-spacing: 0.12em;
+  color: var(--cinnabar-hi);
+}
+.stops__text {
+  margin-top: 3px;
+  color: var(--text-3);
+  font-size: 13.5px;
+  line-height: 1.65;
+  max-width: 66ch;
+}
+.stops__action {
+  flex: none;
+}
+
+/* 边界表 */
+
+.notes-table {
+  border-top: 1px solid var(--line-2);
+}
+.notes-table__row {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 20px;
+  padding: 13px 4px;
+  border-bottom: 1px solid var(--line-1);
+  align-items: baseline;
+}
+.notes-table__row span:first-child {
+  font-size: 12.5px;
+  letter-spacing: 0.1em;
+  color: var(--text-4);
+}
+.notes-table__row span:last-child {
+  color: var(--text-2);
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+.notes-table__row--head span {
+  color: var(--text-4);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+/* 接入步骤 */
+
+.notes-steps {
+  display: flex;
+  flex-direction: column;
+}
+.notes-steps li {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 18px;
+  padding: 18px 4px;
+  border-top: 1px solid var(--line-1);
+  align-items: baseline;
+}
+.notes-steps li:last-child {
+  border-bottom: 1px solid var(--line-1);
+}
+.notes-steps .mono {
+  color: var(--gold);
+  font-size: 12.5px;
+}
+.notes-steps p {
+  margin-top: 3px;
+  color: var(--text-3);
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+
+/* 已知限制 */
+
+.notes-known {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+  padding: 24px;
+  border-radius: var(--r-lg);
+}
+.notes-known .notes-list {
+  margin-top: 12px;
+}
+.notes-compare {
+  padding: 18px;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.notes-compare__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-1);
+  font-size: 13px;
+  transition: color var(--dur-2);
+}
+.notes-compare__link:hover {
+  color: var(--cinnabar-hi);
+}
+.notes-compare__link .icon {
+  width: 14px;
+  height: 14px;
+}
+.notes-compare .mono {
+  font-size: 12.5px;
+  color: var(--text-4);
+}
+
+.notes-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 30px;
+}
+
+@media (max-width: 1080px) {
+  .notes-why,
+  .refs {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .notes-why,
+  .refs {
+    grid-template-columns: 1fr;
+  }
+  .notes-known {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .stops__item {
+    grid-template-columns: 36px minmax(0, 1fr);
+    row-gap: 10px;
+  }
+  .stops__action {
+    grid-column: 2;
+    justify-self: start;
+  }
+  .notes-table__row {
+    grid-template-columns: 96px minmax(0, 1fr);
+    gap: 12px;
+  }
+}
+
+/* =============================================================================
+   第二轮修订（2026-11）：字号抬升后的排版修正与新语义类的样式。
+   ============================================================================= */
+
+.notes-hero__title {
+  max-width: 20em;
+  text-wrap: balance;
+}
+
+.notes-list li {
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+.refs__link {
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.refs__take {
+  font-size: 14px;
+  line-height: 1.75;
+}
+.refs__used {
+  font-size: 13px;
+  color: var(--text-3);
+}
+.refs__used .label {
+  font-size: 12.5px;
+  letter-spacing: 0.06em;
+}
+
+.stops__no {
+  font-family: var(--font-latin);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--cinnabar-hi);
+}
+.stops__text {
+  font-size: 13.5px;
+  color: var(--text-3);
+}
+
+.notes-table__row span:first-child,
+.notes-table__k {
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+}
+.notes-table__row span:last-child {
+  font-size: 14px;
+  line-height: 1.7;
+}
+.notes-table__row {
+  padding: 15px 4px;
+}
+.notes-table__row--head span {
+  font-size: 12.5px;
+  letter-spacing: 0.1em;
+  text-transform: none;
+}
+
+.notes-steps__no {
+  font-family: var(--font-latin);
+  font-size: 13px;
+  color: var(--gold);
+}
+.notes-steps p {
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: var(--text-3);
+}
+
+.notes-compare__note {
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.notes-compare .mono {
+  font-size: 12.5px;
+}
+
+@media (max-width: 760px) {
+  .notes-table__row {
+    grid-template-columns: 104px minmax(0, 1fr);
+  }
+}
+
+/* ------------------------------------------------------------------ 使用说明补充
+   七道工序表多一列「主要产物」；快捷键用定义列表展示。 */
+
+.notes-table--three .notes-table__row {
+  grid-template-columns: 118px minmax(0, 1fr) 176px;
+}
+.notes-table--three .notes-table__row span:last-child {
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.notes-foot {
+  margin-top: 14px;
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+.notes-kbd {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+.notes-kbd > div {
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+}
+.notes-kbd dt .kbd {
+  height: 24px;
+  min-width: 24px;
+  font-size: 12px;
+}
+.notes-kbd dd {
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  line-height: 1.6;
+}
+
+@media (max-width: 760px) {
+  .notes-table--three .notes-table__row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .notes-kbd > div {
+    grid-template-columns: 100px minmax(0, 1fr);
+  }
+}

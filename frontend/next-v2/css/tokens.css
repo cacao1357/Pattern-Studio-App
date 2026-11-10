@@ -1,0 +1,118 @@
+/* =============================================================================
+   tokens.css — 设计令牌（唯一视觉依据，禁止在视图样式里写死颜色/字号）
+   主题：墨与纸 —— 深墨工作台 + 纸本样张。纹样始终放在暖纸图版上，界面本身是暗的。
+   排版原则（2026-11 修订）：界面语言为中文；正文字号不低于 14px，任何标注不低于 12px。
+   ============================================================================= */
+
+:root {
+  /* 背景层级：越亮越靠前 */
+  --bg-0: #0a0a0c;
+  --bg-1: #0f1013;
+  --bg-2: #15161b;
+  --bg-3: #1c1e25;
+  --bg-4: #24262f;
+  --glass: rgba(15, 16, 19, 0.72);
+
+  /* 纸本（纹样图版、导入画布） */
+  --paper-0: #f5efe2;
+  --paper-1: #ece4d2;
+  --paper-2: #ddd2bc;
+  --paper-3: #c8bba1;
+  --paper-ink: #222a35;
+  --paper-ink-2: #4b5566;
+
+  /* 文字 */
+  --text-1: #f3efe5;
+  --text-2: #c6c0b3;
+  --text-3: #9a958a;
+  --text-4: #8a867e;
+
+  /* 线 */
+  --line-1: rgba(243, 239, 229, 0.09);
+  --line-2: rgba(243, 239, 229, 0.16);
+  --line-3: rgba(243, 239, 229, 0.30);
+
+  /* 强调 */
+  --cinnabar: #df543c;
+  --cinnabar-hi: #ff6d4f;
+  --cinnabar-deep: #c24730;
+  --cinnabar-deep-hi: #b8402a;
+  --cinnabar-soft: rgba(223, 84, 60, 0.16);
+  --cinnabar-line: rgba(223, 84, 60, 0.45);
+  --jade: #63b593;
+  --jade-soft: rgba(99, 181, 147, 0.16);
+  --gold: #cba05f;
+  --gold-soft: rgba(203, 160, 95, 0.16);
+  --blue-ink: #6f8fc9;
+
+  /* 字体 */
+  --font-serif: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+  --font-sans: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-latin: "Bahnschrift", "Segoe UI Variable Display", "Segoe UI", sans-serif;
+  --font-mono: "Cascadia Code", "Cascadia Mono", Consolas, "Noto Sans Mono", ui-monospace, monospace;
+
+  /* 字号：全局地板 12px，正文 14px */
+  --text-hero: clamp(42px, 4.5vw, 66px);
+  --text-title: clamp(32px, 3.3vw, 48px);
+  --text-section: clamp(24px, 2.3vw, 32px);
+  --text-h3: 19px;
+  --text-h4: 17px;
+  --text-lead: 16px;
+  --text-body: 14px;
+  --text-body-lg: 15px;
+  --text-sm: 13.5px;
+  --text-label: 12.5px;
+  --text-meta: 12px;
+  --text-min: 12px;
+
+  /* 行高 */
+  --lh-tight: 1.12;
+  --lh-title: 1.35;
+  --lh-body: 1.8;
+
+  /* 圆角 */
+  --r-xs: 3px;
+  --r-sm: 5px;
+  --r: 9px;
+  --r-lg: 16px;
+  --r-xl: 26px;
+  --r-pill: 999px;
+
+  /* 尺度 */
+  --wrap: 1320px;
+  --pad: clamp(20px, 4vw, 56px);
+  --topbar-h: 68px;
+
+  /* 动效 */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.5, 1);
+  --ease-emphasis: cubic-bezier(0.2, 0.9, 0.1, 1);
+  --dur-1: 150ms;
+  --dur-2: 260ms;
+  --dur-3: 460ms;
+  --dur-4: 780ms;
+  --dur-5: 1100ms;
+  --dur-6: 1600ms;
+
+  /* 阴影（暗底只用极淡的浮起与纸面投影） */
+  --shadow-paper: 0 1px 0 rgba(255, 255, 255, 0.35) inset, 0 18px 50px -22px rgba(0, 0, 0, 0.85);
+  --shadow-plate: 0 0 0 1px rgba(0, 0, 0, 0.35), 0 26px 60px -28px rgba(0, 0, 0, 0.95),
+    0 2px 0 rgba(255, 255, 255, 0.45) inset;
+  --shadow-pop: 0 24px 70px -30px rgba(0, 0, 0, 0.9);
+  --ring-focus: 0 0 0 2px var(--bg-0), 0 0 0 4px var(--cinnabar);
+
+  /* 质感：细颗粒与纸纹，全部内联 data URI，不请求任何外部资源 */
+  --grain-dark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+  --grain-paper: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23p)' opacity='0.28'/%3E%3C/svg%3E");
+}
+
+/* 可选：给需要浅色反差的局部区域（纸面内）用的令牌 */
+.on-paper {
+  --text-1: var(--paper-ink);
+  --text-2: var(--paper-ink-2);
+  --text-3: #6d6558;
+  --line-1: rgba(34, 42, 53, 0.12);
+  --line-2: rgba(34, 42, 53, 0.22);
+  --line-3: rgba(34, 42, 53, 0.4);
+}

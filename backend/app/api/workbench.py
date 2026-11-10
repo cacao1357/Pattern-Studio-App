@@ -1,6 +1,5 @@
 """Same-origin local S1 endpoints; processing writes require idempotency."""
 
-from pathlib import Path
 import sqlite3
 import tempfile
 from uuid import UUID
@@ -13,12 +12,6 @@ from app import versions
 from app.schemas.workbench import (CropRequest, PrepareRequest, WorkingCopyRequest, EnhanceRequest, ExtractRequest,
     LineartRequest, VectorRequest, PipelineRequest, ExportRequest, FeedbackRequest)
 from app.storage import ServiceError
-
-
-FRONTEND_MODULES = (
-    "brush-history.js", "edit-history.js", "guidance.js",
-    "job-cancel.js", "params.js", "preview-session.js", "settings.js",
-)
 
 
 def mount_workbench(app, current_store, current_service, current_worker):
@@ -166,56 +159,3 @@ def mount_workbench(app, current_store, current_service, current_worker):
     def feedback(payload: FeedbackRequest, request: Request):
         return current_service().feedback(payload, request.headers.get("idempotency-key", ""))
 
-    frontend = Path(__file__).resolve().parents[3] / "frontend"
-
-    def static_response(filename, media_type):
-        path = frontend / filename
-        if not path.is_file():
-            raise ServiceError("WORKBENCH_UNAVAILABLE", "The local workbench files are unavailable", 503)
-        return Response(path.read_bytes(), media_type=media_type, headers={"Cache-Control": "no-store"})
-
-    @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
-    def index():
-        return static_response("index.html", "text/html")
-
-    @app.api_route("/workbench.js", methods=["GET", "HEAD"], include_in_schema=False)
-    def javascript():
-        return static_response("workbench.js", "text/javascript")
-
-    def module_endpoint(filename):
-        def endpoint():
-            return static_response(filename, "text/javascript")
-        return endpoint
-
-    for module_name in FRONTEND_MODULES:
-        app.add_api_route(f"/{module_name}",
-            module_endpoint(module_name),
-            methods=["GET", "HEAD"], include_in_schema=False)
-
-    @app.api_route("/styles.css", methods=["GET", "HEAD"], include_in_schema=False)
-    def styles():
-        return static_response("styles.css", "text/css")
-
-    @app.api_route("/theme-saas.css", methods=["GET", "HEAD"], include_in_schema=False)
-    def saas_styles():
-        return static_response("theme-saas.css", "text/css")
-
-    @app.api_route("/theme-glass.css", methods=["GET", "HEAD"], include_in_schema=False)
-    def glass_styles():
-        return static_response("theme-glass.css", "text/css")
-
-    @app.api_route("/theme-glass.js", methods=["GET", "HEAD"], include_in_schema=False)
-    def glass_script():
-        return static_response("theme-glass.js", "text/javascript")
-
-    @app.api_route("/assets/pattern-studio/{filename}", methods=["GET", "HEAD"], include_in_schema=False)
-    def pattern_asset(filename: str):
-        allowed = {"bg-home.svg", "bg-workspace.svg", "motif-01-meander.svg", "motif-04-cloud.svg", "lotus-mark.svg", "crane-line-blue.png"}
-        if filename not in allowed:
-            raise ServiceError("ASSET_NOT_FOUND", "Unknown pattern asset", 404)
-        media = "image/svg+xml" if filename.endswith(".svg") else "image/png" if filename.endswith(".png") else "application/octet-stream"
-        return static_response(f"assets/pattern-studio/{filename}", media)
-
-    @app.api_route("/favicon.svg", methods=["GET", "HEAD"], include_in_schema=False)
-    def favicon():
-        return static_response("favicon.svg", "image/svg+xml")
