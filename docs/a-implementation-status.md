@@ -56,6 +56,27 @@ node scripts/validate_a_browser.mjs (Get-Command python).Source
 
 GPU 推理使用已安装的 Stage D 权重和合成图。云端候选使用隔离归档夹具。真实素材保真、外部 SVG 编辑器验收和实际云端调用仍按协作计划验证。
 
+### 2026-11-11 前端接入并合并 main
+
+新版前端（`frontend/next-v2/`）已接入本机服务并纳入版本库：`backend/app/api/frontend.py` 把新界面挂在 `/`，旧前端原文件未改、通过 `/legacy/` 只读对照；接口映射、CSP 与回退方式见 [前端接入说明](frontend-integration.md)。接入提交为 `016197b`，已于 2026-11-11 合并到 `main`。
+
+| 检查 | 结果 | 覆盖 |
+| --- | --- | --- |
+| 后端全量测试 | 77 项及 2 个子测试通过 | 新增 `tests/test_shell.py`：根路径与资源、`/legacy/`、两套 CSP、目录穿越与测试模块不可达 |
+| 旧前端模块回归 | 30 项通过 | `frontend/tests/*.test.mjs`（旧模块未改） |
+| 浏览器端到端 | 通过 | 上传 → 裁切 → 颜色提取 → 蒙版修正 → 2×2 平铺 → 导出 ZIP 下载；纹样库真实资产分页/筛选/抽屉；设置读取、保存、409 冲突；`?image/asset/stage` 深链；390 窄屏；`/legacy/` 无报错 |
+| 服务并发 | 修正 | 新版页面并行请求较多，`limit_concurrency` 从 8 调到 32，避免静态资源被 503 |
+
+复现：
+
+```powershell
+python -B -m pytest -q
+node --test frontend/tests/settings.test.mjs frontend/tests/workbench-regressions.test.mjs
+.\.venv\Scripts\python.exe -B scripts/serve_api.py
+```
+
+浏览器打开 <http://127.0.0.1:8765/> 走七道工序；旧版对照 <http://127.0.0.1:8765/legacy/>。本机环境无 torch 时「模型线稿」会如实失败，512 图在颜色管线矢量化阶段可能触发 worker 内存上限；这些属于已知环境限制，不是接口失败。真实云端候选与局部修复仍需配置密钥和费用门禁后单独验收。
+
 ### 2026-11-01 基础交接
 
 | 检查 | 结果 | 覆盖 |
