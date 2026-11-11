@@ -1,6 +1,7 @@
 """CUDA-first inference for the local 512 px line-art checkpoint."""
 
 from hashlib import file_digest
+import importlib.util
 import json
 
 import numpy as np
@@ -24,6 +25,35 @@ INFERENCE_SPEC = {
     "threshold": 0.5,
     "output": "white_background_black_lines",
 }
+
+
+def model_capability() -> dict:
+    """Check prerequisites without importing ML runtimes or loading the checkpoint.
+
+    This is not an inference or CUDA readiness test. The worker still validates
+    checkpoint integrity and reports runtime failures when a task is executed.
+    """
+    result = {"available": False, "reason": None, "checked": "prerequisites_only"}
+    try:
+        weights = MODEL_DIR / "model.pt"
+        config_path = MODEL_DIR / "inference.json"
+        if not weights.is_file() or not config_path.is_file() or weights.stat().st_size == 0:
+            return {**result, "reason": "model_files_missing"}
+        # A Git LFS pointer is not an installed checkpoint. Read only a small
+        # header when the file is small, never hash/load the weights in /health.
+        if weights.stat().st_size < 1024 and weights.read_bytes().startswith(b"version https://git-lfs.github.com/spec/v1"):
+            return {**result, "reason": "model_files_missing"}
+        try:
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+        except (ValueError, UnicodeError):
+            return {**result, "reason": "model_config_invalid"}
+        if not isinstance(config, dict) or any(config.get(key) != value for key, value in INFERENCE_SPEC.items()):
+            return {**result, "reason": "model_config_invalid"}
+        if any(importlib.util.find_spec(name) is None for name in ("torch", "segmentation_models_pytorch")):
+            return {**result, "reason": "dependencies_missing"}
+        return {**result, "available": True}
+    except (OSError, ImportError, ValueError, RuntimeError):
+        return {**result, "reason": "model_check_failed"}
 
 
 def _infer(torch, model, tensor) -> tuple[np.ndarray, str]:

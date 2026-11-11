@@ -604,6 +604,39 @@ class WorkbenchStore(Store):
         return {"items": [self.get_image(r["id"]) if table == "images" else self.get_job(r["id"]) for r in selected],
                 "next_cursor": str(selected[-1]["sequence"]) if len(rows) > limit else None}
 
+    def page_image_history(self, image_id, collection, limit, cursor):
+        """Read persisted image history without submitting, reconciling or retrying work."""
+        if collection not in {"assets", "jobs", "flows"}:
+            raise ValueError("Unsupported image history collection")
+        offset = page_offset(cursor)
+        with self.connection() as db:
+            image = db.execute("SELECT original_id, normalized_id FROM images WHERE id=?", (image_id,)).fetchone()
+            if image is None:
+                raise ServiceError("IMAGE_NOT_FOUND", "Image history entry not found", 404)
+            # Follow registered parents as well as copied metadata: older assets may
+            # lack image_id. UNION makes duplicate paths and cycles harmless.
+            ownership = """WITH RECURSIVE owned(id) AS (
+                SELECT id FROM assets WHERE id IN (?,?) OR metadata->>'image_id'=?
+                UNION SELECT r.child_id FROM asset_relations r JOIN owned o ON r.parent_id=o.id
+                UNION SELECT a.id FROM assets a JOIN owned o ON a.metadata->>'source_asset_id'=o.id
+            ) """
+            source, condition = {
+                "assets": ("assets", "t.id IN (SELECT id FROM owned)"),
+                "jobs": ("local_jobs", "t.input_id IN (SELECT id FROM owned)"),
+                "flows": ("ai_flows", "t.input_id IN (SELECT id FROM owned)"),
+            }[collection]
+            rows = db.execute(ownership + f"""SELECT t.rowid AS sequence,t.* FROM {source} t
+                WHERE t.rowid<? AND {condition} ORDER BY t.rowid DESC LIMIT ?""",
+                (image["original_id"], image["normalized_id"], image_id, offset, limit + 1)).fetchall()
+        selected = rows[:limit]
+        if collection == "assets":
+            items = [json.loads(row["metadata"]) for row in selected]
+        else:
+            read = self.get_job if collection == "jobs" else self.get_ai_flow
+            items = [read(row["id"]) for row in selected]
+        return {"items": items,
+                "next_cursor": str(selected[-1]["sequence"]) if len(rows) > limit else None}
+
     def page_assets(self, limit, cursor, query, kinds):
         offset = page_offset(cursor)
         search = ""

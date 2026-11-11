@@ -3,6 +3,7 @@
 import sqlite3
 import tempfile
 from uuid import UUID
+from typing import Literal
 
 from fastapi import File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
@@ -12,6 +13,7 @@ from app import versions
 from app.schemas.workbench import (CropRequest, PrepareRequest, WorkingCopyRequest, EnhanceRequest, ExtractRequest,
     LineartRequest, VectorRequest, PipelineRequest, ExportRequest, FeedbackRequest)
 from app.storage import ServiceError
+from app.services.model_lineart import model_capability
 
 
 def mount_workbench(app, current_store, current_service, current_worker):
@@ -35,6 +37,7 @@ def mount_workbench(app, current_store, current_service, current_worker):
         ready = database and storage and worker["alive"] and not worker["error"]
         return JSONResponse({"status": "ok" if ready else "degraded", "scope": "s1_local_workbench",
             "database": database, "storage": storage, "worker": worker, "versions": versions.snapshot(),
+            "capabilities": {"lineart_model": model_capability()},
             "limits": {"upload_bytes": DEFAULT_LIMITS.max_upload_bytes, "decode_pixels": DEFAULT_LIMITS.max_decode_pixels,
                        "working_pixels": DEFAULT_LIMITS.max_vector_pixels, "tile_pixels": DEFAULT_LIMITS.max_tile_pixels,
                        "provisional": True}}, status_code=200 if ready else 503)
@@ -64,6 +67,12 @@ def mount_workbench(app, current_store, current_service, current_worker):
     @app.get("/api/v1/images/{image_id}")
     def image_record(image_id: UUID):
         return current_store().get_image(str(image_id))
+
+    @app.get("/api/v1/images/{image_id}/history")
+    def image_history(image_id: UUID, collection: Literal["assets", "jobs", "flows"] = "assets",
+                      limit: int = Query(default=50, ge=1, le=50),
+                      cursor: str | None = Query(default=None, max_length=18)):
+        return current_store().page_image_history(str(image_id), collection, limit, cursor)
 
     @app.get("/api/v1/images")
     def images(limit: int = Query(default=20, ge=1, le=50), cursor: str | None = Query(default=None, max_length=18)):
