@@ -77,6 +77,21 @@ node --test frontend/tests/settings.test.mjs frontend/tests/workbench-regression
 
 浏览器打开 <http://127.0.0.1:8765/> 走七道工序；旧版对照 <http://127.0.0.1:8765/legacy/>。本机环境无 torch 时「模型线稿」会如实失败，512 图在颜色管线矢量化阶段可能触发 worker 内存上限；这些属于已知环境限制，不是接口失败。真实云端候选与局部修复仍需配置密钥和费用门禁后单独验收。
 
+### 2026-11-11 配色评审 → 接入（「蜜蜡 · 沉褐」）
+
+按「现在这版配色偏 AI 味」的反馈，先在 `frontend/next-v3/` 隔离副本里做评审（正式前端当时零改动）：先只换强调色（被否：像没改）→ 再做浅底/中调三个整屏方案绢白、靛蓝、青瓷（被否：都不如原版）→ 最终把中性近黑整体换成黄橙家族「蜜蜡」，再压一档褐、调暗，定为「蜜蜡 · 沉褐」，方向认可。
+
+评审通过后按「接入新版前端，做好适配」并入 `frontend/next-v2/`，`/` 即为新配色；隔离预览目录与 `/preview/` 脚手架已删除，评审记录迁到 [配色决定记录](palette-review.md)，接入动作见 [前端接入说明](frontend-integration.md) 第 8 节。
+
+| 检查 | 结果 | 覆盖 |
+| --- | --- | --- |
+| 对比度核算 | 通过 | `python scripts/check_contrast.py` 解析 `next-v2/css/tokens.css` 算 22 组配对：正文 13.26:1、次要 8.53:1、弱化 7.26:1、极弱 5.53:1、主按钮 7.73:1、纸面正文 12.79:1、砖红错误 7.11:1 |
+| Lighthouse 无障碍 | 通过 | 首页 / 工作台（含资产与空态）/ 纹样库 / 设置均为 100；设置页首轮 96（警示面板内金色标签 4.07:1），改暗标签底后复跑 100 |
+| 截图核对 | 通过 | 五个页面 + 390 宽 + 七道工序导览，1440×900 / 780×1688 无头 Chrome 实拍，重出 `next-v2/review/` |
+| 页面复核 | 通过 | Chrome 1440×900 与 390×844：无横向溢出、控制台无报错、请求全部同源 |
+| 后端挂载 | 通过 | 隔离实例 `/` 200（studio CSP 不变）、`/preview/` 404、`/legacy/` 200 |
+| 前端模块测试 | 通过 | `next-v2-integration` + 旧版 `settings` / `workbench-regressions` 共 45 项 |
+
 ### 2026-11-01 基础交接
 
 | 检查 | 结果 | 覆盖 |
@@ -111,3 +126,53 @@ Edge 结果：`storage/validation/a/browser-checks.json`；同目录保存桌面
 - [DSH 会话](http://127.0.0.1:3080/?sessionId=session-02cbd6e3-eacb-4af5-a20b-56539a7f4ae8) 已成功结束；Codex 独立检查差异并执行 Edge 对接。审查发现的分支恢复归属缺口已修复补测。
 
 后续共同确定固定样本、质量阈值和真实提示词实验预算，完成 B/C 交付后由 A 做最终真实素材集成验收。实现与验证使用隔离数据，没有付费模型调用，没有读取或改写实际私有配置；既有 README 定位说明保留。代码、测试、脚本和文档按现有目录组织；生成截图与检查结果留在被 Git 忽略的 `storage/validation/a/`，不随源码提交。
+
+### 2026-11-11 新版可靠性对接（第一批）
+
+本批完成模型前置能力接口、默认模型一键与分步入口、上传/加载/任务会话隔离、接受修复的新资产衔接、失败及取消保留产物说明。独立浏览器验收发现并修复深链在页内重绘时重置当前结果的问题。接口与复现命令见 [前端接入说明第 9 节](frontend-integration.md#9-2026-11-11-第一批可靠性对接)。
+
+- 后端定向：19 passed。健康探测不加载 ML 运行时或权重；模型缺失不影响其他本地工具健康状态。
+- 前端：45 passed，含新版 15 项行为回归；语法及差异检查通过。
+- 隔离合成图：真实 CUDA 线稿 PNG→SVG 成功（单独后端冒烟约 16.7 秒），云端调用 0。
+- Chrome：真实页面按钮提交、产物采纳、跨图旧任务隔离与桌面/窄屏访问通过，页面异常及云端生成请求均 0。Edge 的本轮调试端口启动超时，没有将其计为通过。
+- 已有 `D:/CondaEnvs/pattern-studio/python.exe` 是具备模型依赖的 Python 3.11；本次检查时 8765 服务使用另一套 Python 3.12，缺少分割模型库。本批未重启该服务或改装依赖。
+
+前端通过 Harness Relay 的 `delegate-to-deepseek-harness` 技能 委派，backend=harness，provider=deepseek-official，model=deepseek-flash，reasoning=high；runId=e7af3c23-d2a9-4d34-9050-101ff5d79b69，sessionId=session-759261cc-29ac-4577-bd7e-97b16b74ca74，状态 succeeded。Codex 完成后端、消费者兼容、深链结果采纳修复及独立验证。
+
+本批当时保留了配色评审的本地文件，没有提交或推送；配色随后在「配色接入与适配」中并入正式前端，并于 2026-11-12 的整理提交入库（见文末「整理与推送」）。本批验证不代表真实素材质量、真实云端修复或完整历史恢复验收；下一批仍按原分工完善云端续接/局部重跑和恢复契约。
+
+
+## 2026-11-11 第二批：历史查询后端已完成，前端待授权
+
+- 增加按图分页历史 API，复用现有资产、任务及 AI 流程记录；保留失败部分产物和分支关系，兼容旧云端资产 `source_asset_id` 来源链。接口语义见接口合同“按图恢复历史”。
+- 新增 `backend/tests/test_image_history.py` 四个离线集成用例，覆盖三类分页、多流程、任务及分支、重复上传隔离、旧来源链、校验和缺失图片、查询无新增任务或云端调用。
+- 验证：设置 `PYTHONPATH=backend` 后运行 `python -B -m pytest -q -p no:cacheprovider backend/tests/test_image_history.py backend/tests/test_a_workflow.py`，17 passed、2 subtests passed。测试使用临时存储及 MockTransport，不访问生产素材或真实云端。首次缺少模块路径导致收集失败；补路径后旧来源链用例暴露兼容缺口，补齐后通过。
+- 前端委派未获准启动：Harness workspace-write 请求被自动审批拒绝，要求用户明确批准项目源码发送至外部 DeepSeek 服务。本次未产生运行 ID、未切换其他后端或绕过委派；现有第一批前端保留，第二批前端尚未修改。
+- 本批当时未提交、未推送、未重启生产服务；已在 2026-11-12 的整理提交入库（见文末「整理与推送」）。未做第二批浏览器验证、真实云端或素材质量验收。余下工作是新版历史消费、已有任务轮询、continue/rerun 对接与浏览器验收，需上述委派授权后继续。
+
+## 2026-11-11 配色接入与适配（「蜜蜡 · 沉褐」）
+
+正式前端 `frontend/next-v2/` 接入评审定稿的配色，并完成配套适配：
+
+- 令牌换成蜜蜡 · 沉褐，补 `--on-accent`、`--action-*`、`--paper-ink-3`；视图样式里的硬编码色号改为 `color-mix()` 派生，去掉彩色光晕与霓虹阴影，主操作改为「琥珀实心 + 墨字」。
+- 评审覆盖层的结构规则折进 `base/shell/home/workbench/library/settings` 的对应选择器；错误态从强调色剥离（砖红 `#e2a07f`）。
+- 删除 `frontend/next-v3/`、`/preview/` 路由、`PREVIEW_ROOT_NAME`/`PREVIEW_ENABLED`、`js/palette.js` 与 `.gitignore` 的预览条目；对比度工具迁到 `scripts/check_contrast.py`，评审记录迁到 [配色决定记录](palette-review.md)。
+- 设置页警示面板里的金色标签在琥珀底上只有 4.07:1（Lighthouse 首轮 96），已把该面板内标签底改为暗底（6.7:1），复跑 100。
+- 保留 `next-v2` 第一批的 JS 改动（会话身份令牌、深链只加载一次、修复接纳等），配色只动样式与令牌。
+
+验证：`tests/` 69 passed；前端 3 个测试文件 45 passed；`python scripts/check_contrast.py` 22 组全部达标；隔离实例 `/` 200、`/preview/` 404、`/legacy/` 200；Chrome 五页 + 390 宽 + 导览浮层通过，Lighthouse 无障碍逐页 100；`review/` 截图重出。错误态（纹样库、设置页、工作台失败步骤与表单提示、轻提示 warn/done）已统一改用 `--error` / 铜绿，不再复用琥珀。
+
+环境说明：本机 DSH 沙箱把 `0o700` 目录变成创建者自己也无法列目录的对象，pytest 的 `tmp_path` 因此不可用；`tests/` 这轮用了一次性 shim（`storage/validation/v3-integration/pytest_tmpfix.py`，未入库）把 `tmp_path` 指到工作区普通目录。`backend/tests/` 里大量用例直接用 `tempfile.TemporaryDirectory()`，在本沙箱下无法运行，本轮未执行，不能据此判定它们通过或失败。没有重启已在运行的 8765 服务，也没有做真实素材质量、真实云端与第二批前端验收。
+
+## 2026-11-12 整理与推送
+
+把此前积压的三批改动按逻辑拆成四个提交，推到远端 `main`（本机开发分支 `zgx`，与 `main` 同一提交）：
+
+| 提交 | 范围 |
+| --- | --- |
+| `feat(backend): expose line-art capability and per-image history` | 健康能力字段、按图分页历史、对应测试与接口合同 |
+| `feat(frontend): isolate workbench sessions and adopt model capability` | 新版前端第一批可靠性改动、模块测试与浏览器验证脚本 |
+| `feat(frontend): apply the amber palette and retire the preview sandbox` | 蜜蜡 · 沉褐令牌与样式、错误语义迁移、`theme-color`、重出截图、对比度工具、`next-v3` 与 `/preview/` 清理 |
+| `docs: record the palette decision and delivery status` | 配色决定记录、前端接入说明、实施记录与根 README |
+
+整理时清理了本机预览目录、临时探针与忽略目录中的检查脚本；`storage/`（含素材、数据库、验证产物）与旧版草稿仍按原样不入库。推送前后重复执行了对比度核算（22 组）、前端 45 项与 `tests/` 69 项。没有重启生产服务；真实素材质量、真实云端调用与第二批前端仍待后续验收。

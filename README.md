@@ -24,7 +24,7 @@ macOS / Linux（未实机验证）：
 
 浏览器打开 **http://127.0.0.1:8765**。关闭时在启动终端按 Ctrl+C。保持仓库目录结构完整；此程序通过源码目录读取前端资源，不支持只复制 Python 安装包运行。
 
-当前页面是接入本机服务的新版工作台（`frontend/next-v2/`）。旧的浅色前端文件仍在 `frontend/` 根目录保留，可通过 **http://127.0.0.1:8765/legacy/** 只读打开对照；接入与回退说明见 [docs/frontend-integration.md](docs/frontend-integration.md)。
+当前页面是接入本机服务的新版工作台（`frontend/next-v2/`），配色为「蜜蜡 · 沉褐」（令牌在 `frontend/next-v2/css/tokens.css`，改动后可用 `python scripts/check_contrast.py` 复核对比度）。旧的浅色前端文件仍在 `frontend/` 根目录保留，可通过 **http://127.0.0.1:8765/legacy/** 只读打开对照；接入与回退说明见 [docs/frontend-integration.md](docs/frontend-integration.md)。
 
 本地处理无需配置密钥。更新源码后，请在原启动终端按 Ctrl+C 停止服务，用同一个 Python 环境重新启动，再刷新浏览器。
 
@@ -112,6 +112,7 @@ Seedream 图层分解和局部修复需要用户自己的火山方舟账号、�
 - [A 实施与交接记录](docs/a-implementation-status.md)：已完成能力、验证结果和 B/C 接入位置。
 - [接口合同](docs/a-interface-contract.md)：设置、工作流、局部重跑、一键处理与平铺记录。
 - [前端接入说明](docs/frontend-integration.md)：新版工作台的服务路径、会话模型、工序接口与回退方式。
+- [配色决定记录](docs/palette-review.md)：当前「蜜蜡 · 沉褐」配色的参数、被否方案、验证与遗留问题。
 
 A 的基础实现已完成。真实提示词实验、自动选层策略、矢量质量改进和固定素材验收继续按计划推进。最新定向验证及复现命令见交接记录。前端测试和 Edge 验证脚本需要 Node.js 22 或更新版本。
 
