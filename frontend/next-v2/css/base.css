@@ -78,7 +78,7 @@ ol {
 
 ::selection {
   background: var(--cinnabar);
-  color: #fff5ef;
+  color: var(--action-fg);
 }
 
 :focus-visible {
@@ -90,20 +90,20 @@ ol {
 /* 滚动条（暗色，细） */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(243, 239, 229, 0.22) transparent;
+  scrollbar-color: color-mix(in srgb, var(--text-1) 22%, transparent) transparent;
 }
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(243, 239, 229, 0.18);
+  background: color-mix(in srgb, var(--text-1) 18%, transparent);
   border: 3px solid transparent;
   background-clip: content-box;
   border-radius: 99px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(243, 239, 229, 0.3);
+  background: color-mix(in srgb, var(--text-1) 30%, transparent);
   background-clip: content-box;
 }
 
@@ -220,7 +220,7 @@ ol {
 
 .display em {
   font-style: normal;
-  color: var(--cinnabar-hi);
+  color: var(--cinnabar);
   position: relative;
 }
 
@@ -302,7 +302,7 @@ ol {
   bottom: -1px;
   width: 100%;
   height: 1px;
-  background: linear-gradient(90deg, var(--cinnabar-line), rgba(223, 84, 60, 0.12) 34%, transparent 78%);
+  background: linear-gradient(90deg, var(--cinnabar-line), color-mix(in srgb, var(--cinnabar) 12%, transparent) 34%, transparent 78%);
   transform: scaleX(0);
   transform-origin: left;
   transition: transform var(--dur-5) var(--ease-out) 80ms;
@@ -386,24 +386,25 @@ ol {
   transform: translateX(3px);
 }
 
+/* 主操作：纸块压墨字，平涂不发光 */
 .btn--primary {
-  background: var(--cinnabar-deep);
-  color: #fff6f1;
-  box-shadow: 0 12px 32px -14px rgba(223, 84, 60, 0.95), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  background: var(--action-bg);
+  color: var(--action-fg);
+  box-shadow: inset 0 0 0 1px var(--action-edge), 0 10px 22px -16px rgba(22, 12, 2, 0.9);
 }
 .btn--primary:hover {
-  background: var(--cinnabar-deep-hi);
-  box-shadow: 0 16px 40px -14px rgba(223, 84, 60, 1), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  background: var(--action-bg-hi);
+  box-shadow: inset 0 0 0 1px var(--action-edge), 0 12px 24px -16px rgba(22, 12, 2, 0.95);
 }
 
 .btn--ghost {
   border-color: var(--line-2);
   color: var(--text-1);
-  background: rgba(243, 239, 229, 0.02);
+  background: color-mix(in srgb, var(--text-1) 2%, transparent);
 }
 .btn--ghost:hover {
   border-color: var(--line-3);
-  background: rgba(243, 239, 229, 0.06);
+  background: color-mix(in srgb, var(--text-1) 6%, transparent);
 }
 
 .btn--quiet {
@@ -412,16 +413,16 @@ ol {
 }
 .btn--quiet:hover {
   color: var(--text-1);
-  background: rgba(243, 239, 229, 0.05);
+  background: color-mix(in srgb, var(--text-1) 5%, transparent);
 }
 
 .btn--paper {
   background: var(--paper-0);
   color: var(--paper-ink);
-  box-shadow: 0 12px 30px -16px rgba(0, 0, 0, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  box-shadow: 0 12px 30px -16px rgba(22, 12, 2, 0.92), inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 .btn--paper:hover {
-  background: #fff8ea;
+  background: var(--on-accent);
 }
 
 .btn--sm {
@@ -456,7 +457,7 @@ ol {
   transition: background var(--dur-2), color var(--dur-2), transform var(--dur-2) var(--ease-spring);
 }
 .icon-btn:hover {
-  background: rgba(243, 239, 229, 0.07);
+  background: color-mix(in srgb, var(--text-1) 7%, transparent);
   color: var(--text-1);
 }
 .icon-btn:active {
@@ -498,12 +499,12 @@ ol {
   background: var(--cinnabar-soft);
 }
 .chip--jade {
-  border-color: rgba(99, 181, 147, 0.4);
+  border-color: color-mix(in srgb, var(--jade) 40%, transparent);
   color: var(--jade);
   background: var(--jade-soft);
 }
 .chip--gold {
-  border-color: rgba(203, 160, 95, 0.4);
+  border-color: color-mix(in srgb, var(--gold) 40%, transparent);
   color: var(--gold);
   background: var(--gold-soft);
 }
@@ -568,7 +569,7 @@ ol {
 
 .card {
   position: relative;
-  background: linear-gradient(180deg, rgba(243, 239, 229, 0.04), rgba(243, 239, 229, 0.012));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--text-1) 4%, transparent), color-mix(in srgb, var(--text-1) 1.2%, transparent));
   border: 1px solid var(--line-1);
   border-radius: var(--r-lg);
   overflow: hidden;
@@ -583,7 +584,7 @@ ol {
   .card--hover:hover {
     border-color: var(--line-2);
     transform: translateY(-3px);
-    box-shadow: 0 24px 50px -34px rgba(0, 0, 0, 0.95), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    box-shadow: 0 24px 50px -34px rgba(22, 12, 2, 0.95), inset 0 1px 0 rgba(255, 238, 202, 0.05);
   }
 }
 
@@ -613,10 +614,10 @@ ol {
   opacity: 0.5;
   background-image: repeating-linear-gradient(
       0deg,
-      rgba(34, 42, 53, 0.035) 0 1px,
+      color-mix(in srgb, var(--paper-ink) 3.5%, transparent) 0 1px,
       transparent 1px 3px
     ),
-    repeating-linear-gradient(90deg, rgba(34, 42, 53, 0.03) 0 1px, transparent 1px 3px);
+    repeating-linear-gradient(90deg, color-mix(in srgb, var(--paper-ink) 3%, transparent) 0 1px, transparent 1px 3px);
   mix-blend-mode: multiply;
 }
 .plate--grain::before {
@@ -785,7 +786,7 @@ ol {
 }
 .switch[aria-checked="true"]::after {
   transform: translateX(17px);
-  background: #fff6f1;
+  background: var(--on-accent);
 }
 
 /* ------------------------------------------------------------------ 轻提示 */
@@ -811,7 +812,7 @@ ol {
   padding: 11px 18px;
   border: 1px solid var(--line-2);
   border-radius: var(--r-pill);
-  background: rgba(21, 22, 27, 0.95);
+  background: color-mix(in srgb, var(--bg-2) 95%, transparent);
   backdrop-filter: blur(16px);
   color: var(--text-1);
   font-size: 13.5px;
@@ -821,8 +822,15 @@ ol {
 .toast .icon {
   width: 16px;
   height: 16px;
-  color: var(--cinnabar-hi);
+  color: var(--text-2);
   flex: none;
+}
+/* 轻提示按语义给图标色：琥珀只表示「当前/主操作」，不兼任提示色 */
+.toast--warn .icon {
+  color: var(--error);
+}
+.toast--done .icon {
+  color: var(--jade);
 }
 .toast.is-out {
   animation: toast-out var(--dur-2) var(--ease-in-out) both;
@@ -845,10 +853,10 @@ ol {
   width: min(540px, 94vw);
   display: flex;
   flex-direction: column;
-  background: rgba(13, 14, 17, 0.975);
+  background: color-mix(in srgb, var(--bg-1) 97.5%, transparent);
   backdrop-filter: blur(24px);
   border-left: 1px solid var(--line-2);
-  box-shadow: -30px 0 80px -40px rgba(0, 0, 0, 0.9);
+  box-shadow: -30px 0 80px -40px rgba(22, 12, 2, 0.9);
   animation: drawer-in var(--dur-3) var(--ease-out) both;
 }
 @keyframes drawer-in {
@@ -898,7 +906,7 @@ ol {
   opacity: 0;
   background: radial-gradient(
     360px circle at var(--mx, 50%) var(--my, 50%),
-    rgba(243, 239, 229, 0.1),
+    color-mix(in srgb, var(--text-1) 10%, transparent),
     transparent 62%
   );
   transition: opacity var(--dur-3) var(--ease-out);
@@ -932,17 +940,18 @@ ol {
   inset: 0;
   z-index: -2;
   pointer-events: none;
+  /* 陈褐分层：顶部一层极淡灯光，四角压暗，像旧物标本的拍摄台 */
   background:
-    radial-gradient(58% 44% at 78% -6%, rgba(223, 84, 60, 0.10), transparent 62%),
-    radial-gradient(48% 40% at 6% 12%, rgba(111, 143, 201, 0.07), transparent 60%),
-    linear-gradient(180deg, #0b0b0e 0%, #0a0a0c 46%, #09090b 100%);
+    radial-gradient(150% 90% at 50% -26%, color-mix(in srgb, var(--cinnabar) 7%, transparent), transparent 66%),
+    radial-gradient(120% 105% at 50% 42%, transparent 46%, rgba(16, 9, 1, 0.42) 100%),
+    linear-gradient(180deg, var(--bg-1) 0%, var(--bg-0) 46%, var(--bg-0) 100%);
 }
 .ambient::before {
   content: "";
   position: absolute;
   inset: 0;
-  opacity: 0.55;
-  background-image: radial-gradient(rgba(243, 239, 229, 0.05) 0.6px, transparent 0.6px);
+  opacity: 0.5;
+  background-image: radial-gradient(rgba(245, 219, 168, 0.09) 0.6px, transparent 0.6px);
   background-size: 22px 22px;
   mask-image: radial-gradient(70% 60% at 50% 20%, #000 0%, transparent 78%);
 }
@@ -951,7 +960,7 @@ ol {
   content: "";
   position: absolute;
   inset: 0;
-  opacity: 0.5;
+  opacity: 0.42;
   background-image: var(--grain-dark);
   background-size: 140px 140px;
   mix-blend-mode: soft-light;

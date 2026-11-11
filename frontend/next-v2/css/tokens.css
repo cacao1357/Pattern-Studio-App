@@ -1,49 +1,70 @@
 /* =============================================================================
    tokens.css — 设计令牌（唯一视觉依据，禁止在视图样式里写死颜色/字号）
-   主题：墨与纸 —— 深墨工作台 + 纸本样张。纹样始终放在暖纸图版上，界面本身是暗的。
-   排版原则（2026-11 修订）：界面语言为中文；正文字号不低于 14px，任何标注不低于 12px。
+   主题：蜜蜡 · 沉褐 —— 焦褐底的暗房，灯下的琥珀光。
+   把原来的中性近黑整体换成黄橙家族，再压一档褐：底是陈褐漆、字是茶白、
+   线是极淡的旧金、主操作是陈年琥珀（配墨字），纸本是放旧的绢。
+   三处结构动作（2026-11-11 定稿，评审记录见 docs/palette-review.md）：
+   1) 明度结构：底色分层从 #1e1506 到 #493819，暖褐逐层亮起，不再是一片死黑；
+   2) 主次反转：主操作由「暗红实心 + 米白字」改为「琥珀实心 + 墨字」，屏上最亮的一块就是下一步；
+   3) 语义分层：琥珀只做「当前 / 主操作 / 强调」，错误另用砖红，通过用铜绿、待办用旧金。
+   排版原则：界面语言为中文；正文字号不低于 14px，任何标注不低于 12px。
    ============================================================================= */
 
 :root {
-  /* 背景层级：越亮越靠前 */
-  --bg-0: #0a0a0c;
-  --bg-1: #0f1013;
-  --bg-2: #15161b;
-  --bg-3: #1c1e25;
-  --bg-4: #24262f;
-  --glass: rgba(15, 16, 19, 0.72);
+  /* 背景层级：越亮越靠前（沉着的老褐） */
+  --bg-0: #1e1506;
+  --bg-1: #251b09;
+  --bg-2: #2d220d;
+  --bg-3: #392c12;
+  --bg-4: #493819;
+  --glass: rgba(30, 21, 6, 0.76);
 
-  /* 纸本（纹样图版、导入画布） */
-  --paper-0: #f5efe2;
-  --paper-1: #ece4d2;
-  --paper-2: #ddd2bc;
-  --paper-3: #c8bba1;
-  --paper-ink: #222a35;
-  --paper-ink-2: #4b5566;
+  /* 绢本（纹样图版、导入画布）：放旧了的绢，黄气浊 */
+  --paper-0: #f4e5bf;
+  --paper-1: #ecdab0;
+  --paper-2: #dcc494;
+  --paper-3: #c2aa7b;
+  --paper-ink: #2a2012;
+  --paper-ink-2: #514329;
+  --paper-ink-3: #6a5a3e;
 
-  /* 文字 */
-  --text-1: #f3efe5;
-  --text-2: #c6c0b3;
-  --text-3: #9a958a;
-  --text-4: #8a867e;
+  /* 文字：茶白一组（象牙黄里掺褐，不发亮） */
+  --text-1: #f6ecd2;
+  --text-2: #d2bd99;
+  --text-3: #c4ae8a;
+  --text-4: #ad9773;
 
-  /* 线 */
-  --line-1: rgba(243, 239, 229, 0.09);
-  --line-2: rgba(243, 239, 229, 0.16);
-  --line-3: rgba(243, 239, 229, 0.30);
+  /* 线：旧金 */
+  --line-1: rgba(238, 214, 168, 0.12);
+  --line-2: rgba(238, 214, 168, 0.2);
+  --line-3: rgba(238, 214, 168, 0.32);
 
-  /* 强调 */
-  --cinnabar: #df543c;
-  --cinnabar-hi: #ff6d4f;
-  --cinnabar-deep: #c24730;
-  --cinnabar-deep-hi: #b8402a;
-  --cinnabar-soft: rgba(223, 84, 60, 0.16);
-  --cinnabar-line: rgba(223, 84, 60, 0.45);
-  --jade: #63b593;
-  --jade-soft: rgba(99, 181, 147, 0.16);
-  --gold: #cba05f;
-  --gold-soft: rgba(203, 160, 95, 0.16);
-  --blue-ink: #6f8fc9;
+  /* 强调：陈年琥珀（只做「当前 / 主操作 / 强调」，不再兼任错误色） */
+  --cinnabar: #dd9f45;
+  --cinnabar-hi: #ecb45a;
+  --cinnabar-deep: #8f4611;
+  --cinnabar-deep-hi: #a0521a;
+  --cinnabar-soft: color-mix(in srgb, var(--cinnabar) 17%, transparent);
+  --cinnabar-line: color-mix(in srgb, var(--cinnabar) 48%, transparent);
+  /* 灰青：次要强调与信息类标记 */
+  --blue-ink: #93aca6;
+  /* 铜绿：通过、成功 */
+  --jade: #93b29c;
+  --jade-soft: color-mix(in srgb, var(--jade) 18%, transparent);
+  /* 旧金：待办、告警、B 级 */
+  --gold: #cbae6d;
+  --gold-soft: color-mix(in srgb, var(--gold) 18%, transparent);
+  /* 砖红：错误与危险；琥珀只表示「当前」，错误态不得复用琥珀 */
+  --error: #e2a07f;
+  --error-line: rgba(226, 160, 127, 0.55);
+
+  /* 反白文字（深赭上的茶白字，用于印、勾选框、滑柄） */
+  --on-accent: #f6ecd2;
+  /* 主操作：琥珀金实心 + 墨字，平涂不发光 */
+  --action-bg: #dda149;
+  --action-bg-hi: #e9ae55;
+  --action-fg: #241705;
+  --action-edge: color-mix(in srgb, var(--action-fg) 24%, transparent);
 
   /* 字体 */
   --font-serif: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
@@ -95,12 +116,12 @@
   --dur-5: 1100ms;
   --dur-6: 1600ms;
 
-  /* 阴影（暗底只用极淡的浮起与纸面投影） */
-  --shadow-paper: 0 1px 0 rgba(255, 255, 255, 0.35) inset, 0 18px 50px -22px rgba(0, 0, 0, 0.85);
-  --shadow-plate: 0 0 0 1px rgba(0, 0, 0, 0.35), 0 26px 60px -28px rgba(0, 0, 0, 0.95),
-    0 2px 0 rgba(255, 255, 255, 0.45) inset;
-  --shadow-pop: 0 24px 70px -30px rgba(0, 0, 0, 0.9);
-  --ring-focus: 0 0 0 2px var(--bg-0), 0 0 0 4px var(--cinnabar);
+  /* 阴影：更深的暖褐黑，不用中性黑 */
+  --shadow-paper: 0 1px 0 rgba(255, 238, 202, 0.26) inset, 0 18px 50px -22px rgba(22, 12, 2, 0.94);
+  --shadow-plate: 0 0 0 1px rgba(22, 12, 2, 0.55), 0 26px 60px -28px rgba(22, 12, 2, 0.98),
+    0 2px 0 rgba(255, 238, 202, 0.3) inset;
+  --shadow-pop: 0 24px 70px -30px rgba(22, 12, 2, 0.95);
+  --ring-focus: 0 0 0 2px var(--bg-0), 0 0 0 4px var(--cinnabar-hi);
 
   /* 质感：细颗粒与纸纹，全部内联 data URI，不请求任何外部资源 */
   --grain-dark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
@@ -111,8 +132,8 @@
 .on-paper {
   --text-1: var(--paper-ink);
   --text-2: var(--paper-ink-2);
-  --text-3: #6d6558;
-  --line-1: rgba(34, 42, 53, 0.12);
-  --line-2: rgba(34, 42, 53, 0.22);
-  --line-3: rgba(34, 42, 53, 0.4);
+  --text-3: var(--paper-ink-3);
+  --line-1: color-mix(in srgb, var(--paper-ink) 12%, transparent);
+  --line-2: color-mix(in srgb, var(--paper-ink) 22%, transparent);
+  --line-3: color-mix(in srgb, var(--paper-ink) 40%, transparent);
 }

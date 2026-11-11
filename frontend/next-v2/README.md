@@ -65,26 +65,33 @@ export default {
 
 ## 截图
 
-`review/` 是接入真实后端后的页面截图（1440×900 与 390 宽视口），只为方便快速翻看；
+`review/` 是接入真实后端后的页面截图（1440×900 与 390 宽视口，无头 Chrome 实拍），只为方便快速翻看；
 页面本身可直接访问，截图不是交付物，可整目录删除：
 
 ```
 review/01-home.jpg              首页（1440×900）
 review/02-workbench.jpg         工作台 · 03 处理（1440×900）
-review/03-workbench-compare.jpg 工作台 · 对比原图与线稿
-review/04-library.jpg           纹样库 · 网格（1440×900）
-review/05-settings.jpg          设置（1440×900）
-review/06-notes.jpg             使用说明（1440×900）
-review/07-narrow-home.jpg       首页 · 390 宽
-review/08-narrow-workbench.jpg  工作台 · 390 宽
-review/09-tour.jpg              首页 · 七道工序导览浮层
+review/03-library.jpg           纹样库 · 网格（1440×900）
+review/04-settings.jpg          设置（1440×900）
+review/05-notes.jpg             使用说明（1440×900）
+review/06-narrow-home.jpg       首页 · 390 宽
+review/07-narrow-workbench.jpg  工作台 · 390 宽
+review/08-tour.jpg              首页 · 七道工序导览浮层
 ```
+
+截图批次为 2026-11-11「蜜蜡 · 沉褐」配色接入后重出；本批没有重拍「对比」，因为现有素材只有原件与规范输入，
+工作台对这两个版本如实提示无可对比对象。
 
 ## 设计
 
-视觉依据见 [DESIGN.md](DESIGN.md)：暗墨工作台 + 暖纸样张，朱砂只给当前工序、A 级与主操作；
-所有纹样都放在纸本图版上；动效只服务进入、对比、确认，并受 `prefers-reduced-motion` 关闭。
+视觉依据见 [DESIGN.md](DESIGN.md)：配色为「蜜蜡 · 沉褐」——焦褐底暗房 + 放旧的绢样张 + 陈年琥珀，
+琥珀只给主操作、当前工序、A 级与焦点环，错误另用砖红；所有纹样都放在纸本图版上；
+动效只服务进入、对比、确认，并受 `prefers-reduced-motion` 关闭。
 中文界面、可见文字最小 12px、正文 14px。
+
+配色令牌集中在 `css/tokens.css`（全部颜色来自令牌，视图样式里不写死色号）；
+改完令牌在仓库根目录跑 `python scripts/check_contrast.py` 复核 WCAG 对比度。
+配色过程与参数见 [docs/palette-review.md](../../docs/palette-review.md)。
 
 ## 数据与边界
 
@@ -96,6 +103,7 @@ review/09-tour.jpg              首页 · 七道工序导览浮层
 ## 已知限制
 
 - 没有构建步骤、没有第三方依赖；只在 Chrome 验证过，Safari / Firefox 与完整屏幕阅读器走查未做。
+- 颜色用 `color-mix()` 派生明暗与透明层，需要 Chrome 111+ / Safari 16.2+ / Firefox 113+；更旧的浏览器会丢这些半透明层。
 - 「本地线稿模型」依赖本机 torch、分割模型库与 `model/` 权重；缺少时请用 OpenCV 线稿或颜色提取。
 - 大图在矢量化阶段可能触及 worker 内存上限，先创建工作副本更稳。
 - 字体依赖本机 `Noto Serif SC` / `Noto Sans SC` / `Bahnschrift` / `Cascadia Code`，缺失时观感会变。

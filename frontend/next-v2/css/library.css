@@ -613,7 +613,11 @@
 }
 
 .lb-state--error {
-  border-color: var(--cinnabar-line);
+  border-color: var(--error-line);
+}
+
+.lb-state--error .lb-state__icon {
+  color: var(--error);
 }
 
 .lb-state__title {

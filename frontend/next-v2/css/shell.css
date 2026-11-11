@@ -21,14 +21,15 @@
   gap: 30px;
   padding-inline: var(--pad);
   border-bottom: 1px solid transparent;
-  background: linear-gradient(to bottom, rgba(10, 10, 12, 0.88), rgba(10, 10, 12, 0.62));
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--bg-0) 88%, transparent), color-mix(in srgb, var(--bg-0) 62%, transparent));
   backdrop-filter: blur(20px) saturate(125%);
+  box-shadow: 0 1px 0 rgba(22, 12, 2, 0.55);
   transition: border-color var(--dur-3) var(--ease-out), background var(--dur-3) var(--ease-out);
 }
 
 .topbar.is-stuck {
   border-bottom-color: var(--line-1);
-  background: rgba(10, 10, 12, 0.84);
+  background: color-mix(in srgb, var(--bg-0) 84%, transparent);
 }
 
 /* 顶栏底部一道极淡的朱砂褪色线，滚动后才出现 */
@@ -63,14 +64,15 @@
   width: 32px;
   height: 32px;
   border-radius: 5px;
-  background: linear-gradient(160deg, var(--cinnabar-hi), var(--cinnabar) 62%, #b73f2c);
-  color: #fff4ee;
-  box-shadow: 0 8px 22px -10px rgba(223, 84, 60, 0.95), inset 0 1px 0 rgba(255, 255, 255, 0.28);
-  transition: transform var(--dur-3) var(--ease-spring), box-shadow var(--dur-3) var(--ease-out);
+  /* 印章：平涂朱砂，靠边缘留白和纸感取胜，不做渐变与投影 */
+  background: var(--cinnabar-deep);
+  color: var(--on-accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--on-accent) 24%, transparent);
+  transition: transform var(--dur-3) var(--ease-spring), filter var(--dur-3) var(--ease-out);
 }
 .brand:hover .brand__seal {
-  transform: rotate(-6deg) scale(1.05);
-  box-shadow: 0 10px 26px -10px rgba(223, 84, 60, 1), inset 0 1px 0 rgba(255, 255, 255, 0.32);
+  transform: rotate(-6deg) scale(1.04);
+  filter: brightness(1.1);
 }
 .brand__seal .icon {
   width: 20px;
@@ -122,11 +124,11 @@
 }
 .topnav__link:hover {
   color: var(--text-1);
-  background: rgba(243, 239, 229, 0.045);
+  background: color-mix(in srgb, var(--text-1) 4.5%, transparent);
 }
 .topnav__link[aria-current="page"] {
   color: var(--text-1);
-  background: rgba(243, 239, 229, 0.06);
+  background: color-mix(in srgb, var(--text-1) 6%, transparent);
 }
 .topnav__link[aria-current="page"]::after {
   opacity: 1;
@@ -195,7 +197,7 @@
 .cmdk-trigger:hover {
   border-color: var(--line-2);
   color: var(--text-1);
-  background: rgba(243, 239, 229, 0.045);
+  background: color-mix(in srgb, var(--text-1) 4.5%, transparent);
 }
 .cmdk-trigger:active {
   transform: scale(0.985);
@@ -279,7 +281,7 @@
   height: 34px;
   padding-inline: var(--pad);
   border-top: 1px solid var(--line-1);
-  background: rgba(9, 9, 11, 0.9);
+  background: color-mix(in srgb, var(--bg-0) 90%, transparent);
   backdrop-filter: blur(16px);
   font-size: 12px;
   letter-spacing: 0.01em;
@@ -306,7 +308,7 @@
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-2);
-  background: rgba(243, 239, 229, 0.03);
+  background: color-mix(in srgb, var(--text-1) 3%, transparent);
 }
 .statusbar .accent {
   color: var(--cinnabar-hi);
@@ -322,7 +324,7 @@
   display: none;
   justify-content: center;
   padding-top: min(15vh, 150px);
-  background: rgba(6, 6, 8, 0.66);
+  background: color-mix(in srgb, var(--bg-0) 66%, transparent);
   backdrop-filter: blur(10px) saturate(110%);
 }
 .cmdk.is-open {
@@ -339,10 +341,10 @@
   max-height: min(70vh, 600px);
   display: flex;
   flex-direction: column;
-  background: rgba(18, 19, 23, 0.985);
+  background: color-mix(in srgb, var(--bg-2) 98.5%, transparent);
   border: 1px solid var(--line-2);
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow-pop), 0 0 0 1px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-pop), 0 0 0 1px rgba(22, 12, 2, 0.65);
   overflow: hidden;
   animation: cmdk-pop var(--dur-3) var(--ease-out);
 }
@@ -427,7 +429,7 @@
 }
 .cmdk__item:hover,
 .cmdk__item.is-active {
-  background: rgba(243, 239, 229, 0.07);
+  background: color-mix(in srgb, var(--text-1) 7%, transparent);
   color: var(--text-1);
 }
 .cmdk__item.is-active .icon {
@@ -468,7 +470,7 @@
   width: 100%;
   transform: scaleX(0);
   transform-origin: left;
-  background: linear-gradient(90deg, var(--cinnabar), var(--gold));
+  background: var(--cinnabar);
   pointer-events: none;
 }
 .route-progress.is-running {

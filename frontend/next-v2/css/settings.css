@@ -424,12 +424,12 @@
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--cinnabar), var(--gold));
+  background: var(--gold);
   transition: width var(--dur-3) var(--ease-out), background var(--dur-2) var(--ease-out);
 }
 
 .st-bar.is-over .st-bar__fill {
-  background: var(--cinnabar);
+  background: var(--error);
 }
 
 .st-warning {
@@ -601,6 +601,12 @@
   background: var(--cinnabar-soft);
 }
 
+/* 警示面板本身已铺一层琥珀底，金色标签再叠一层浅金底会把文字压到 4.1:1；
+   这里把标签底改回暗底，保留旧金描边与字样（实测 6.7:1）。 */
+.st-blockers--warn .chip {
+  background: color-mix(in srgb, var(--bg-0) 35%, transparent);
+}
+
 .st-blockers__title {
   display: flex;
   align-items: center;
@@ -737,11 +743,11 @@
 }
 
 .st-state--error {
-  border-color: var(--cinnabar-line);
+  border-color: var(--error-line);
 }
 
 .st-state__icon {
-  color: var(--cinnabar-hi);
+  color: var(--error);
 }
 
 .st-state__icon .icon {
@@ -785,9 +791,9 @@
   padding: 8px 12px;
   font-size: var(--text-sm);
   line-height: 1.6;
-  color: var(--cinnabar-hi);
-  background: var(--cinnabar-soft);
-  border: 1px solid var(--cinnabar-line);
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  border: 1px solid var(--error-line);
   border-radius: var(--r-sm);
 }
 
