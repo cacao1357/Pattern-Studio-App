@@ -65,9 +65,10 @@ const api = {
   toast(message, kind = "info") {
     const stack = document.getElementById("toasts");
     if (!stack) return;
+    const tone = kind === "warn" || kind === "done" ? kind : "info";
     const el = document.createElement("div");
-    el.className = "toast";
-    el.innerHTML = `${icon(kind === "warn" ? "alert" : kind === "done" ? "check" : "info")}<span>${message}</span>`;
+    el.className = `toast toast--${tone}`;
+    el.innerHTML = `${icon(tone === "warn" ? "alert" : tone === "done" ? "check" : "info")}<span>${message}</span>`;
     stack.append(el);
     setTimeout(() => {
       el.classList.add("is-out");
@@ -109,12 +110,20 @@ function applyParams(params) {
   if (asset) {
     // 从纹样库/首页带着具体资产进来：必须载入该资产及其同图来源，
     // 不能只改 currentAssetId（会话资产里可能还没有它）。
+    // openAsset 在请求被更新的加载/会话取代时返回 null；此时不 refresh、不报错。
     store
       .openAsset(asset)
-      .then(() => api.refresh())
+      .then((opened) => {
+        if (opened) api.refresh();
+      })
       .catch((error) => api.toast(error?.message || "载入资产失败", "warn"));
   } else if (image) {
-    store.ensureSession(image).catch((error) => api.toast(error?.message || "载入纹样失败", "warn"));
+    store
+      .ensureSession(image)
+      .then((session) => {
+        if (session) api.refresh();
+      })
+      .catch((error) => api.toast(error?.message || "载入纹样失败", "warn"));
   }
   if (params.has("compare")) state.compare = params.get("compare") !== "0";
   const tile = params.get("tile");
@@ -424,8 +433,14 @@ async function uploadFile(file) {
   }
   api.toast(`正在上传 ${file.name}…`, "info");
   try {
-    const result = await http.uploadImage(file);
-    await store.startFromImage(result);
+    // store 在上传请求发出前就捕获会话归属：上传期间切到别的会话时，
+    // 晚到的上传结果不再发布、也不导航，避免抢回用户已打开的会话。
+    const { result, session } = await store.uploadToSession(file);
+    if (!session) {
+      store.loadRecent();
+      api.toast("已上传，但会话已切换，未自动打开这张纹样；可在纹样库中重新进入。", "warn");
+      return;
+    }
     const grade = result.original?.grade ? `等级 ${result.original.grade}` : "已登记";
     const duplicates = Array.isArray(result.duplicates) ? result.duplicates.length : 0;
     api.toast(
@@ -534,6 +549,8 @@ export function boot() {
   store.loadHealth();
   store.loadSettings();
   store.loadRecent();
+  // 30 秒轮询只刷新 health（含 lineart_model 前置能力）；不重载设置，
+  // 也不触碰工作台里的用户参数；能力读取失败时 store 保留上一次已知值。
   window.setInterval(() => store.loadHealth(), 30000);
   renderView();
 }

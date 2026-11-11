@@ -42,6 +42,7 @@ const CODE_MESSAGES = {
   SEAM_OBSERVATION_CONFLICT: "接缝记录已被更新，请重新读取资产后再保存。",
   SEAM_OBSERVATION_NOT_TILE: "这个资产不是平铺结果，不能记录接缝。",
   TILE_NOT_READY: "平铺结果尚未生成完成。",
+  LINEART_MODEL_UNAVAILABLE: "模型线稿不可用：模型权重/配置缺失、校验未通过，或运行依赖不可用（torch、segmentation_models_pytorch）；可改用 OpenCV 路线，或按 README 检查模型环境。",
   SERVICE_ERROR: "本机服务未能完成请求，请稍后重试。",
   INTERNAL_ERROR: "本机服务内部出错，未自动重试。",
 };
@@ -237,11 +238,17 @@ export function isTerminal(job) {
 /**
  * 轮询任务直到终态。返回最后一次任务快照；失败会抛出 ApiError，
  * 但“任务本身 failed”不算异常，交给调用方按状态展示。
+ *
+ * 可选 `abandon`：每轮请求前与收到快照后调用；返回 true 时表示调用方已不再
+ * 关心这个任务（例如会话已切换），此时停止轮询并返回 null，不抛异常，
+ * 也不再把任何快照交给 onTick。默认不放弃。
  */
-export async function waitForJob(jobId, { signal, onTick, interval = 1200, maxFailures = 5 } = {}) {
+export async function waitForJob(jobId, { signal, onTick, interval = 1200, maxFailures = 5, abandon } = {}) {
+  const abandoned = () => Boolean(abandon?.());
   let failures = 0;
   let snapshot = null;
   for (;;) {
+    if (abandoned()) return null;
     if (signal?.aborted) throw new ApiError("请求已取消。", { network: true });
     try {
       snapshot = await api.job(jobId, { signal });
@@ -253,6 +260,7 @@ export async function waitForJob(jobId, { signal, onTick, interval = 1200, maxFa
       failures += 1;
       if (failures >= maxFailures) throw error;
     }
+    if (abandoned()) return null;
     onTick?.(snapshot);
     if (snapshot && isTerminal(snapshot)) return snapshot;
     await new Promise((resolve, reject) => {

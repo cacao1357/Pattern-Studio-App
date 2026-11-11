@@ -63,7 +63,7 @@ const NO_PREVIEW_KINDS = new Set(["zip", "export", "archive"]);
 const STAGE_COPY = {
   source: { title: "放入纹样", note: "原件与规范输入各留一份", desc: "原件只读；规范输入另外保存。尺寸、等级、来源与哈希都来自本机服务。" },
   crop: { title: "框定纹样", note: "坐标使用当前资产真实像素", desc: "在纸面上拖框，或直接填写像素坐标。right / bottom 是开区间终点。" },
-  process: { title: "提取与矢量化", note: "颜色一键，或线稿分两步", desc: "颜色提取一次跑完提取与矢量；线稿路线先出 PNG，再单独矢量化。" },
+  process: { title: "提取与矢量化", note: "模型一键、颜色提取或线稿分步", desc: "模型一键直接出线稿 PNG 与黑白 SVG；也可颜色提取，或先出线稿 PNG 再单独矢量化。" },
   candidate: { title: "挑一层", note: "云端需要配置", desc: "云端按层拆分后，在本地合成候选。每次调用都要显式同意上传与计费。" },
   mask: { title: "修正前景", note: "只改透明 PNG", desc: "在源图上补前景或擦除杂点，提交后生成新的透明 PNG，旧结果保留。" },
   repair: { title: "局部重跑", note: "云端修复", desc: "框出问题区域，云端返回修复候选，再由你决定接受或拒绝。" },
@@ -192,6 +192,7 @@ const ERROR_TEXT = {
   QUEUE_FULL: "任务队列已满，请稍后再试。",
   RETRY_NOT_ALLOWED: "只有失败的本机任务才能重试。",
   PAID_RETRY_REQUIRES_NEW_CONSENT: "付费调用不会自动重试，需要重新确认。",
+  LINEART_MODEL_UNAVAILABLE: "模型线稿不可用：模型权重/配置缺失、校验未通过，或运行依赖不可用（torch、segmentation_models_pytorch）；可改用 OpenCV 路线，或按 README 检查模型环境。",
   LOCAL_REQUEST_HEADER_REQUIRED: "请求缺少本机写标记，请刷新页面后重试。",
   NOT_FOUND: "没有找到对应的资产或任务。",
   INVALID_REQUEST: "参数没有通过接口校验，请检查填写内容。",
@@ -208,7 +209,8 @@ function defaultDraft() {
   return {
     crop: null,
     cropPreset: "original",
-    processRoute: "color",
+    /* 默认本地一键路线：POST /pipelines + recipe:"model_lineart" */
+    processRoute: "model",
     extractMode: "otsu",
     polarity: "dark",
     threshold: 127,
@@ -264,6 +266,8 @@ let viewState = null;
 let expectedImage = "";
 let lastCurrentId = "";
 let lastImageId = "";
+let lastSessionToken = null;
+let lastHealthCapability = "";
 let panelPref = null;
 let sessionTimer = null;
 let resizeHandler = null;
@@ -310,6 +314,43 @@ function errorText(error) {
   if (code && ERROR_TEXT[code]) return ERROR_TEXT[code];
   const message = String(error?.message || "").trim();
   return message || "请求没有完成，请稍后重试。";
+}
+
+/* ------------------------------------------------------------ 模型线稿能力 */
+
+/** health.capabilities.lineart_model.reason 的中文说明（只描述前置检查）。 */
+const LINEART_REASON_TEXT = {
+  dependencies_missing: "本机缺少模型运行依赖（torch / segmentation_models_pytorch）。OpenCV 路线仍可用。",
+  model_files_missing: "模型权重或配置文件尚未安装（model/model.pt、model/inference.json）。OpenCV 路线仍可用。",
+  model_config_invalid: "模型配置与推理规格不一致，请检查 model/inference.json。OpenCV 路线仍可用。",
+  model_check_failed: "模型前置检查执行失败，暂时无法判断模型是否可用；仍可尝试，或先用 OpenCV。",
+};
+
+/** 只读 health 能力；available 为 null 表示未知，绝不能当成“不可用”。 */
+function lineartCapability() {
+  const raw = store.lineartModel || {};
+  return {
+    available: raw.available === true ? true : raw.available === false ? false : null,
+    reason: String(raw.reason || ""),
+    checked: String(raw.checked || ""),
+  };
+}
+
+/** 能力文案：只在后端明确 available=false 时才给出缺依赖/缺文件等判断。 */
+function lineartCapabilityText() {
+  const cap = lineartCapability();
+  if (cap.available === true) {
+    return "前置检查通过：模型文件与依赖已就绪。只检查前置条件，不保证 GPU 或推理一定成功；失败按任务错误展示。";
+  }
+  if (cap.available === false) {
+    return LINEART_REASON_TEXT[cap.reason] || "模型前置检查未通过。OpenCV 路线仍可用。";
+  }
+  return "模型能力未知：后端没有返回该能力，或健康检查暂时读取失败。仍可尝试；失败按任务错误展示。";
+}
+
+function healthCapabilitySignature() {
+  const model = store.lineartModel || {};
+  return JSON.stringify([model.available ?? null, model.reason || "", model.checked || ""]);
 }
 
 function currentDims(asset = currentAsset()) {
@@ -479,6 +520,33 @@ function resetMaskStrokes() {
 }
 
 function syncDrafts(state) {
+  const sessionToken = store.sessionToken();
+  if (lastSessionToken !== null && sessionToken !== lastSessionToken) {
+    // 会话身份已切换：上一个会话遗留的任务、候选与修复状态不能带到新会话；
+    // 但用户已选的路线、线稿方法等界面参数保留（只在 imageId 变化时清与图相关的草稿）。
+    ui.running = false;
+    ui.job = null;
+    ui.jobId = "";
+    ui.jobStage = 0;
+    ui.error = "";
+    ui.errorDetail = "";
+    ui.notice = "";
+    ui.sessionError = "";
+    cand.jobId = "";
+    cand.layers = [];
+    cand.selected = [];
+    cand.loading = false;
+    cand.error = "";
+    repairState.info = null;
+    repairState.loading = false;
+    repairState.error = "";
+    resetMaskStrokes();
+    if (sessionTimer) {
+      window.clearTimeout(sessionTimer);
+      sessionTimer = null;
+    }
+  }
+  lastSessionToken = sessionToken;
   const asset = currentAsset();
   const id = asset?.asset_id || "";
   const imageId = store.session.imageId || "";
@@ -1066,9 +1134,15 @@ function captionFor(stage, state) {
         : `输入 ${dimsOf(asset)}`;
     }
     case "process":
+      if (draft.processRoute === "model") {
+        const cap = lineartCapability();
+        return `模型一键 · ${
+          cap.available === true ? "前置检查通过" : cap.available === false ? "前置检查未通过" : "能力未知"
+        } · 当前 ${kindLabel(asset.kind)}`;
+      }
       return draft.processRoute === "color"
         ? `颜色提取 · ${extractModeLabel(draft.extractMode)} · ${draft.colors} 色 · 细节${detailLabel(draft.detail)}`
-        : `线稿 · ${draft.lineMethod === "model" ? "模型（需模型环境）" : "OpenCV"} · 当前 ${kindLabel(asset.kind)}`;
+        : `线稿分步 · ${draft.lineMethod === "model" ? "模型" : "OpenCV"} · 当前 ${kindLabel(asset.kind)}`;
     case "candidate": {
       if (!store.seedream?.enabled) return "云端未配置：候选层需要在设置里启用云端";
       if (cand.layers.length) return `云端候选 ${cand.layers.length} 层 · 已选 ${cand.selected.length} 层`;
@@ -1113,11 +1187,13 @@ function statusFor(stage, state) {
             draft.crop.left
           )}, ${Math.round(draft.crop.top)})`
         : "未设置选区";
-    case "process":
-      if (done) return `${draft.processRoute === "color" ? "颜色提取" : "线稿"}完成 · 当前 ${kindLabel(asset.kind)} ${dimsOf(asset)}`;
-      return draft.processRoute === "color"
-        ? "颜色提取未提交"
-        : `线稿路线 · ${isImageLike(asset) ? "可生成线稿" : "当前资产不能作为线稿输入"}`;
+    case "process": {
+      const routeLabel = draft.processRoute === "model" ? "模型一键" : draft.processRoute === "color" ? "颜色提取" : "线稿";
+      if (done) return `${routeLabel}完成 · 当前 ${kindLabel(asset.kind)} ${dimsOf(asset)}`;
+      if (draft.processRoute === "model") return `模型一键 · ${isImageLike(asset) ? "可尝试" : "当前资产不能作为输入"}`;
+      if (draft.processRoute === "color") return "颜色提取未提交";
+      return `线稿路线 · ${isImageLike(asset) ? "可生成线稿" : "当前资产不能作为线稿输入"}`;
+    }
     case "candidate":
       return store.seedream?.enabled ? `${cand.selected.length} 层已选 · 未合成` : "云端未配置，候选不可用";
     case "mask": {
@@ -1154,7 +1230,13 @@ function statusShort(stage, state) {
     case "crop":
       return done ? "裁切完成" : "裁切未提交";
     case "process":
-      return done ? "任务已完成" : draft.processRoute === "color" ? "颜色提取未提交" : "线稿未提交";
+      return done
+        ? "任务已完成"
+        : draft.processRoute === "model"
+        ? "模型一键未提交"
+        : draft.processRoute === "color"
+        ? "颜色提取未提交"
+        : "线稿未提交";
     case "candidate":
       return store.seedream?.enabled ? `${cand.selected.length} 层已选` : "云端未配置";
     case "mask":
@@ -1393,12 +1475,18 @@ function processPanel(state) {
   const asset = currentAsset();
   if (!asset) return noAssetPanel();
   const stage = currentStage(state);
-  const canLine = isImageLike(asset);
+  const cap = lineartCapability();
   const outputs = (ui.job && ui.jobStage === stageNo(stage) ? ui.job.result?.assets || [] : []).filter(Boolean);
   const lastPipeline = lastJob(["pipeline", "lineart", "vectorize"]);
   const jobAssets = outputs.length
     ? outputs
     : (store.session.assets || []).filter((entry) => lastPipeline && entry.generated_by_job_id === lastPipeline.job_id);
+  const routeHint =
+    draft.processRoute === "model"
+      ? "模型一键：直接以当前资产为输入，依次发布线稿 PNG 与黑白 SVG；不发送提取/增强参数，也不发起云端调用。"
+      : draft.processRoute === "color"
+      ? "先做前景提取，再按颜色矢量化；一步生成蒙版、透明 PNG、轮廓线稿与 SVG。"
+      : "先单独生成线稿 PNG（模型或 OpenCV），再单独矢量化成单色或轮廓 SVG。";
   return `
   ${jobBox(stage)}
   ${errorBox()}
@@ -1410,19 +1498,27 @@ function processPanel(state) {
       "processRoute",
       "处理路线",
       [
-        ["color", "颜色提取（一键）"],
-        ["line", "线稿"],
+        ["model", "模型一键"],
+        ["color", "颜色提取"],
+        ["line", "线稿分步"],
       ],
       draft.processRoute
     )}
-    <p class="field__hint">${
-      draft.processRoute === "color"
-        ? "先做前景提取，再按颜色矢量化；一步生成蒙版、透明 PNG、轮廓线稿与 SVG。"
-        : "先用 OpenCV 生成线稿 PNG，再单独矢量化成单色或轮廓 SVG。"
-    }</p>`
+    <p class="field__hint">${esc(routeHint)}</p>`
   )}
   ${
-    draft.processRoute === "color"
+    draft.processRoute === "model"
+      ? `${sec(
+          "模型线稿",
+          cap.available === true ? "前置检查通过" : cap.available === false ? "前置检查未通过" : "能力未知",
+          `${noteBox(esc(lineartCapabilityText()), cap.available === false ? "error" : "info")}
+          <p class="field__hint">${
+            cap.available === false
+              ? "这条路线暂不可用；可切到「颜色提取」或「线稿分步」，OpenCV 线稿仍在本机可用。"
+              : "可以先尝试；若前置检查未通过，提交会被本机服务拒绝或任务失败，失败时已发布的 PNG 会保留。"
+          }</p>`
+        )}`
+      : draft.processRoute === "color"
       ? `${sec(
           "提取",
           `输入 ${esc(dimsOf(asset))}`,
@@ -1445,19 +1541,21 @@ function processPanel(state) {
         )}`
       : `${sec(
           "线稿",
-          "本机 OpenCV",
+          "本机",
           `${segField(
             "lineMethod",
             "线稿方法",
             [
-              ["opencv", "OpenCV（本机可用）"],
-              ["model", "模型（需模型环境）"],
+              ["opencv", "OpenCV（本机）"],
+              ["model", "模型线稿（本机）"],
             ],
             draft.lineMethod
           )}
           <p class="field__hint">${
             draft.lineMethod === "model"
-              ? "本机没装 torch，模型线稿会失败；请用 OpenCV，或先在环境里装好模型。"
+              ? `${esc(lineartCapabilityText())}${
+                  cap.available === false ? " 当前前置检查未通过，请切回 OpenCV。" : ""
+                }`
               : "OpenCV 线稿在本机完成，不发起云端调用，也不产生费用。"
           }</p>`
         )}
@@ -1476,7 +1574,7 @@ function processPanel(state) {
     `${
       jobAssets.length
         ? assetChoices(jobAssets, { currentId: store.session.currentAssetId })
-        : `<p class="field__hint">提交后这里会列出前景蒙版、透明 PNG、轮廓线稿与 SVG，可直接设为当前资产。</p>`
+        : `<p class="field__hint">提交后这里会列出线稿 PNG、SVG、前景蒙版与透明 PNG，可直接设为当前资产。</p>`
     }`
   )}`;
 }
@@ -1868,14 +1966,25 @@ function stageActions(stage, state) {
         disabled(!asset) ? " disabled" : ""
       }>重置选区</button>
         ${primaryButton("apply-crop", "应用裁切", "crop", disabled(!isImageLike(asset) || Boolean(cropError())))}`;
-    case "process":
+    case "process": {
+      const cap = lineartCapability();
+      if (draft.processRoute === "model") {
+        return primaryButton(
+          "run-model-lineart",
+          cap.available === false ? "模型暂不可用" : "模型一键提取",
+          "flask",
+          disabled(!isImageLike(asset) || cap.available === false)
+        );
+      }
       if (draft.processRoute === "color") {
         return primaryButton("run-color", "开始颜色提取", "flask", disabled(!isImageLike(asset)));
       }
+      const modelBlocked = draft.lineMethod === "model" && cap.available === false;
       return `<button class="btn btn--ghost btn--sm" type="button" data-act="run-lineart"${
-        disabled(!isImageLike(asset) || draft.lineMethod === "model") ? " disabled" : ""
+        disabled(!isImageLike(asset) || modelBlocked) ? " disabled" : ""
       }>${icon("brush")}生成线稿</button>
         ${primaryButton("run-vectorize", "矢量化当前", "spark", disabled(!isImageLike(asset)))}`;
+    }
     case "candidate":
       if (!store.seedream?.enabled) {
         return `<button class="btn btn--ghost btn--sm" type="button" data-act="settings">${icon("gear")}去设置</button>`;
@@ -2124,11 +2233,65 @@ function tickProgress(job) {
   });
 }
 
+/** 云端相关任务：取消/失败文案要避免声称撤销云端请求或退费。 */
+const CLOUD_JOB_KINDS = new Set(["repair", "decompose-layers", "compose-layers", "ai", "ai-pipeline"]);
+
+function isCloudJob(job) {
+  const kind = String(job?.kind || "");
+  return Boolean(
+    job?.result?.provider_call_id ||
+      job?.parameters?.consent_to_charge ||
+      job?.parameters?.consent_to_upload ||
+      CLOUD_JOB_KINDS.has(kind) ||
+      kind.startsWith("ai")
+  );
+}
+
+/**
+ * 失败/取消任务的准确文案：区分“有保留产物”和“无产物”。
+ * 失败或取消时后端仍可能已发布 result.assets（例如线稿 PNG 已发布、后续矢量化失败），
+ * 这些产物会由 store 保留，界面不能再说“没有写入新的产物”。
+ * @returns {{ state: string, retained: string[], hasRetained: boolean, cloud: boolean, message: string }}
+ */
+function taskOutcomeCopy(final) {
+  const job = final || {};
+  const state = String(job.state || "");
+  const assets = (Array.isArray(job.result?.assets) ? job.result.assets : []).filter(Boolean);
+  const retained = [...new Set(assets.map((asset) => String(asset.kind || "")).filter(Boolean))];
+  const hasRetained = retained.length > 0;
+  const labels = retained.map((kind) => kindLabel(kind)).join("、");
+  const cloud = isCloudJob(job);
+  if (state === "failed") {
+    return {
+      state,
+      retained,
+      hasRetained,
+      cloud,
+      message: hasRetained
+        ? `任务失败，但已发布的 ${labels} 已保留，可以继续在会话里使用。`
+        : "任务失败，没有可用的保留产物。",
+    };
+  }
+  if (state === "cancelled") {
+    const base = hasRetained
+      ? `任务已取消，但已发布的 ${labels} 已保留，可以继续在会话里使用。`
+      : "任务已取消，没有已发布的保留产物。";
+    const fee = cloud
+      ? "已请求取消本机任务；本地取消不等于撤回已经发出的云端请求，也不退费，费用以服务商结算为准。"
+      : "";
+    return { state, retained, hasRetained, cloud, message: fee ? `${base}${fee}` : base };
+  }
+  return { state, retained, hasRetained, cloud, message: "" };
+}
+
 async function startJob(api, submit, onSuccess) {
   if (ui.running) {
     api.toast("已有任务在运行，请等待或取消后再试。", "warn");
     return;
   }
+  // 在提交前捕获会话归属：任务结束、成功回调、清理 busy 都只对原会话生效。
+  const token = store.sessionToken();
+  const owned = () => store.isSessionCurrent(token);
   const root = document.querySelector(".wb");
   ui.running = true;
   ui.job = null;
@@ -2138,42 +2301,61 @@ async function startJob(api, submit, onSuccess) {
   ui.errorDetail = "";
   ui.notice = "";
   repaint(root, api);
+
+  let outcome = null;
+  let failure = null;
   try {
-    const queued = submit();
-    if (queued && typeof queued.then === "function") {
-      queued.then(
-        (job) => {
-          if (job?.job_id) ui.jobId = job.job_id;
-        },
-        () => {}
-      );
-    }
-    const final = await store.runJob(queued, {
+    outcome = await store.runJob(submit, {
+      onQueued: (queued) => {
+        if (!owned()) return;
+        if (queued?.job_id) ui.jobId = queued.job_id;
+      },
       onTick: (snapshot) => {
+        if (!owned()) return;
         ui.job = snapshot;
         tickProgress(snapshot);
       },
     });
-    ui.job = final;
-    if (final.state === "succeeded") {
-      await onSuccess?.(final, api);
-    } else if (final.state === "failed") {
-      ui.error = jobErrorText(final);
-      ui.errorDetail = String(final.error?.message || "");
-      api.toast(ui.error, "warn");
-    } else if (final.state === "cancelled") {
-      ui.notice = "任务已取消，没有写入新的产物。";
-      api.toast(ui.notice, "info");
-    }
   } catch (error) {
-    ui.error = errorText(error);
-    ui.errorDetail = String(error?.message || "");
-    api.toast(ui.error, "warn");
-  } finally {
+    failure = error;
+  }
+
+  if (owned()) {
     ui.running = false;
     ui.jobId = "";
     repaintIfHere(api);
   }
+  // 会话已切换：旧任务不弹错、不写 ui、不清新会话的状态，安静退出。
+  if (!owned()) return;
+
+  if (failure) {
+    ui.error = errorText(failure);
+    ui.errorDetail = String(failure?.message || "");
+    api.toast(ui.error, "warn");
+    repaintIfHere(api);
+    return;
+  }
+  if (!outcome || !outcome.owned || !outcome.job) return;
+
+  const final = outcome.job;
+  ui.job = final;
+  if (final.state === "succeeded") {
+    await onSuccess?.(final, api);
+  } else if (final.state === "failed") {
+    const copy = taskOutcomeCopy(final);
+    ui.error = jobErrorText(final);
+    ui.errorDetail = String(final.error?.message || "");
+    ui.notice = copy.message;
+    api.toast(copy.hasRetained ? "任务失败，但已保留部分产物。" : "任务失败。", "warn");
+  } else if (final.state === "cancelled") {
+    const copy = taskOutcomeCopy(final);
+    ui.notice = copy.message;
+    api.toast(copy.hasRetained ? "任务已取消，已保留部分产物。" : "任务已取消。", "info");
+  }
+  repaintIfHere(api);
+  // 终态后的轻量刷新：失败静默，不覆盖任务结果。
+  store.loadRecent();
+  store.refreshBudget();
 }
 
 async function cancelActive(api) {
@@ -2190,35 +2372,53 @@ async function cancelActive(api) {
 }
 
 async function fetchLayers(api, jobId) {
+  const token = store.sessionToken();
+  const owned = () => store.isSessionCurrent(token);
   cand.loading = true;
   cand.error = "";
   repaintIfHere(api);
+  let payload = null;
+  let failure = null;
   try {
-    const payload = await http.layers(jobId);
-    cand.jobId = jobId;
+    payload = await http.layers(jobId);
+  } catch (error) {
+    failure = error;
+  }
+  if (!owned()) return null;
+  cand.jobId = jobId;
+  if (failure) {
+    cand.error = errorText(failure);
+  } else {
     cand.layers = Array.isArray(payload?.layers) ? payload.layers : [];
     cand.selected = cand.selected.filter((id) => cand.layers.some((layer) => layer.layer_id === id));
     if (!cand.layers.length) cand.error = "云端拆分没有返回可合成的层。";
-  } catch (error) {
-    cand.error = errorText(error);
-  } finally {
-    cand.loading = false;
-    repaintIfHere(api);
   }
+  cand.loading = false;
+  repaintIfHere(api);
+  return payload;
 }
 
-async function fetchRepair(api, jobId) {
+async function fetchRepair(api, jobId, token = store.sessionToken()) {
+  const owned = () => store.isSessionCurrent(token);
   repairState.loading = true;
   repairState.error = "";
   repaintIfHere(api);
+  let info = null;
+  let failure = null;
   try {
-    repairState.info = await http.repairInfo(jobId);
+    info = await http.repairInfo(jobId);
   } catch (error) {
-    repairState.error = errorText(error);
-  } finally {
-    repairState.loading = false;
-    repaintIfHere(api);
+    failure = error;
   }
+  if (!owned()) return null;
+  if (failure) {
+    repairState.error = errorText(failure);
+  } else {
+    repairState.info = info;
+  }
+  repairState.loading = false;
+  repaintIfHere(api);
+  return failure ? null : info;
 }
 
 /* ------------------------------------------------------------------ 输入校验 */
@@ -2382,9 +2582,6 @@ function handleSeg(root, state, api, button) {
       return;
     default:
       break;
-  }
-  if (key === "lineMethod" && value === "model") {
-    api.toast("本机没有 torch，模型线稿会失败；已保留 OpenCV 路线可用。", "warn");
   }
   repaint(root, api);
 }
@@ -2705,6 +2902,57 @@ async function runColorPipeline(api) {
   });
 }
 
+/**
+ * 模型一键线稿请求体：input_asset_id + recipe:"model_lineart" + 可选 vector。
+ * 模型路线直接处理输入，不携带 extract / enhance（后端会以 422 拒绝）。
+ */
+function buildModelLineartPayload(assetId, draftLike = {}) {
+  const local = draftLike || {};
+  return {
+    input_asset_id: assetId,
+    recipe: "model_lineart",
+    vector: {
+      mode: "monochrome",
+      detail: local.detail || "medium",
+    },
+    working_max_pixels: 1000000,
+  };
+}
+
+/**
+ * 单独线稿请求体：只包含 input_asset_id 与 method。
+ * method:"model" 时不能携带任何 OpenCV 选项（local/med/min_area 等）。
+ */
+function buildLineartPayload(assetId, draftLike = {}) {
+  const local = draftLike || {};
+  return {
+    input_asset_id: assetId,
+    method: local.lineMethod === "model" ? "model" : "opencv",
+  };
+}
+
+/** 本地一键模型路线：recipe:"model_lineart"，任务依次发布 lineart PNG 与 SVG。 */
+async function runModelLineart(api) {
+  const asset = currentAsset();
+  if (!asset) return;
+  if (!isImageLike(asset)) {
+    api.toast("当前资产不能作为模型线稿输入，请先选一张原图或裁切图。", "warn");
+    return;
+  }
+  const payload = buildModelLineartPayload(asset.asset_id, draft);
+  await startJob(api, () => http.pipeline(payload), (final) => {
+    const produced = final.result?.assets || [];
+    const png = produced.find((entry) => entry.kind === "lineart") || null;
+    const svg = produced.find((entry) => entry.kind === "svg") || null;
+    if (png) store.setCurrentAsset(png.asset_id);
+    const kinds = [...new Set(produced.map((entry) => kindLabel(entry.kind)))];
+    ui.notice = `模型一键线稿完成：${kinds.length ? `已生成 ${kinds.join("、")}` : "没有返回产物"}${
+      png ? "，并把线稿 PNG 设为当前资产" : ""
+    }。`;
+    api.toast(png && svg ? "模型线稿已生成 PNG 与 SVG。" : "模型线稿任务完成。", "done");
+  });
+}
+
 async function runLineart(api) {
   const asset = currentAsset();
   if (!asset) return;
@@ -2712,15 +2960,16 @@ async function runLineart(api) {
     api.toast("当前资产不能作为线稿输入，请先选一张原图或裁切图。", "warn");
     return;
   }
-  if (draft.lineMethod === "model") {
-    api.toast("本机没有 torch，模型线稿会失败。请切回 OpenCV 路线，或先装好模型环境。", "warn");
-    return;
-  }
-  await startJob(api, () => http.lineart({ input_asset_id: asset.asset_id, method: "opencv" }), (final) => {
+  const method = draft.lineMethod === "model" ? "model" : "opencv";
+  const payload = buildLineartPayload(asset.asset_id, draft);
+  await startJob(api, () => http.lineart(payload), (final) => {
     const produced = (final.result?.assets || []).find((entry) => entry.kind === "lineart") || null;
     if (produced) {
       store.setCurrentAsset(produced.asset_id);
-      ui.notice = `线稿 PNG 已生成（${dimsOf(produced)}），已设为当前资产，可以继续矢量化。`;
+      ui.notice =
+        method === "model"
+          ? `模型线稿 PNG 已生成（${dimsOf(produced)}），已设为当前资产，可以继续矢量化。`
+          : `OpenCV 线稿 PNG 已生成（${dimsOf(produced)}），已设为当前资产，可以继续矢量化。`;
       api.toast("线稿 PNG 已生成。", "done");
     } else {
       ui.notice = "线稿任务完成，但没有返回 PNG。";
@@ -2873,6 +3122,25 @@ async function runRepair(api) {
   });
 }
 
+/** 采纳已接受的修复资产：只有读取并写入会话成功才提示“可用于平铺/导出”。 */
+async function adoptRepairAsset(api, info, token) {
+  const result = await store.adoptAcceptedRepair(info, token);
+  if (!store.isSessionCurrent(token)) return result;
+  if (result.status === "adopted" || result.status === "already_present") {
+    if (result.asset) store.setCurrentAsset(result.asset.asset_id);
+    ui.notice = "已接受这次修复，修复结果已加入会话资产，可用于平铺与导出。";
+    api.toast("已接受修复，已加入会话资产。", "done");
+  } else if (result.status === "fetch_failed") {
+    // 接受记录已在服务端，但资产还没读进会话：不能声称已可用。
+    ui.notice = "已记录接受，但修复资产尚未加载成功；请刷新页面或到纹样库重试。";
+    api.toast(ui.notice, "warn");
+  } else if (result.status === "no_accepted_asset") {
+    ui.notice = "已记录接受，但返回信息里没有新资产 id；请刷新或到纹样库查看。";
+    api.toast(ui.notice, "warn");
+  }
+  return result;
+}
+
 async function decideRepair(api, action, assetId = "", full = false) {
   const info = repairState.info;
   if (!info) return;
@@ -2880,28 +3148,57 @@ async function decideRepair(api, action, assetId = "", full = false) {
     api.toast("接受全图候选前，请先勾选确认它可能改变整个画面。", "warn");
     return;
   }
+  // 修复决定属于当前会话；网络返回前会话切换了就不再写任何界面状态。
+  const token = store.sessionToken();
+  const jobId = info.repair_job_id || info.job_id || cand.jobId || "";
   const payload = {
     revision: info.revision,
     action,
     ...(action === "accept" ? { selected_asset_id: assetId, accept_full_image_changes: Boolean(full && draft.acceptFull) } : {}),
   };
+  let next = null;
   try {
-    const next = await http.repairDecision(info.repair_job_id || info.job_id || cand.jobId, payload);
-    repairState.info = next;
-    ui.notice = action === "accept" ? "已接受这次修复。" : "已拒绝这次修复，旧结果保留。";
-    api.toast(ui.notice, "done");
-    repaintIfHere(api);
+    next = await http.repairDecision(jobId, payload);
   } catch (error) {
+    if (!store.isSessionCurrent(token)) return;
     if (error?.code === "STALE_REVISION") {
       repairState.error = "修复记录已更新，正在重新读取…";
       api.toast(repairState.error, "warn");
-      await fetchRepair(api, info.repair_job_id || info.job_id || "");
-    } else {
-      repairState.error = errorText(error);
-      api.toast(repairState.error, "warn");
+      const fresh = await fetchRepair(api, jobId, token);
+      if (!fresh || !store.isSessionCurrent(token)) return;
+      if (fresh.decision?.action === "accept") {
+        // 重复点击或另一处已接受：按 accepted_asset_id 幂等补齐，不重复添加资产。
+        repairState.error = "";
+        await adoptRepairAsset(api, fresh, token);
+      } else if (fresh.decision?.action === "reject") {
+        repairState.error = "";
+        ui.notice = "这次修复之前已被拒绝；没有生成新资产，原有结果保留。";
+        api.toast(ui.notice, "info");
+      }
       repaintIfHere(api);
+      return;
     }
+    repairState.error = errorText(error);
+    api.toast(repairState.error, "warn");
+    repaintIfHere(api);
+    return;
   }
+  if (!store.isSessionCurrent(token)) return;
+  repairState.info = next;
+  repairState.error = "";
+  if (action === "reject") {
+    ui.notice = "已拒绝这次修复；没有生成新资产，原有结果保留。";
+    api.toast(ui.notice, "info");
+    repaintIfHere(api);
+    return;
+  }
+  repairState.loading = true;
+  repaintIfHere(api);
+  await adoptRepairAsset(api, next, token);
+  if (!store.isSessionCurrent(token)) return;
+  repairState.loading = false;
+  repaintIfHere(api);
+  store.loadRecent();
 }
 
 async function saveSeam(api) {
@@ -3081,6 +3378,9 @@ function handleClick(root, state, api, event) {
     case "run-color":
       runColorPipeline(api);
       break;
+    case "run-model-lineart":
+      runModelLineart(api);
+      break;
     case "run-lineart":
       runLineart(api);
       break;
@@ -3128,11 +3428,16 @@ function handleClick(root, state, api, event) {
       break;
     case "retry-session":
       if (expectedImage) {
+        const token = store.sessionToken();
         ui.sessionError = "";
         store
           .ensureSession(expectedImage)
-          .then(() => repaintIfHere(api))
+          .then((session) => {
+            // 被更新的加载取代时 ensureSession 返回 null：不重绘、不报错。
+            if (session) repaintIfHere(api);
+          })
           .catch((error) => {
+            if (!store.isSessionCurrent(token)) return;
             ui.sessionError = error?.message || "读取纹样失败。";
             repaintIfHere(api);
           });
@@ -3342,12 +3647,19 @@ export default {
         }
       }, 8000);
     }
-    const wantAsset = params?.get?.("asset") || "";
-    if (wantAsset && store.session.imageId && store.session.currentAssetId !== wantAsset) {
-      if ((store.session.assets || []).some((asset) => asset.asset_id === wantAsset)) store.setCurrentAsset(wantAsset);
-    }
+    // app.applyParams loads deep-link assets once when the URL changes.
+    // Repainting must preserve the user's selection and newly adopted results.
 
+    lastHealthCapability = healthCapabilitySignature();
     unsubscribe = store.subscribe((reason) => {
+      if (reason === "health") {
+        // 30 秒 health 轮询只在模型能力真的变化时重绘；不重置 draft 里的用户选择。
+        const signature = healthCapabilitySignature();
+        if (signature === lastHealthCapability) return;
+        lastHealthCapability = signature;
+        repaintIfHere(api);
+        return;
+      }
       if (!["session", "job-start", "job-end", "settings", "seedream"].includes(reason)) return;
       repaintIfHere(api);
     });
@@ -3391,3 +3703,6 @@ export default {
     focusMemo = null;
   },
 };
+
+/* 供 node:test 直接导入的行为纯函数；默认导出保持不变。 */
+export { buildLineartPayload, buildModelLineartPayload, taskOutcomeCopy };

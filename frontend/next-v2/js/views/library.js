@@ -751,7 +751,9 @@ async function drawerAction(action, asset, button, api) {
   if (action === "workbench") {
     if (button) button.disabled = true;
     try {
-      const { asset: opened, stage } = await store.openAsset(asset.asset_id);
+      const result = await store.openAsset(asset.asset_id);
+      if (!result) return;
+      const { asset: opened, stage } = result;
       const query = { asset: opened.asset_id, stage };
       if (opened.image_id) query.image = opened.image_id;
       api.closeDrawer();

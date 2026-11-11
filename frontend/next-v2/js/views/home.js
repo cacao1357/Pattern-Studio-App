@@ -491,7 +491,9 @@ export default {
         return;
       }
       try {
-        const { asset, stage } = await store.openAsset(assetId);
+        const opened = await store.openAsset(assetId);
+        if (!opened) return;
+        const { asset, stage } = opened;
         api.go("workbench", { query: { image: asset.image_id, asset: asset.asset_id, stage } });
       } catch (error) {
         api.toast(error?.message || "打开资产失败", "warn");
@@ -710,6 +712,7 @@ async function openAsset(assetId, api) {
     api.closeDrawer();
     try {
       const opened = await store.openAsset(asset.asset_id);
+      if (!opened) return;
       api.go("workbench", { query: { image: opened.asset.image_id, asset: opened.asset.asset_id, stage: opened.stage } });
     } catch (error) {
       api.toast(error?.message || "打开工作台失败", "warn");
