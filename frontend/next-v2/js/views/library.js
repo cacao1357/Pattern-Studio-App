@@ -275,7 +275,7 @@ function loadingHtml() {
   <div class="lb-state lb-loading" role="status">
     <span class="lb-state__spinner" aria-hidden="true"></span>
     <p class="lb-state__title">正在读取本机纹样库…</p>
-    <p class="lb-state__copy">资产索引来自本机服务，原件与派生版本都留在本机。</p>
+    <p class="lb-state__copy">资产索引来自本机服务 /api/v1/assets。</p>
   </div>`;
 }
 
@@ -299,7 +299,7 @@ function emptyHtml() {
         上传第一张纹样，等级、尺寸与授权记录会一起登记。
       </p>
       <button class="btn btn--primary btn--sm" type="button" data-act="upload">${icon("upload")}上传纹样</button>
-      <p class="lb-empty__hint">保存在 storage/api/，不会上传到远程服务。</p>
+      <p class="lb-empty__hint">文件保存在 storage/api/。</p>
     </div>`;
   }
   const condition = activeFilterText();
@@ -726,7 +726,7 @@ function drawerBody(asset) {
       <button class="btn btn--ghost btn--sm" type="button" data-drawer-action="copy">${icon("file")}复制资产 ID</button>
       <button class="btn btn--primary btn--sm" type="button" data-drawer-action="workbench">${icon("arrow")}在工作台打开</button>
     </div>
-    <p class="drawer-foot">字段来自本机资产记录；预览与下载直接读取本机文件，不经过远程服务。</p>
+    <p class="drawer-foot">字段来自本机资产记录；预览与下载直接读取本机文件。</p>
   `;
 }
 

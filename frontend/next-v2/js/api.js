@@ -44,7 +44,7 @@ const CODE_MESSAGES = {
   TILE_NOT_READY: "平铺结果尚未生成完成。",
   LINEART_MODEL_UNAVAILABLE: "模型线稿不可用：模型权重/配置缺失、校验未通过，或运行依赖不可用（torch、segmentation_models_pytorch）；可改用 OpenCV 路线，或按 README 检查模型环境。",
   SERVICE_ERROR: "本机服务未能完成请求，请稍后重试。",
-  INTERNAL_ERROR: "本机服务内部出错，未自动重试。",
+  INTERNAL_ERROR: "本机服务内部出错。",
 };
 
 function errorMessage(data, status) {

@@ -18,8 +18,8 @@ import { blockerLabel, escapeHtml as esc, formatBytes, shortId } from "../format
 const SECTIONS = [
   { id: "cloud", n: "01", title: "云端服务", note: "只在生成候选时用到" },
   { id: "cost", n: "02", title: "费用门禁", note: "超出预算即拒绝" },
-  { id: "local", n: "03", title: "本机处理", note: "只读 · 原件不出本机" },
-  { id: "about", n: "04", title: "关于与边界", note: "数据留在本机" },
+  { id: "local", n: "03", title: "本机处理", note: "只读 · 来自 /health" },
+  { id: "about", n: "04", title: "关于", note: "配置与版本" },
 ];
 
 const VERSION_LABELS = {
@@ -115,7 +115,7 @@ function navHtml() {
       </li>`
       ).join("")}
     </ul>
-    <p class="st-nav__foot">保存写入本机配置<br />刷新后仍从服务端读取</p>
+    <p class="st-nav__foot">保存写入本机配置</p>
   </nav>`;
 }
 
@@ -124,7 +124,7 @@ function savebarHtml() {
   <div class="st-savebar" role="region" aria-label="保存设置">
     <div class="wrap st-savebar__inner">
       <p class="st-savebar__note" data-st-note data-dirty="false" aria-live="polite">正在读取当前配置…</p>
-      <p class="st-savebar__hint" data-st-hint>保存写入本机配置 · 带 revision 校验 · 不回显密钥</p>
+      <p class="st-savebar__hint" data-st-hint>保存写入本机配置 · 带 revision 校验</p>
       <p class="st-form-error" data-st-error role="alert" hidden></p>
       <div class="st-savebar__acts">
         <button class="btn btn--ghost btn--sm" type="button" data-act="reload" hidden>重新加载</button>
@@ -153,13 +153,13 @@ function blockersHtml(record) {
     <div class="st-blockers" data-blockers aria-live="polite">
       <p class="st-blockers__title">${icon("check")}当前云端配置已就绪</p>
       <p class="st-blockers__copy">密钥、付费开关、价格确认与预算都已配置；实际调用仍会按费用门禁逐次检查。</p>
-      <p class="field__hint">修改后按「保存设置」写入本机配置；接口只保存配置，不测试密钥，也不会立即发起云端调用。</p>
+      <p class="field__hint">修改后按「保存设置」写入配置；保存不测试密钥，也不发起调用。</p>
     </div>`;
   }
   return `
   <div class="st-blockers st-blockers--warn" data-blockers aria-live="polite">
     <p class="st-blockers__title">${icon("alert")}当前云端不可用</p>
-    <p class="st-blockers__copy">以下条件尚未满足，云端调用会被拒绝；本地处理不受影响。</p>
+    <p class="st-blockers__copy">以下条件尚未满足，云端调用会被拒绝。</p>
     <ul class="st-blockers__list">
       ${codes
         .map(
@@ -168,7 +168,7 @@ function blockersHtml(record) {
         )
         .join("")}
     </ul>
-    <p class="field__hint">修改后按「保存设置」写入本机配置；接口只保存，不测试密钥，也不会立即发起云端调用。</p>
+    <p class="field__hint">修改后按「保存设置」写入配置；保存不测试密钥，也不发起调用。</p>
   </div>`;
 }
 
@@ -195,20 +195,20 @@ function cloudSection(record) {
       <div class="field">
         <div class="field__label"><span>API Key</span><span class="st-field-note">只读状态</span></div>
         <div class="st-keyrow" role="group" aria-label="API Key 状态">
-          <span class="mono st-keyrow__val" data-key-state>${record.api_key_configured ? "已配置 · 仅存本机" : "未配置"}</span>
+          <span class="mono st-keyrow__val" data-key-state>${record.api_key_configured ? "已配置" : "未配置"}</span>
           <span class="chip ${record.api_key_configured ? "chip--jade" : "chip--gold"}" data-key-chip>
             ${record.api_key_configured ? "已配置" : "未配置"}
           </span>
           <button class="btn btn--ghost btn--sm" type="button" data-act="clear-key" aria-pressed="false">清除密钥</button>
         </div>
-        <p class="field__hint" data-key-hint>密钥只保存在本机配置，页面不会回显完整内容；替换时填写新值即可。</p>
+        <p class="field__hint" data-key-hint>页面不回显密钥内容；替换时填写新值。</p>
       </div>
 
       <form class="field" data-key-form novalidate>
         <label class="field__label" for="st-api-key">替换 API Key<span class="st-field-note">留空不修改</span></label>
         <input class="input" id="st-api-key" name="api-key" type="password" data-cfg="api_key"
           autocomplete="new-password" spellcheck="false" placeholder="仅在替换密钥时填写" />
-        <p class="field__hint">填入新值即会替换当前密钥；留空表示保持现状。保存只写回本机，不发送到远程，也不会立即测试密钥是否可用。</p>
+        <p class="field__hint">填入新值即替换当前密钥；留空表示保持现状。保存不测试密钥。</p>
       </form>
 
       <div data-blockers-wrap>${blockersHtml(record)}</div>
@@ -261,7 +261,7 @@ function costSection(record) {
         </div>
         <div class="field field--note">
           <p class="field__hint">
-            预算、预留与次数都由本机服务校验；保存只更新配置，不会立即产生任何费用。
+            预算、预留与次数都由本机服务校验。
           </p>
         </div>
       </div>
@@ -269,7 +269,7 @@ function costSection(record) {
       <div class="st-toggle">
         <div class="st-toggle__text">
           <p class="st-toggle__label" id="st-paid-label">允许付费调用</p>
-          <p class="st-toggle__hint">关闭时所有云端调用都会被拒绝；本地线稿、矢量化、蒙版与平铺不受影响。</p>
+          <p class="st-toggle__hint">关闭后所有云端调用都会被拒绝。</p>
         </div>
         <button class="switch" type="button" role="switch" data-cfg="paid_calls_enabled"
           aria-checked="${record.paid_calls_enabled}" aria-labelledby="st-paid-label"></button>
@@ -379,7 +379,7 @@ function localSection() {
       </div>
 
       <p class="field__hint">
-        以上为只读状态：数据保存在本机 <span class="mono">storage/api/</span>，页面不写浏览器存储，也不会改动处理路径。
+        以上字段只读，全部来自 <span class="mono">/api/v1/health</span>。
       </p>
     </div>`;
 }
@@ -389,21 +389,18 @@ function localSection() {
 function aboutSection(record) {
   return `
   <section class="st-sec" id="st-about" data-sec="about" aria-labelledby="st-about-title">
-    ${secHead("04", "关于与边界", "数据留在本机", "st-about-title")}
+    ${secHead("04", "关于", "配置与版本", "st-about-title")}
     <div class="st-sec__body">
       <p class="copy">
-        纹样工作台是本机优先的工具：原件、中间结果、蒙版与导出都保存在本机，云端只在生成候选或局部修复时使用。
-        设置页写入的配置也留在本机，不写浏览器存储，不需要登录。
+        数据、配置与密钥都在本机服务里；云端只在 04 候选层与 06 局部修复时被调用。
       </p>
       <dl class="st-facts st-facts--about">
         <div><dt>数据位置</dt><dd>本机 <span class="mono">storage/api/</span></dd></div>
-        <div><dt>密钥</dt><dd>仅本机配置 · 不回显完整内容</dd></div>
-        <div><dt>浏览器存储</dt><dd>不使用 · 刷新后从服务端重新读取</dd></div>
-        <div><dt>云端</dt><dd>默认关闭 · 不影响本地处理</dd></div>
+        <div><dt>密钥</dt><dd>只显示「已配置 / 未配置」 · 不回显内容</dd></div>
+        <div><dt>云端</dt><dd>默认关闭</dd></div>
       </dl>
       <p class="field__hint">
-        当前配置修订 <span class="mono" data-revision>${revLabel(record)}</span>；
-        「保存设置」只在本机写回配置，不会立即验证密钥，也不会自动发起云端调用。
+        当前配置修订 <span class="mono" data-revision>${revLabel(record)}</span>。
       </p>
       <div class="st-about__acts">
         <a class="btn btn--ghost btn--sm" href="/legacy/" target="_blank" rel="noopener">
@@ -412,7 +409,6 @@ function aboutSection(record) {
         <a class="btn btn--quiet btn--sm" href="#/library">去纹样库</a>
         <a class="btn btn--quiet btn--sm" href="#/notes">使用说明</a>
       </div>
-      <p class="field__hint">旧版前端只用于只读对照，新前端不依赖它的任何文件。</p>
     </div>
   </section>`;
 }
@@ -547,7 +543,7 @@ function paintKeyState(page) {
     state.textContent = pendingClear
       ? "已标记清除 · 保存后生效"
       : configured
-        ? "已配置 · 仅存本机"
+        ? "已配置"
         : "未配置";
   }
   if (chip) {
@@ -562,7 +558,7 @@ function paintKeyState(page) {
   if (hint) {
     hint.textContent = pendingClear
       ? "保存设置后会清除本机保存的密钥；保存前可再次点击按钮撤销。"
-      : "密钥只保存在本机配置，页面不会回显完整内容；替换时填写新值即可。";
+      : "页面不回显密钥内容；替换时填写新值。";
   }
   if (headChip) {
     headChip.textContent = pendingClear ? "密钥待清除" : configured ? "密钥已配置" : "密钥未配置";
@@ -595,26 +591,26 @@ function paintCostWarning(page) {
   const form = currentForm(page);
   const warnings = [];
   if (form.budgetRaw !== "" && (!Number.isFinite(form.budget) || form.budget < 0)) {
-    warnings.push("预算请填写 0–1,000,000 元之间的金额");
+    warnings.push("预算金额无效");
   } else if (Number.isFinite(form.budget) && form.budget <= 0) {
-    warnings.push("预算为 0 元：云端调用会被拒绝");
+    warnings.push("预算为 0 元");
   }
   if (form.reservationRaw !== "" && !Number.isFinite(form.reservation)) {
-    warnings.push("单次预留请填写 0–1,000,000 元之间的金额");
+    warnings.push("单次预留金额无效");
   } else if (Number.isFinite(form.reservation) && form.reservation <= 0) {
-    warnings.push("单次预留为 0 元：云端调用会被拒绝");
+    warnings.push("单次预留为 0 元");
   } else if (Number.isFinite(form.reservation) && Number.isFinite(form.budget) && form.reservation > form.budget) {
-    warnings.push("单次预留高于预算上限，云端调用会被拒绝");
+    warnings.push("单次预留高于预算上限");
   }
   if (form.callsRaw !== "" && (!Number.isFinite(form.maxCalls) || form.maxCalls < 1)) {
     warnings.push("最大调用次数需在 1–100 之间");
   }
-  if (!form.paid) warnings.push("付费开关已关闭：云端调用会被拒绝");
-  if (!form.pricing) warnings.push("价格尚未确认：云端调用会被拒绝");
+  if (!form.paid) warnings.push("付费开关已关闭");
+  if (!form.pricing) warnings.push("价格尚未确认");
 
   const el = page.querySelector("[data-cost-warning]");
   if (!el) return;
-  const text = warnings.join("；");
+  const text = warnings.length ? `${warnings.join(" · ")} · 云端调用会被拒绝` : "";
   if (el.textContent !== text) el.textContent = text;
   el.hidden = !text;
 }
@@ -914,7 +910,7 @@ export default {
                 ? `${cloudSection(record)}
                    ${costSection(record)}
                    <section class="st-sec" id="st-local" data-sec="local" aria-labelledby="st-local-title">
-                     ${secHead("03", "本机处理", "只读 · 原件不出本机", "st-local-title")}
+                     ${secHead("03", "本机处理", "只读 · 来自 /health", "st-local-title")}
                      <div class="st-sec__body">${localSection()}</div>
                    </section>
                    ${aboutSection(record)}`

@@ -8,10 +8,10 @@ import { icon } from "../icons.js";
 const STAGE_GUIDE = [
   ["01 来源", "上传 PNG / JPEG，保留原件并生成规范输入；同时记录评级、来源与指纹。", "原图、规范输入"],
   ["02 裁切", "在真实图版上框出纹样单元；大图先创建工作副本可避免整页超限。", "裁切图、工作副本"],
-  ["03 处理", "颜色提取或线稿生成透明 PNG，再矢量化成可编辑 SVG。参数可改，结果可回退。", "蒙版、透明 PNG、线稿、SVG"],
-  ["04 候选", "配置云端后按提示词拆分图层，本地合成。未配置时不影响本地流程。", "候选层、合成候选"],
+  ["03 处理", "颜色提取或线稿生成透明 PNG，再矢量化成可编辑 SVG。参数可改，可重复重跑。", "蒙版、透明 PNG、线稿、SVG"],
+  ["04 候选", "配置云端后按提示词拆分图层，勾选后在本地合成。", "候选层、合成候选"],
   ["05 蒙版", "对透明 PNG 补前景或擦除杂点，提交后生成新的透明 PNG。", "修正后的透明 PNG"],
-  ["06 修复", "圈出问题区域，经明确确认后调用云端生成修复候选；旧结果保留。", "修复候选、接受记录"],
+  ["06 修复", "圈出问题区域，经明确确认后调用云端生成修复候选。", "修复候选、接受记录"],
   ["07 平铺", "选单元生成 2×2 / 3×3 排列，记录接缝观察，并把成果打包成 ZIP。", "平铺预览、ZIP 包"],
 ];
 
@@ -32,15 +32,15 @@ export default {
       <div class="notes">
         <section class="notes-hero wrap wrap--tight">
           <p class="eyebrow">七道工序 · 参数可改</p>
-          <h1 class="title notes-hero__title">从原图到可编辑 SVG，七步都能回退。</h1>
+          <h1 class="title notes-hero__title">从原图到可编辑 SVG，七道工序各有产物。</h1>
           <p class="lead notes-hero__lead">
-            从上传到导出都在同一套流程里；改参数不用从头再来。
+            上传后按工序推进，任意一步都可以重跑。
           </p>
           <div class="notes-hero__chips">
             <span class="chip chip--jade">${icon("check")}可编辑 SVG</span>
             <span class="chip">${icon("flask")}参数可调</span>
-            <span class="chip">${icon("history")}结果可回退</span>
-            <span class="chip">${icon("lock")}密钥不回显</span>
+            <span class="chip">${icon("layers")}每步独立产物</span>
+            <span class="chip">${icon("download")}ZIP 打包导出</span>
           </div>
         </section>
 
@@ -62,7 +62,7 @@ export default {
                   `<div class="notes-table__row" role="row"><span role="cell" class="notes-table__k">${stage}</span><span role="cell">${what}</span><span role="cell">${out}</span></div>`
               ).join("")}
             </div>
-            <p class="notes-foot">处理任务在后台队列串行执行；页面会轮询任务状态。失败或取消的任务保留原因，不会自动重试云端调用。</p>
+            <p class="notes-foot">处理任务在后台队列串行执行；页面会轮询任务状态。失败或取消的任务保留原因。</p>
           </div>
         </section>
 
@@ -94,7 +94,6 @@ export default {
               <article class="card notes-why__card" data-reveal style="--i:2">
                 <p class="label">任务与结果</p>
                 <ul class="notes-list">
-                  <li>每个处理动作都会产生新的资产，不覆盖旧结果</li>
                   <li>任务失败时显示后端错误原因；可换更小的图或降低细节重试</li>
                   <li>导出的 ZIP 包含所选资产、清单与来源信息</li>
                 </ul>
@@ -120,8 +119,7 @@ export default {
                 ["运行方式", "只监听 127.0.0.1:8765；同源、无登录，只适合本机使用"],
                 ["数据位置", "图片、任务、资产与 SQLite 历史都在 storage/api/；保留该目录即可保留数据"],
                 ["密钥", "保存在本机服务配置里，接口只返回「是否已配置」，不回显明文"],
-                ["浏览器", "不写 localStorage / sessionStorage / indexedDB；刷新后会话从地址或纹样库重建"],
-                ["云端", "只有生成候选与局部修复会调用云端；每次都需要勾选上传与计费确认"],
+                ["云端", "04 候选层与 06 局部修复会调用云端；每次调用都要勾选上传与计费确认"],
                 ["旧前端", "原文件仍在 frontend/ 根目录，可通过 /legacy/ 只读打开对照；不参与新界面"],
                 ["备份", "优化前的静态版保存在 frontend/next-v2-backup-20261110/，可随时删除"],
               ]
@@ -155,7 +153,7 @@ export default {
                 <span class="stops__no">02</span>
                 <div class="stops__body">
                   <h3 class="h3">处理任务失败</h3>
-                  <p class="stops__text">常见原因：图片超过像素上限、内存上限或矢量化参数过细。先创建工作副本或降低细节；失败不会自动重发云端请求。</p>
+                  <p class="stops__text">常见原因：图片超过像素上限、内存上限或矢量化参数过细。先创建工作副本或降低细节。</p>
                 </div>
               </li>
               <li class="stops__item" data-reveal>
@@ -193,7 +191,7 @@ export default {
                 <a class="notes-compare__link" href="/legacy/" target="_blank" rel="noreferrer noopener">
                   打开旧版工作台 ${icon("external")}
                 </a>
-                <p class="notes-compare__note">同一服务的只读入口 · 原文件未改动</p>
+                <p class="notes-compare__note">旧版界面 · 只读对照</p>
               </div>
             </div>
             <div class="notes-actions">
@@ -208,7 +206,7 @@ export default {
 
   mount(root, state, api) {
     root.querySelectorAll('a[target="_blank"]').forEach((link) => {
-      link.addEventListener("click", () => api.toast("将在新标签页打开旧版工作台，新界面不依赖它", "info"));
+      link.addEventListener("click", () => api.toast("将在新标签页打开旧版工作台", "info"));
     });
   },
 };
