@@ -48,6 +48,7 @@ const api = {
   },
   patch(partial) {
     Object.assign(state, partial);
+    if (partial.stage) store.noteStage(partial.stage);
     renderView();
   },
   set(partial) {
@@ -104,7 +105,10 @@ function parseHash() {
 
 function applyParams(params) {
   const stage = Number(params.get("stage"));
-  if (stage && STAGES[stage - 1]) state.stage = stage;
+  if (stage && STAGES[stage - 1]) {
+    state.stage = stage;
+    store.noteStage(stage);
+  }
   const asset = params.get("asset");
   const image = params.get("image");
   if (asset) {
@@ -177,7 +181,7 @@ function renderStatusbar() {
         ? `<span class="statusbar__item statusbar__item--hide-sm"><span class="statusbar__key">1</span>–<span class="statusbar__key">7</span> 工序</span>
            <span class="statusbar__item statusbar__item--hide-sm"><span class="statusbar__key">[</span><span class="statusbar__key">]</span> 资产</span>
            <span class="statusbar__item"><span class="statusbar__key">C</span> 对比</span>`
-        : `<span class="statusbar__item">本机运行 · 不写入远程</span>`
+        : `<span class="statusbar__item statusbar__item--hide-sm"><span class="statusbar__key">Ctrl</span> <span class="statusbar__key">K</span> 命令面板</span>`
     }
   `;
 }

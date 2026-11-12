@@ -90,6 +90,40 @@ export function stageForKind(kind) {
   }
 }
 
+/** 任务类型大致落在哪一道工序；一键处理从提取开始，算第 3 道。 */
+const JOB_STAGE = {
+  crop: 2,
+  "working-copy": 2,
+  working_copy: 2,
+  prepare: 2,
+  enhance: 2,
+  extract: 3,
+  pipeline: 3,
+  lineart: 3,
+  vectorize: 3,
+  "ai-pipeline": 4,
+  compose: 4,
+  "compose-layers": 4,
+  "refine-mask": 5,
+  repair: 6,
+  "tile-preview": 7,
+  export: 7,
+};
+
+export function stageForJobKind(kind) {
+  return JOB_STAGE[kind] || 0;
+}
+
+/**
+ * 一个任务走到第几道工序：任务类型与它已经发布的产物里更靠后的一步。
+ * 失败或取消的任务同样按已发布的产物计，界面据此如实显示停在哪一步。
+ */
+export function stageForJob(job) {
+  if (!job) return 0;
+  const produced = (job.result?.assets || []).map((asset) => stageForKind(asset.kind));
+  return Math.max(stageForJobKind(job.kind), ...produced, 0);
+}
+
 export function canPreview(kind, suffix = "") {
   if (["export", "archive", "zip"].includes(kind)) return false;
   return [".png", ".jpg", ".jpeg", ".webp", ".svg", ".gif"].includes(String(suffix).toLowerCase());

@@ -517,6 +517,21 @@
   letter-spacing: 0.14em;
   color: var(--text-3);
 }
+/* 工序配图：样例纹样放在旧绢图版上，与工作台里的真实结果同一套观感 */
+.flow__plate {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 11;
+  margin: 2px 0 12px;
+}
+.flow__plate .plate__img {
+  padding: 9px;
+  box-sizing: border-box;
+  transition: transform var(--dur-3) var(--ease-out);
+}
+.flow__card:hover .flow__plate .plate__img {
+  transform: scale(1.03);
+}
 .flow__card.is-current .flow__no {
   color: var(--cinnabar-hi);
 }
@@ -1644,13 +1659,6 @@
   width: 28px;
   height: 28px;
 }
-.tour__body--text {
-  grid-template-columns: 330px minmax(0, 1fr);
-  align-items: start;
-}
-.tour__stage--text {
-  align-self: center;
-}
 .job-list {
   display: flex;
   flex-direction: column;
@@ -1675,9 +1683,6 @@
 }
 
 @media (max-width: 760px) {
-  .tour__body--text {
-    grid-template-columns: 1fr;
-  }
   .job-row {
     grid-template-columns: minmax(0, 1fr) 80px;
     row-gap: 2px;
