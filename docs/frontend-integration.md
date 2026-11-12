@@ -29,6 +29,7 @@
 | `js/format.js` | 后端英文枚举 → 中文文案、时间/尺寸/字节格式化、HTML 转义 |
 | `js/views/*.js` | 首页、工作台、纹样库、设置、使用说明 |
 | `js/data.js` | 只剩静态工序定义（编号、名称、标题、说明） |
+| `js/samples.js` | 七道工序的样例图定义（`assets/demo` 下的缠枝莲团花，首页工序卡与导览共用） |
 
 视图契约不变：`{ id, title, flush, render(state, api, params), mount(root, state, api, params), unmount() }`。
 异步数据变化由视图自己在 `mount` 中订阅 `store` 并调用 `api.refresh()`，避免全局重绘打断输入。
@@ -143,3 +144,27 @@ node scripts/validate_v2_integration.mjs D:/CondaEnvs/pattern-studio/python.exe
 - 未做：Safari / Firefox、屏幕阅读器、超宽屏暗角复核；未重启已在运行的 8765 服务；未做真实素材质量、真实云端与第二批前端验收。
 
 
+
+## 12. 2026-11-13 工序样例图、首页进度高亮与工作台资产分组
+
+纯前端改动，未改接口、参数版本、后端与 `docs/a-interface-contract.md`：
+
+- 首页：七道工序卡与导览浮层各配一张 `assets/demo` 的缠枝莲团花样例（同一张纹样从原图走到无缝平铺），
+  `js/samples.js` 提供 `sampleFor(stage)`；工序高亮不再写死第 3 道，按「正在跑的任务 → `store.lastStage`（用户刚停下的工序）
+  → 当前资产类型 → 最近成果」推断「已完成 / 最近一步」（`format.js` 新增 `stageForJobKind` / `stageForJob`）。
+- 工作台左栏：会话资产按**工序分组**（`01 来源 / 02 裁切 / 03 处理 …`），组头显示数量并可折叠，组内两列纸面缩略图；
+  同一步同一类型跑过多次时按生成时间编号 `v1…vN`，当前资产琥珀描边 +「当前」角标，切图后自动滚进视野（折叠组会先展开）。
+  分组与排序是纯函数 `groupAssets`，在 `frontend/tests/next-v2-integration.test.mjs` 覆盖。
+- 蒙版笔迹：一笔改渲染为**一条圆头描边路径**（半透明宽带 + 一条细中线），采样点按笔刷半径抽稀后再记录；
+  提交给后端的仍是 `{mode, radius, points[]}`，接口不变。
+- 两次布局尝试（三栏宽度改按图版高度分配、参数栏改三段式）按反馈**已回退**，三栏仍为 `264px | 1fr | 368px`，
+  面板仍是「标题 + 控件 + 行内说明」；回退后逐档宽度复测与原版一致。
+
+验证：
+
+- 前端模块测试：`node --test frontend/tests/next-v2-integration.test.mjs frontend/tests/settings.test.mjs frontend/tests/workbench-regressions.test.mjs`
+  → 47 passed（新增分组/参数摘要 2 项）。
+- 浏览器（Chrome，真实本机数据）：首页、纹样库、设置、使用说明与工作台七道工序逐页核对；
+  视口 1081 / 1150 / 1200 / 1280 / 1300 / 1366 / 1440 / 1512 / 1680 / 1920 / 2560，以及 1080 / 1024 / 900 / 820 / 390
+  均无横向溢出、控制台无报错；工作台三栏宽度、图版边长与原版逐档一致。
+- 未做：`frontend/next-v2/review/` 截图未重拍（首页、导览、工作台两张已过时）；未做真实素材质量、真实云端与 Safari/Firefox 验收。
