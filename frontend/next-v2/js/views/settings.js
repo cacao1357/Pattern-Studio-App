@@ -84,12 +84,12 @@ function headHtml(record) {
       <p class="eyebrow">四 · 配置</p>
       <h1 class="title st-head__title">设置</h1>
       <p class="lead st-head__lead">
-        这里的字段直接读写本机服务：保存后写入本机配置，用于下一次云端任务。
-        密钥只显示是否已配置，不回显完整内容；本地处理与数据都不依赖云端。
+        这些设置只影响付费生成，保存后用于下一次调用。<br />
+        密钥只显示是否已配置，不回显内容。
       </p>
     </div>
     <div class="st-head__meta">
-      <span class="chip chip--jade">真实本机配置</span>
+      <span class="chip chip--jade">本地配置</span>
       <span class="chip" data-head-key>${record ? (record.api_key_configured ? "密钥已配置" : "密钥未配置") : "读取中"}</span>
       <span class="chip${blockers ? " chip--gold" : " chip--jade"}" data-head-cloud>
         ${record ? `云端${blockers ? `不可用 · ${blockers} 项` : "配置就绪"}` : "读取中"}

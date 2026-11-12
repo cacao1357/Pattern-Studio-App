@@ -31,17 +31,16 @@ export default {
     return `
       <div class="notes">
         <section class="notes-hero wrap wrap--tight">
-          <p class="eyebrow">本机工具 · 数据不出本机</p>
-          <h1 class="title notes-hero__title">这是一件干活的工具，不只是一张好看的脸。</h1>
+          <p class="eyebrow">七道工序 · 参数可改</p>
+          <h1 class="title notes-hero__title">从原图到可编辑 SVG，七步都能回退。</h1>
           <p class="lead notes-hero__lead">
-            「纹样工作台」直接对接本机服务：上传、裁切、提取、矢量化、蒙版、平铺与导出都会真实读写
-            <span class="mono">storage/api</span>。页面不写浏览器存储，刷新后按地址或纹样库重新进入。
+            从上传到导出都在同一套流程里；改参数不用从头再来。
           </p>
           <div class="notes-hero__chips">
-            <span class="chip chip--jade">${icon("check")}真实本机处理</span>
-            <span class="chip">${icon("lock")}密钥不回显</span>
-            <span class="chip">${icon("layers")}七道工序</span>
+            <span class="chip chip--jade">${icon("check")}可编辑 SVG</span>
+            <span class="chip">${icon("flask")}参数可调</span>
             <span class="chip">${icon("history")}结果可回退</span>
+            <span class="chip">${icon("lock")}密钥不回显</span>
           </div>
         </section>
 
@@ -52,7 +51,7 @@ export default {
                 <span class="sec-head__no">一 · 七道工序</span>
                 <h2 class="section-title">每一步在做什么</h2>
               </div>
-              <p class="sec-head__aside">不是必须按顺序全部点一遍；从任意一道进入都可以，资产会按来源串起来。</p>
+              <p class="sec-head__aside">不必按顺序走完，从任意一道工序都能进入。</p>
             </header>
             <div class="notes-table notes-table--three" role="table" aria-label="七道工序说明">
               <div class="notes-table__row notes-table__row--head" role="row">
@@ -80,10 +79,10 @@ export default {
               <article class="card notes-why__card" data-reveal>
                 <p class="label">页面</p>
                 <ul class="notes-list">
-                  <li><a href="#/home">首页</a>：最近成果、接着上次、七道工序导览与云端边界</li>
-                  <li><a href="#/workbench">工作台</a>：三栏——文档与工序、纸本图版、参数</li>
+                  <li><a href="#/home">首页</a>：最近成果、接着上次、七道工序与费用说明</li>
+                  <li><a href="#/workbench">工作台</a>：三栏——文档与工序、图版、参数</li>
                   <li><a href="#/library">纹样库</a>：真实资产的分页、筛选与档案</li>
-                  <li><a href="#/settings">设置</a>：云端、费用门禁与本机状态</li>
+                  <li><a href="#/settings">设置</a>：付费生成、预算与本机状态</li>
                 </ul>
               </article>
               <article class="card notes-why__card notes-why__card--accent" data-reveal style="--i:1">
@@ -108,10 +107,10 @@ export default {
           <div class="wrap">
             <header class="sec-head">
               <div class="sec-head__main">
-                <span class="sec-head__no">三 · 数据与边界</span>
-                <h2 class="section-title">数据在哪里，什么会离开本机</h2>
+                <span class="sec-head__no">三 · 数据与费用</span>
+                <h2 class="section-title">数据在哪，哪里会花钱</h2>
               </div>
-              <p class="sec-head__aside">下面是可以核对的边界，不是口头承诺。</p>
+              <p class="sec-head__aside">下面这些可以直接核对。</p>
             </header>
             <div class="notes-table" role="table" aria-label="数据与安全边界">
               <div class="notes-table__row notes-table__row--head" role="row">
@@ -142,7 +141,7 @@ export default {
                 <span class="sec-head__no">四 · 故障排查</span>
                 <h2 class="section-title">遇到问题时先看这里</h2>
               </div>
-              <p class="sec-head__aside">错误信息会尽量说明原因；不要靠反复重试云端来「碰运气」。</p>
+              <p class="sec-head__aside">先看错误原因，再决定是否重试。</p>
             </header>
             <ol class="stops">
               <li class="stops__item" data-reveal>

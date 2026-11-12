@@ -89,10 +89,10 @@ function renderResume(api) {
         <div class="resume__main">
           <div class="resume__top">
             <p class="label">开始</p>
-            <span class="resume__time">本机还没有处理记录</span>
+            <span class="resume__time">还没有处理记录</span>
           </div>
           <h2 class="resume__name">从一张原图开始</h2>
-          <p class="resume__note">上传 PNG 或 JPEG，系统会先保留原件、生成规范输入，再让你裁切和提取。</p>
+          <p class="resume__note">上传 PNG 或 JPEG，保留原件后即可裁切、提取与矢量化。</p>
           <div class="resume__actions">
             <button class="btn btn--primary" type="button" data-upload>上传纹样 ${icon("upload")}</button>
             <a class="btn btn--ghost btn--sm" href="#/library">去纹样库挑一件</a>
@@ -168,10 +168,10 @@ function renderFlow() {
         </button>`;
       }).join("")}
       <div class="flow__summary card" data-reveal style="--i:7">
-        <p class="label">全流程</p>
+        <p class="label">付费调用</p>
         <p class="flow__summary-num">${store.seedream?.budget?.call_count ?? 0} <span class="flow__summary-unit">次</span></p>
-        <p class="flow__summary-copy">这是本机记录到的云端调用次数。其余步骤全部在本机完成；原图、结果与来源记录都留在本机 <span class="mono">storage/api</span>。</p>
-        <p class="flow__summary-foot">云端关闭时，本地提取、矢量化、蒙版、平铺与导出照常可用。</p>
+        <p class="flow__summary-copy">其余步骤不产生费用；原图与结果都会保留。</p>
+        <p class="flow__summary-foot">不开通付费生成，也能完成提取、矢量化、蒙版、平铺与导出。</p>
       </div>
     </div>
   `;
@@ -218,26 +218,25 @@ function renderGate() {
   const usedPct = budget && Number(budget.limit_cny) > 0
     ? Math.min(100, Math.round((Number(budget.committed_cny) / Number(budget.limit_cny)) * 100))
     : 0;
-  const version = store.health?.versions?.extraction || "—";
   return `
     <div class="gate">
       <article class="gate__card card" data-reveal data-spotlight>
         <div class="gate__head">
           <span class="gate__icon">${icon("cpu")}</span>
           <div>
-            <h3 class="h3">本机优先</h3>
-            <p class="gate__kicker">除云端候选外，全部在本机完成</p>
+            <h3 class="h3">不付费也能导出</h3>
+            <p class="gate__kicker">去底、线稿、矢量化、蒙版与平铺直接可用</p>
           </div>
         </div>
         <ul class="gate__list">
-          <li>${icon("check")} 提取、线稿、矢量化、蒙版与平铺都在本机执行（提取版本 <span class="mono">${escapeHtml(version)}</span>）</li>
-          <li>${icon("check")} 原图、工作副本与结果保存在本机 <span class="mono">storage/api</span></li>
-          <li>${icon("check")} 页面不加载第三方脚本与字体；云端关闭时本地功能不受影响</li>
+          <li>${icon("check")} 原图与结果保留，改参数可重跑</li>
+          <li>${icon("check")} 可导出 SVG、PNG 或整包 ZIP</li>
+          <li>${icon("check")} 不加载第三方脚本与字体</li>
         </ul>
         <div class="gate__stats">
           <div><strong class="num">${total}</strong><span>张图片</span></div>
-          <div><strong class="num">${store.recentAssets.length}</strong><span>项近期成果</span></div>
-          <div><strong class="num">${budget?.call_count ?? 0}</strong><span>次云端调用</span></div>
+          <div><strong class="num">${store.recentAssets.length}</strong><span>项已完成</span></div>
+          <div><strong class="num">${budget?.call_count ?? 0}</strong><span>次付费调用</span></div>
         </div>
         <div class="gate__pipe" aria-hidden="true">
           <span class="gate__node">原图</span>
@@ -254,20 +253,20 @@ function renderGate() {
         <div class="gate__head">
           <span class="gate__icon gate__icon--accent">${icon("cloud")}</span>
           <div>
-            <h3 class="h3">云端是一道闸门</h3>
-            <p class="gate__kicker">${enabled ? "配置完整，逐次确认后才会调用" : "当前不可用，本地流程不受影响"}</p>
+            <h3 class="h3">付费生成</h3>
+            <p class="gate__kicker">${enabled ? "候选层与局部修复按次付费" : "未开启，不影响其他步骤"}</p>
           </div>
-          <span class="chip ${enabled ? "chip--jade" : "chip--gold"} gate__chip">${enabled ? "已就绪" : "未就绪"}</span>
+          <span class="chip ${enabled ? "chip--jade" : "chip--gold"} gate__chip">${enabled ? "已开通" : "未开通"}</span>
         </div>
         <div class="gate__budget">
           <div class="gate__budget-row">
             <span>预算使用</span>
             <span class="num">${money(budget?.committed_cny)} / ${money(budget?.limit_cny)}</span>
           </div>
-          <div class="gate__meter" role="progressbar" aria-label="云端费用预算使用比例" aria-valuenow="${usedPct}" aria-valuemin="0" aria-valuemax="100">
+          <div class="gate__meter" role="progressbar" aria-label="付费生成预算使用比例" aria-valuenow="${usedPct}" aria-valuemin="0" aria-valuemax="100">
             <span style="width:${Math.max(4, usedPct)}%"></span>
           </div>
-          <p class="gate__budget-note">调用 ${budget?.call_count ?? 0} / ${budget?.max_calls ?? "—"} 次 · 单次请求先做预算预留 · 失败不自动重试</p>
+          <p class="gate__budget-note">已用 ${budget?.call_count ?? 0} / ${budget?.max_calls ?? "—"} 次 · 失败不自动重试</p>
         </div>
         ${
           blockers.length
@@ -275,11 +274,11 @@ function renderGate() {
                 .map((code) => `<li>${icon("alert")} ${escapeHtml(blockerLabel(code))}</li>`)
                 .join("")}</ul>`
             : `<ul class="gate__list gate__list--small">
-                 <li>${icon("lock")} 密钥只保存在本机服务，不写入浏览器</li>
-                 <li>${icon("flask")} 候选生成前展示参数与费用闸门，确认后才请求</li>
+                 <li>${icon("lock")} 密钥只保存在本机，不写入浏览器</li>
+                 <li>${icon("flask")} 请求前先看参数与费用，确认后才扣费</li>
                </ul>`
         }
-        <a class="btn btn--paper btn--sm gate__cta" href="#/settings">查看费用与云端设置 ${icon("arrow")}</a>
+        <a class="btn btn--paper btn--sm gate__cta" href="#/settings">查看费用设置 ${icon("arrow")}</a>
       </article>
     </div>
   `;
@@ -293,7 +292,6 @@ export default {
 
   render(state, api) {
     const latest = store.recentAssets.find((asset) => hasPreview(asset)) || null;
-    const budget = store.seedream?.budget;
     const job = store.recentJobs[0];
     const dataset = store.dataset;
 
@@ -303,13 +301,12 @@ export default {
           <div class="hero__ghost" aria-hidden="true" data-parallax="0.05">${medallionGhost()}</div>
           <div class="wrap hero__inner">
             <div class="hero__copy">
-              <p class="eyebrow" data-reveal style="--i:0">本地优先 · 纹样提取与矢量化</p>
+              <p class="eyebrow" data-reveal style="--i:0">纹样提取 · 矢量化 · 平铺检查</p>
               <h1 class="display hero__title" data-reveal style="--i:1">
-                把一片纹样，<br />做成<em>可编辑</em>的矢量。
+                上传纹样，<br />导出<em>可编辑 SVG</em>。
               </h1>
               <p class="lead hero__lead" data-reveal style="--i:2">
-                放进来、框住它、提线稿、矢量化、查接缝。全部先在本机跑；
-                只有你确认后，才会带着明确的预算去调用云端。
+                自动去底、提线稿、生成矢量、检查平铺接缝；<br />参数可调，结果可回退。
               </p>
               <div class="hero__actions" data-reveal style="--i:3">
                 <a class="btn btn--primary" href="#/workbench" data-magnetic>
@@ -319,20 +316,6 @@ export default {
                   ${icon("play")} 看七道工序
                 </button>
               </div>
-              <dl class="hero__meta" data-reveal style="--i:4">
-                <div>
-                  <dt>处理</dt>
-                  <dd>本机 · ${escapeHtml(store.health?.versions?.extraction || "服务未连接")}</dd>
-                </div>
-                <div>
-                  <dt>云端</dt>
-                  <dd>${store.seedream?.enabled ? "已配置，逐次确认" : "未配置，本地可用"}</dd>
-                </div>
-                <div>
-                  <dt>费用门禁</dt>
-                  <dd><span class="num">${money(budget?.committed_cny)}</span> / <span class="num">${money(budget?.limit_cny)}</span></dd>
-                </div>
-              </dl>
             </div>
 
             <div class="hero__stage" data-reveal style="--i:2">
@@ -351,7 +334,7 @@ export default {
                 </div>
                 <div class="specimen__caption">
                   <div class="specimen__caption-main">
-                    <p class="specimen__name">${latest ? escapeHtml(kindLabel(latest.kind)) : "本机纹样工作台"}</p>
+                    <p class="specimen__name">${latest ? escapeHtml(kindLabel(latest.kind)) : "纹样工作台"}</p>
                     <p class="mono">${
                       latest
                         ? `${shortId(latest.asset_id)} · ${escapeHtml(dimsOf(latest))} · ${escapeHtml(formatTime(latest.created_at, { withDate: true }))}`
@@ -365,15 +348,10 @@ export default {
                 </div>
               </div>
 
-              <div class="hero__float hero__float--paths">
-                <span class="hero__float-label">本机资产</span>
-                <strong>${store.dataset?.total_images ?? store.recentAssets.length} 张图片</strong>
-                <span class="hero__float-sub">${store.recentAssets.length} 项近期成果</span>
-              </div>
               ${
                 job
                   ? `<p class="hero__drag-hint">最近任务：${escapeHtml(jobKindLabel(job.kind))} · ${escapeHtml(jobStateLabel(job.state))} · ${escapeHtml(relativeTime(job.updated_at))}</p>`
-                  : `<p class="hero__drag-hint">数据保存在本机 storage/api，不上传第三方</p>`
+                  : `<p class="hero__drag-hint">上传或打开纹样后，可从任意一道工序继续</p>`
               }
             </div>
           </div>
@@ -386,8 +364,8 @@ export default {
                 (s) => `<span class="ticker__item"><span class="ticker__no">${s.n}</span>${s.title}<span class="ticker__dot">·</span></span>`
               ).join("")
             ).join("")}
-            <span class="ticker__item ticker__item--accent">本机优先<span class="ticker__dot">·</span></span>
-            <span class="ticker__item ticker__item--accent">云端按需<span class="ticker__dot">·</span></span>
+            <span class="ticker__item ticker__item--accent">可编辑 SVG<span class="ticker__dot">·</span></span>
+            <span class="ticker__item ticker__item--accent">参数可回退<span class="ticker__dot">·</span></span>
           </div>
         </div>
 
@@ -402,9 +380,9 @@ export default {
             <header class="sec-head">
               <div class="sec-head__main">
                 <span class="sec-head__no">二 · 七道工序</span>
-                <h2 class="section-title">一条可回溯的路</h2>
+                <h2 class="section-title">七步，从原图到矢量</h2>
               </div>
-              <p class="sec-head__aside">每步都留下资产；改参数可以复用已有结果，云端结果不确定就不自动重发。</p>
+              <p class="sec-head__aside">每一步都能单独重跑。</p>
             </header>
             ${renderFlow()}
           </div>
@@ -414,11 +392,11 @@ export default {
           <div class="wrap">
             <header class="sec-head">
               <div class="sec-head__main">
-                <span class="sec-head__no">三 · 最近成果</span>
+                <span class="sec-head__no">三 · 成果</span>
                 <h2 class="section-title">最近成果</h2>
               </div>
               <p class="sec-head__aside">
-                ${dataset ? `共 ${dataset.total_images} 张图片 · A 级 ${dataset.grades?.A ?? 0} · 重复内容 ${dataset.duplicate_content_ids ?? 0}` : "正在读取本机数据"}
+                ${dataset ? `共 ${dataset.total_images} 张图片 · A 级 ${dataset.grades?.A ?? 0} · 重复内容 ${dataset.duplicate_content_ids ?? 0}` : "正在读取数据"}
                 <a class="sec-head__link" href="#/library">去纹样库看全部 ${icon("arrow")}</a>
               </p>
             </header>
@@ -430,10 +408,10 @@ export default {
           <div class="wrap">
             <header class="sec-head">
               <div class="sec-head__main">
-                <span class="sec-head__no">四 · 本地与云端</span>
-                <h2 class="section-title">本机跑完，云端才是一道闸门</h2>
+                <span class="sec-head__no">四 · 费用</span>
+                <h2 class="section-title">先出结果，按需付费。</h2>
               </div>
-              <p class="sec-head__aside">云端模型只做候选生成；价格、预算与调用次数在你确认前都看得见。</p>
+              <p class="sec-head__aside">付费前先给报价与次数。</p>
             </header>
             ${renderGate()}
           </div>
@@ -442,15 +420,15 @@ export default {
         <section class="section section--closing">
           <div class="wrap wrap--tight">
             <div class="closing" data-reveal>
-              <p class="eyebrow">本机工具 · 数据留在本机</p>
-              <h2 class="title closing__title">这是一件干活的工具。</h2>
-              <p class="copy">原件、中间结果和导出都保存在本机 storage/api；云端只在生成候选或局部修复时使用，且每次都需要明确确认。页面不写浏览器存储，刷新后按 URL 或纹样库重新进入。</p>
+              <p class="eyebrow">工作方式</p>
+              <h2 class="title closing__title">原图不动，每一步都能回退。</h2>
+              <p class="copy">原图和每一步结果都会保留；改参数可以重跑，不会覆盖已有成果。付费生成只在确认后发生。</p>
               <div class="closing__actions">
                 <button class="btn btn--primary" type="button" data-upload data-magnetic>
-                  从放图开始 ${icon("arrow")}
+                  从上传纹样开始 ${icon("arrow")}
                 </button>
                 <a class="btn btn--ghost" href="#/notes">使用说明</a>
-                <span class="closing__meta">本机运行 · 云端正按需 · 数据不出本机</span>
+                <span class="closing__meta">导出 SVG / PNG / ZIP · 结果可回退</span>
               </div>
             </div>
           </div>
@@ -539,7 +517,7 @@ function tourMarkup() {
         <header class="tour__head">
           <div>
             <p class="eyebrow">七道工序导览</p>
-            <h2 class="tour__title" id="tour-title">从一张原图，到一套能用的矢量纹样</h2>
+            <h2 class="tour__title" id="tour-title">七步，从原图到可编辑 SVG</h2>
           </div>
           <button class="icon-btn tour__close" type="button" data-tour-close aria-label="关闭导览">${icon("close")}</button>
         </header>

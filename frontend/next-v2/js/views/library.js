@@ -187,11 +187,10 @@ function headHtml() {
   return `
   <header class="lb-head">
     <div class="lb-head__text">
-      <p class="eyebrow">三 · 索引册</p>
+      <p class="eyebrow">三 · 资产索引</p>
       <h1 class="title lb-head__title">纹样库</h1>
       <p class="lead lb-head__lead">
-        本机服务里已登记的资产都在这本索引册里：类型、尺寸、评级、授权与生成时间摊在同一行。
-        换网格看样张，换列表看字段，点开任意一项读它的完整记录。
+        全部资产都在这里，可切换网格或列表查看。
       </p>
     </div>
     <div class="lb-head__acts">
@@ -295,13 +294,12 @@ function emptyHtml() {
     return `
     <div class="lb-empty">
       <span class="lb-empty__icon" aria-hidden="true">${icon("layers")}</span>
-      <p class="lb-empty__title">本机还没有纹样</p>
+      <p class="lb-empty__title">还没有纹样</p>
       <p class="lb-empty__copy">
-        上传第一张纹样后，它会连同等级、尺寸、来源与授权记录一起出现在这里。
-        上传入口在页面顶部，也可以直接用下面的按钮。
+        上传第一张纹样，等级、尺寸与授权记录会一起登记。
       </p>
       <button class="btn btn--primary btn--sm" type="button" data-act="upload">${icon("upload")}上传纹样</button>
-      <p class="lb-empty__hint">数据保存在本机 storage/api/，不会上传到远程服务。</p>
+      <p class="lb-empty__hint">保存在 storage/api/，不会上传到远程服务。</p>
     </div>`;
   }
   const condition = activeFilterText();
