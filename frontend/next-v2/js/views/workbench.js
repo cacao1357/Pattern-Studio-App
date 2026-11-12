@@ -29,6 +29,7 @@ import {
   progressOf,
   shortId,
   sourceLabel,
+  stageForJobKind,
 } from "../format.js";
 
 /* ------------------------------------------------------------------ 常量 */
@@ -61,12 +62,12 @@ const RGB_KINDS = new Set([
 const NO_PREVIEW_KINDS = new Set(["zip", "export", "archive"]);
 
 const STAGE_COPY = {
-  source: { title: "放入纹样", note: "原件与规范输入各留一份", desc: "原件只读；规范输入另外保存。尺寸、等级、来源与哈希都来自本机服务。" },
+  source: { title: "放入纹样", note: "原件与规范输入各留一份", desc: "原件只用于对照与重新导出，后续工序产出的是新资产。" },
   crop: { title: "框定纹样", note: "坐标使用当前资产真实像素", desc: "在纸面上拖框，或直接填写像素坐标。right / bottom 是开区间终点。" },
-  process: { title: "提取与矢量化", note: "模型一键、颜色提取或线稿分步", desc: "模型一键直接出线稿 PNG 与黑白 SVG；也可颜色提取，或先出线稿 PNG 再单独矢量化。" },
-  candidate: { title: "选候选层", note: "按提示词拆分", desc: "云端按层拆分后，在本地合成候选。每次调用都要显式同意上传与计费。" },
-  mask: { title: "修正前景", note: "只改透明 PNG", desc: "在源图上补前景或擦除杂点，提交后生成新的透明 PNG，旧结果保留。" },
-  repair: { title: "局部修复", note: "只改选定区域", desc: "框出问题区域，云端返回修复候选，再由你决定接受或拒绝。" },
+  process: { title: "提取与矢量化", note: "模型一键、颜色提取或线稿分步", desc: "路线决定产物：线稿 PNG、透明 PNG、SVG。" },
+  candidate: { title: "选候选层", note: "按提示词拆分", desc: "云端按层拆分，勾选后合成一张候选；每次调用都要勾选上传与计费。" },
+  mask: { title: "修正前景", note: "只改透明 PNG", desc: "在源图上补前景或擦除杂点。" },
+  repair: { title: "局部修复", note: "只改选定区域", desc: "框出问题区域，云端返回修复候选；接受或拒绝都在右侧完成。" },
   tile: { title: "检查接缝", note: "2×2 / 3×3", desc: "从会话资产选一个单元做整数重复；接缝观察写入资产元数据。导出可勾选多个资产。" },
 };
 
@@ -191,12 +192,12 @@ const ERROR_TEXT = {
   LAYERS_NOT_READY: "云端拆分还没有成功完成，暂时不能选层。",
   QUEUE_FULL: "任务队列已满，请稍后再试。",
   RETRY_NOT_ALLOWED: "只有失败的本机任务才能重试。",
-  PAID_RETRY_REQUIRES_NEW_CONSENT: "付费调用不会自动重试，需要重新确认。",
+  PAID_RETRY_REQUIRES_NEW_CONSENT: "付费调用需要重新确认后才能重试。",
   LINEART_MODEL_UNAVAILABLE: "模型线稿不可用：模型权重/配置缺失、校验未通过，或运行依赖不可用（torch、segmentation_models_pytorch）；可改用 OpenCV 路线，或按 README 检查模型环境。",
   LOCAL_REQUEST_HEADER_REQUIRED: "请求缺少本机写标记，请刷新页面后重试。",
   NOT_FOUND: "没有找到对应的资产或任务。",
   INVALID_REQUEST: "参数没有通过接口校验，请检查填写内容。",
-  INTERNAL_ERROR: "本机服务内部出错，没有自动重试。",
+  INTERNAL_ERROR: "本机服务内部出错。",
 };
 
 /* ------------------------------------------------------------------ 模块状态 */
@@ -269,6 +270,11 @@ let lastImageId = "";
 let lastSessionToken = null;
 let lastHealthCapability = "";
 let panelPref = null;
+/* 折叠的资产分组（key = 工序号）与上一次滚动定位到的资产 */
+const collapsedGroups = new Set();
+let lastRevealedId = "";
+/* 切换当前资产后由 revealCurrentThumb 决定缩略图区滚动位置，重绘时不再恢复旧值 */
+let filmRestoreSkip = false;
 let sessionTimer = null;
 let resizeHandler = null;
 let canvasObserver = null;
@@ -320,10 +326,10 @@ function errorText(error) {
 
 /** health.capabilities.lineart_model.reason 的中文说明（只描述前置检查）。 */
 const LINEART_REASON_TEXT = {
-  dependencies_missing: "本机缺少模型运行依赖（torch / segmentation_models_pytorch）。OpenCV 路线仍可用。",
-  model_files_missing: "模型权重或配置文件尚未安装（model/model.pt、model/inference.json）。OpenCV 路线仍可用。",
-  model_config_invalid: "模型配置与推理规格不一致，请检查 model/inference.json。OpenCV 路线仍可用。",
-  model_check_failed: "模型前置检查执行失败，暂时无法判断模型是否可用；仍可尝试，或先用 OpenCV。",
+  dependencies_missing: "缺少模型运行依赖（torch / segmentation_models_pytorch）。",
+  model_files_missing: "模型权重或配置文件尚未安装（model/model.pt、model/inference.json）。",
+  model_config_invalid: "模型配置与推理规格不一致，请检查 model/inference.json。",
+  model_check_failed: "模型前置检查执行失败，暂时无法判断模型是否可用。",
 };
 
 /** 只读 health 能力；available 为 null 表示未知，绝不能当成“不可用”。 */
@@ -340,12 +346,12 @@ function lineartCapability() {
 function lineartCapabilityText() {
   const cap = lineartCapability();
   if (cap.available === true) {
-    return "前置检查通过：模型文件与依赖已就绪。只检查前置条件，不保证 GPU 或推理一定成功；失败按任务错误展示。";
+    return "前置检查通过：模型文件与依赖已就绪。";
   }
   if (cap.available === false) {
-    return LINEART_REASON_TEXT[cap.reason] || "模型前置检查未通过。OpenCV 路线仍可用。";
+    return LINEART_REASON_TEXT[cap.reason] || "模型前置检查未通过。";
   }
-  return "模型能力未知：后端没有返回该能力，或健康检查暂时读取失败。仍可尝试；失败按任务错误展示。";
+  return "模型能力未知：后端没有返回该能力，或健康检查暂时读取失败。";
 }
 
 function healthCapabilitySignature() {
@@ -710,7 +716,7 @@ function jobBox(stage) {
     </div>
     <div class="wb-meter" aria-hidden="true"><span data-run-bar style="width:${Math.max(2, percent)}%"></span></div>
     ${steps.length ? `<ol class="wb-run__steps" data-run-steps>${stepItems(steps)}</ol>` : ""}
-    ${ui.running ? `<p class="field__hint">任务已提交，等待本机处理；可在下方取消。</p>` : ""}
+    ${ui.running ? `<p class="field__hint">任务已提交，可在下方取消。</p>` : ""}
   </div>`;
 }
 
@@ -755,7 +761,6 @@ function cloudDisabled(api) {
       ${(blockers.length ? blockers : ["SETTINGS_NOT_READY"]).map((code) => `<li>${esc(blockerLabel(code))} <span class="mono">${esc(code)}</span></li>`).join("")}
     </ul>
     <button class="btn btn--ghost btn--sm btn--block" type="button" data-act="settings">${icon("gear")}去设置</button>
-    <p class="field__hint">本机处理（裁切、提取、线稿、蒙版、平铺、导出）不需要云端，仍可正常使用。</p>
   </div>`;
 }
 
@@ -778,6 +783,218 @@ function noAssetPanel() {
   )}`;
 }
 
+/* ------------------------------------------------------------------ 资产分组 */
+
+/** 资产类型 → 生成它的工序号；会话里还留着对应任务时以任务类型为准（如 05 蒙版也产出透明 PNG）。 */
+const KIND_STAGE = {
+  original: 1,
+  normalized_input: 1,
+  cropped: 2,
+  working_copy: 2,
+  prepared: 2,
+  enhanced: 2,
+  foreground_mask: 3,
+  transparent_png: 3,
+  lineart: 3,
+  contour_line_art: 3,
+  svg: 3,
+  edit_candidate: 4,
+  composed_candidate: 4,
+  accepted_repair: 6,
+  tile_preview: 7,
+  zip: 7,
+};
+
+/** 同一道工序内部的排列顺序：输入 → 底图 → 线稿 → 矢量 → 平铺。 */
+const KIND_RANK = {
+  original: 0,
+  normalized_input: 1,
+  working_copy: 2,
+  cropped: 3,
+  foreground_mask: 4,
+  transparent_png: 5,
+  lineart: 6,
+  contour_line_art: 7,
+  svg: 8,
+  edit_candidate: 9,
+  composed_candidate: 10,
+  accepted_repair: 11,
+  tile_preview: 12,
+  zip: 13,
+};
+
+const PARAM_VALUE_LABELS = {
+  otsu: "Otsu",
+  manual: "手动阈值",
+  adaptive_mean: "自适应均值",
+  adaptive_gaussian: "自适应高斯",
+  sauvola: "Sauvola",
+  grabcut: "GrabCut",
+  monochrome: "单色",
+  color: "彩色",
+  contour: "轮廓",
+  low: "低",
+  medium: "中",
+  high: "高",
+};
+
+const createdMs = (asset) => {
+  const ms = Date.parse(String(asset?.created_at || ""));
+  return Number.isNaN(ms) ? 0 : ms;
+};
+
+/** 生成时间精确到秒：同一分钟里跑出来的多个版本靠它区分。 */
+function clockOf(asset) {
+  const ms = createdMs(asset);
+  if (!ms) return "—";
+  const date = new Date(ms);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function assetStageNo(asset) {
+  const job = (store.session.jobs || []).find((entry) => entry?.job_id && entry.job_id === asset?.generated_by_job_id);
+  return (job && stageForJobKind(job.kind)) || KIND_STAGE[String(asset?.kind || "")] || 0;
+}
+
+/**
+ * 按工序把会话资产分组：同一步跑过多次时，同类型的多个结果在组内编号 v1…vN。
+ * 组与组内顺序都按工序推进，和左栏工序轨一致；stageOf 可注入，便于测试。
+ */
+function groupAssets(assets, stageOf = assetStageNo) {
+  const map = new Map();
+  for (const asset of assets || []) {
+    if (!asset?.asset_id) continue;
+    const stageNo = stageOf(asset);
+    const key = String(stageNo || 0);
+    if (!map.has(key)) {
+      map.set(key, { key, stageNo, stage: stageNo ? STAGES[stageNo - 1] : null, items: [] });
+    }
+    map.get(key).items.push(asset);
+  }
+  const groups = [...map.values()];
+  for (const group of groups) {
+    const ordered = [...group.items].sort(
+      (a, b) => createdMs(a) - createdMs(b) || (KIND_RANK[a.kind] ?? 90) - (KIND_RANK[b.kind] ?? 90)
+    );
+    const counts = new Map();
+    for (const asset of ordered) {
+      const kind = String(asset.kind || "");
+      counts.set(kind, (counts.get(kind) || 0) + 1);
+    }
+    const seen = new Map();
+    group.entries = ordered.map((asset) => {
+      const kind = String(asset.kind || "");
+      const version = (seen.get(kind) || 0) + 1;
+      seen.set(kind, version);
+      return { asset, version, versions: counts.get(kind) || 1, label: kindLabel(kind) };
+    });
+    group.count = ordered.length;
+    group.label = group.stage ? group.stage.name : "其它";
+  }
+  groups.sort((a, b) => (a.stageNo || 99) - (b.stageNo || 99));
+  return groups;
+}
+
+/** 参数摘要：同类版本的区别主要在参数上，写进缩略图的 title。 */
+function assetParamLine(asset) {
+  const raw = asset?.parameters || {};
+  const params = { ...(raw.options || {}), ...raw };
+  const label = (value) => PARAM_VALUE_LABELS[String(value)] || value;
+  const bits = [];
+  if (params.method) bits.push(`方法 ${params.method === "model" ? "模型" : "OpenCV"}`);
+  if (params.mode) bits.push(`模式 ${label(params.mode)}`);
+  if (params.polarity) bits.push(`前景 ${params.polarity === "light" ? "浅色" : "深色"}`);
+  if (Number.isFinite(Number(params.threshold))) {
+    const threshold = Number(params.threshold);
+    bits.push(`阈值 ${threshold < 1 ? threshold : Math.round(threshold)}`);
+  }
+  if (Number.isFinite(Number(params.max_colors))) bits.push(`颜色 ${params.max_colors} 色`);
+  if (params.detail) bits.push(`细节 ${label(params.detail)}`);
+  return bits.slice(0, 3).join(" · ");
+}
+
+/** 缩略图 title：类型 + 版本 + 尺寸 + 生成时刻 + 参数 + 资产 id。 */
+function assetThumbTitle(asset, version, versions = 1) {
+  const parts = [
+    versions > 1 ? `${kindLabel(asset.kind)} · v${version}` : kindLabel(asset.kind),
+    `${dimsOf(asset)} · ${formatTime(asset.created_at, { withDate: true })}`,
+  ];
+  const params = assetParamLine(asset);
+  if (params) parts.push(params);
+  parts.push(shortId(asset.asset_id));
+  return parts.join("\n");
+}
+
+function assetGroupMarkup(group) {
+  const collapsed = collapsedGroups.has(group.key);
+  const currentId = store.session.currentAssetId;
+  const headTitle = `${group.stage ? `第 ${group.stage.n} 道 ${group.stage.name}` : "其它资产"} · ${group.count} 项`;
+  /* 组内先按类型（工序内的固定顺序）再按时间倒序：同类型的版本挨在一起，方便对比。 */
+  const ordered = [...group.entries].sort(
+    (a, b) =>
+      (KIND_RANK[a.asset.kind] ?? 90) - (KIND_RANK[b.asset.kind] ?? 90) ||
+      createdMs(b.asset) - createdMs(a.asset)
+  );
+  const cards = ordered
+    .map(({ asset, version, versions, label }) => {
+      const on = asset.asset_id === currentId;
+      const url = assetPreview(asset);
+      const versionText = versions > 1 ? ` v${version}` : "";
+      return `<li>
+        <button class="wb-thumb" type="button" data-act="asset" data-id="${asset.asset_id}"
+          aria-current="${on ? "true" : "false"}"
+          aria-label="${esc(`${label}${versionText} · ${dimsOf(asset)} · ${clockOf(asset)}${on ? " · 当前资产" : ""}`)}"
+          title="${esc(assetThumbTitle(asset, version, versions))}">
+          <span class="wb-thumb__plate plate plate--grain">
+            ${
+              url
+                ? `<img class="plate__img" src="${url}" alt="" loading="lazy" decoding="async" />`
+                : `<span class="wb-thumb__file" aria-hidden="true">${icon("file")}</span>`
+            }
+            ${versions > 1 ? `<span class="wb-thumb__ver mono">v${version}</span>` : ""}
+            ${on ? `<span class="wb-thumb__now">当前</span>` : ""}
+          </span>
+          <span class="wb-thumb__cap">${esc(label)}</span>
+        </button>
+      </li>`;
+    })
+    .join("");
+  return `
+  <section class="wb-group" data-group="${esc(group.key)}">
+    <button class="wb-group__head" type="button" data-act="toggle-group" data-group="${esc(group.key)}"
+      aria-expanded="${collapsed ? "false" : "true"}" title="${esc(headTitle)}">
+      <span class="wb-group__no mono">${esc(group.stage ? group.stage.n : "··")}</span>
+      <span class="wb-group__name">${esc(group.label)}</span>
+      <span class="wb-group__count mono">${group.count > 1 ? `${group.count} 项` : ""}</span>
+      <span class="wb-group__chev" aria-hidden="true">${icon("chevron")}</span>
+    </button>
+    <ul class="wb-group__grid"${collapsed ? " hidden" : ""}>${cards}</ul>
+  </section>`;
+}
+
+/** 切到别的资产后把缩略图滚进视野；同一资产不重复滚动，也不在单栏布局里滚动整页。 */
+function revealCurrentThumb(root) {
+  const id = store.session.currentAssetId || "";
+  if (!id || id === lastRevealedId) return;
+  lastRevealedId = id;
+  filmRestoreSkip = true;
+  const card = root?.querySelector(`.wb-thumb[data-id="${id}"]`);
+  if (!card) return;
+  // 当前资产落在折叠组里（例如刚跑完的新结果）：展开它，否则结果看不见。
+  const grid = card.closest(".wb-group__grid");
+  if (grid?.hidden) {
+    grid.hidden = false;
+    const group = grid.closest(".wb-group");
+    const head = group?.querySelector(".wb-group__head");
+    if (head) head.setAttribute("aria-expanded", "true");
+    if (group?.dataset.group) collapsedGroups.delete(group.dataset.group);
+  }
+  const scroller = root.querySelector(".wb-groups");
+  if (!scroller || scroller.scrollHeight <= scroller.clientHeight) return;
+  if (typeof card.scrollIntoView === "function") card.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
 /* ------------------------------------------------------------------ 左栏 */
 
 function railHtml(state) {
@@ -787,6 +1004,7 @@ function railHtml(state) {
   const statuses = stageStatuses();
   const doneCount = STAGES.filter((stage) => statuses[stage.key]).length;
   const assets = store.session.assets || [];
+  const assetGroups = groupAssets(assets);
   const grade = gradeOf();
   const stampClass = grade && "ABCU".includes(grade) ? `stamp--${grade.toLowerCase()}` : "stamp--u";
 
@@ -847,33 +1065,11 @@ function railHtml(state) {
     <section class="wb-rail__sec wb-rail__sec--film">
       <header class="wb-rail__head">
         <span class="label">资产</span>
-        <span class="mono">${assets.length} 项</span>
+        <span class="mono">${assets.length} 项 · ${assetGroups.length} 组</span>
       </header>
       ${
         assets.length
-          ? `<ul class="wb-film">
-              ${[...assets]
-                .reverse()
-                .map((entry) => {
-                  const on = entry.asset_id === store.session.currentAssetId;
-                  const url = assetPreview(entry);
-                  return `<li>
-                    <button class="wb-ver" type="button" data-act="asset" data-id="${entry.asset_id}"
-                      aria-current="${on ? "true" : "false"}"
-                      title="${esc(`${kindLabel(entry.kind)} · ${dimsOf(entry)} · ${formatTime(entry.created_at, { withDate: true })} · ${entry.asset_id}`)}">
-                      <span class="wb-ver__thumb">${
-                        url ? `<img src="${url}" alt="" loading="lazy" decoding="async" />` : icon("file")
-                      }</span>
-                      <span class="wb-ver__text">
-                        <span class="wb-ver__label">${esc(kindLabel(entry.kind))}</span>
-                        <span class="wb-ver__meta mono">${esc(dimsOf(entry))} · ${esc(formatTime(entry.created_at))}</span>
-                      </span>
-                      <span class="wb-ver__id mono">${esc(shortId(entry.asset_id))}</span>
-                    </button>
-                  </li>`;
-                })
-                .join("")}
-            </ul>`
+          ? `<div class="wb-groups">${assetGroups.map((group) => assetGroupMarkup(group)).join("")}</div>`
           : `<div class="wb-assets-empty">
                <p>这个会话还没有资产。上传一张原图，或从纹样库挑一件。</p>
                <button class="btn btn--ghost btn--sm btn--block" type="button" data-act="upload">${icon("upload")}上传纹样</button>
@@ -928,19 +1124,30 @@ function cropOverlay(asset) {
   </div>`;
 }
 
+/** 一笔笔迹的路径：采样点连成一条圆头折线，和提交给后端的点位一一对应。 */
+function strokePath(points) {
+  const [first, ...rest] = points;
+  if (!first) return "";
+  // 单点也要有长度：零长度子路径配圆头线帽在部分浏览器里画不出点。
+  if (!rest.length) return `M${first.x} ${first.y}l0.01 0`;
+  return `M${first.x} ${first.y}${rest.map((point) => `L${point.x} ${point.y}`).join("")}`;
+}
+
+/** 一笔笔迹 = 一条描边路径（半透明宽带 + 一条细中线）；线宽取笔刷直径，两端与转角都是圆的。 */
+function maskStrokeMarkup(stroke) {
+  const d = strokePath(stroke.points);
+  if (!d) return "";
+  const erase = stroke.mode === "erase" ? " is-erase" : "";
+  return `<g class="wb-mask-mark${erase}" data-mask-mark>
+    <path class="wb-mask-mark__body" d="${d}" stroke-width="${Math.max(1, stroke.radius * 2)}" />
+    <path class="wb-mask-mark__line" d="${d}" />
+  </g>`;
+}
+
 function maskSvg(asset) {
   const width = Math.max(1, asset.width || 1);
   const height = Math.max(1, asset.height || 1);
-  const marks = maskState.strokes
-    .map((stroke) =>
-      stroke.points
-        .map(
-          (point) =>
-            `<circle class="wb-mask-dot${stroke.mode === "erase" ? " is-erase" : ""}" cx="${point.x}" cy="${point.y}" r="${stroke.radius}" />`
-        )
-        .join("")
-    )
-    .join("");
+  const marks = maskState.strokes.map(maskStrokeMarkup).join("");
   return `<svg class="wb-mask-svg" data-mask-svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">${marks}</svg>`;
 }
 
@@ -989,7 +1196,7 @@ function emptyPlate() {
     <div class="wb-empty-state">
       <span class="wb-empty-state__icon">${icon("image")}</span>
       <h3>还没有打开纹样</h3>
-      <p>上传一张 PNG 或 JPEG，或从纹样库挑一件已经处理过的资产。处理结果都保存本机。</p>
+      <p>上传一张 PNG 或 JPEG，或从纹样库挑一件已经处理过的资产。</p>
       <div class="wb-empty-state__actions">
         <button class="btn btn--primary btn--sm" type="button" data-act="upload">${icon("upload")}上传纹样</button>
         <button class="btn btn--ghost btn--sm" type="button" data-act="library">去纹样库</button>
@@ -1178,7 +1385,7 @@ function statusFor(stage, state) {
   const done = ui.job && ui.jobStage === stageNo(stage) && ui.job.state === "succeeded";
   switch (stage.key) {
     case "source":
-      return `原件只读 · 当前资产 ${kindLabel(asset.kind)} ${dimsOf(asset)}`;
+      return "无需提交";
     case "crop":
       return done
         ? "裁切完成 · 可在资产轨切换结果"
@@ -1190,12 +1397,12 @@ function statusFor(stage, state) {
     case "process": {
       const routeLabel = draft.processRoute === "model" ? "模型一键" : draft.processRoute === "color" ? "颜色提取" : "线稿";
       if (done) return `${routeLabel}完成 · 当前 ${kindLabel(asset.kind)} ${dimsOf(asset)}`;
-      if (draft.processRoute === "model") return `模型一键 · ${isImageLike(asset) ? "可尝试" : "当前资产不能作为输入"}`;
+      if (draft.processRoute === "model") return `模型一键 · ${isImageLike(asset) ? "可以运行" : "需要先切到规范输入或裁切图"}`;
       if (draft.processRoute === "color") return "颜色提取未提交";
-      return `线稿路线 · ${isImageLike(asset) ? "可生成线稿" : "当前资产不能作为线稿输入"}`;
+      return `线稿路线 · ${isImageLike(asset) ? "可以生成线稿" : "需要先切到规范输入或裁切图"}`;
     }
     case "candidate":
-      return store.seedream?.enabled ? `${cand.selected.length} 层已选 · 未合成` : "云端未配置，候选不可用";
+      return store.seedream?.enabled ? `${cand.selected.length} 层已选 · 未合成` : "候选层需要云端：在设置里启用";
     case "mask": {
       const source = maskSource();
       const points = maskState.strokes.reduce((sum, stroke) => sum + stroke.points.length, 0);
@@ -1210,7 +1417,7 @@ function statusFor(stage, state) {
       const unit = tileUnit();
       if (done) return "平铺预览完成 · 可在资产轨查看结果";
       return unit
-        ? `${tileSpec(state)} 平铺 · 单元 ${kindLabel(unit.kind)} ${dimsOf(unit)} · 接缝${SEAM_LABELS[draftSeam()]}`
+        ? `${kindLabel(unit.kind)} ${dimsOf(unit)} · 接缝${SEAM_LABELS[draftSeam()]}`
         : "没有可平铺的单元";
     }
     default:
@@ -1226,7 +1433,7 @@ function statusShort(stage, state) {
   const done = ui.job && ui.jobStage === stageNo(stage) && ui.job.state === "succeeded";
   switch (stage.key) {
     case "source":
-      return "原件只读 · 不上传云端";
+      return "无需提交";
     case "crop":
       return done ? "裁切完成" : "裁切未提交";
     case "process":
@@ -1353,7 +1560,7 @@ function sourcePanel(state) {
         <span class="wb-drop__title">上传原件或点击选择</span>
         <span class="mono wb-drop__hint">PNG / JPEG · 单张 ≤ 20 MB</span>
       </button>
-      <p class="field__hint">上传后本机服务会保存原件、规范输入、aHash、清晰度与来源记录；不写入浏览器存储。</p>`
+      <p class="field__hint">上传后保存原件、规范输入、aHash、清晰度与来源记录。</p>`
     )}
     ${sec(
       "或从纹样库开始",
@@ -1389,8 +1596,7 @@ function sourcePanel(state) {
         Number.isFinite(Number(meta.sharpness)) ? Number(meta.sharpness).toFixed(1) : "—"
       } / ${Number.isFinite(Number(meta.contrast)) ? Number(meta.contrast).toFixed(1) : "—"}</dd></div>
       <div class="kv__row"><dt>创建</dt><dd class="mono">${esc(createdText())}</dd></div>
-    </dl>
-    <p class="field__hint">原件只读：路径、哈希与上传时间都不会被改写。</p>`
+    </dl>`
   )}
   ${sec(
     "原件与规范输入",
@@ -1464,8 +1670,8 @@ function cropPanel(state) {
   )}
   ${sec(
     "提交",
-    "本机任务",
-    `<p class="field__hint">裁切是独立的本机任务，产物类型为「裁切」，原图与规范输入保留。${
+    "",
+    `<p class="field__hint">裁切产物类型为「裁切」，可作为 03 的输入，也是 07 的平铺单元。${
       error ? `<strong class="wb-field-error">${esc(error)}</strong>` : ""
     }</p>`
   )}`;
@@ -1483,7 +1689,7 @@ function processPanel(state) {
     : (store.session.assets || []).filter((entry) => lastPipeline && entry.generated_by_job_id === lastPipeline.job_id);
   const routeHint =
     draft.processRoute === "model"
-      ? "模型一键：直接以当前资产为输入，依次发布线稿 PNG 与黑白 SVG；不发送提取/增强参数，也不发起云端调用。"
+      ? "模型一键：以当前资产为输入，依次生成线稿 PNG 与黑白 SVG。"
       : draft.processRoute === "color"
       ? "先做前景提取，再按颜色矢量化；一步生成蒙版、透明 PNG、轮廓线稿与 SVG。"
       : "先单独生成线稿 PNG（模型或 OpenCV），再单独矢量化成单色或轮廓 SVG。";
@@ -1493,7 +1699,7 @@ function processPanel(state) {
   ${noticeBox()}
   ${sec(
     "路线",
-    "都在本机",
+    "",
     `${segField(
       "processRoute",
       "处理路线",
@@ -1514,8 +1720,8 @@ function processPanel(state) {
           `${noteBox(esc(lineartCapabilityText()), cap.available === false ? "error" : "info")}
           <p class="field__hint">${
             cap.available === false
-              ? "这条路线暂不可用；可切到「颜色提取」或「线稿分步」，OpenCV 线稿仍在本机可用。"
-              : "可以先尝试；若前置检查未通过，提交会被本机服务拒绝或任务失败，失败时已发布的 PNG 会保留。"
+              ? "这条路线暂不可用；请改用「颜色提取」或「线稿分步」。"
+              : "可以先尝试；前置检查未通过时任务会失败。"
           }</p>`
         )}`
       : draft.processRoute === "color"
@@ -1541,13 +1747,13 @@ function processPanel(state) {
         )}`
       : `${sec(
           "线稿",
-          "本机",
+          "",
           `${segField(
             "lineMethod",
             "线稿方法",
             [
-              ["opencv", "OpenCV（本机）"],
-              ["model", "模型线稿（本机）"],
+              ["opencv", "OpenCV"],
+              ["model", "模型线稿"],
             ],
             draft.lineMethod
           )}
@@ -1556,7 +1762,7 @@ function processPanel(state) {
               ? `${esc(lineartCapabilityText())}${
                   cap.available === false ? " 当前前置检查未通过，请切回 OpenCV。" : ""
                 }`
-              : "OpenCV 线稿在本机完成，不发起云端调用，也不产生费用。"
+              : "OpenCV 线稿不依赖模型权重，直接用图像处理生成 PNG。"
           }</p>`
         )}
         ${sec(
@@ -1583,9 +1789,9 @@ function candidatePanel(state) {
   const stage = currentStage(state);
   if (!store.seedream?.enabled) {
     return `${jobBox(stage)}${errorBox()}${noticeBox()}${cloudDisabled(null)}${sec(
-      "本机替代",
+      "不启用云端时",
       "",
-      `<p class="field__hint">没有云端也可以完成颜色提取、线稿、蒙版与导出；候选层是可选增强。</p>`
+      `<p class="field__hint">候选层这一步跳过：用 03 的「颜色提取」得到蒙版与透明 PNG、线稿与 SVG，再到 05 修正前景。</p>`
     )}`;
   }
   const normalized = (store.session.assets || []).find((entry) => entry.kind === "normalized_input") || null;
@@ -1607,8 +1813,8 @@ function candidatePanel(state) {
   ${sec(
     "显式同意",
     "每次调用都要确认",
-    `${checkRow("consentUpload", "同意把当前规范输入上传到云端服务商", draft.consentUpload, "只发送这一次请求所需的输入图。")}
-    ${checkRow("consentCharge", "同意按设置里的价格为本调用计费", draft.consentCharge, "失败不自动重试，也不会自动再次计费。")}
+    `${checkRow("consentUpload", "同意把当前规范输入上传到云端服务商", draft.consentUpload, "只发送当前规范输入这一张图。")}
+    ${checkRow("consentCharge", "同意按设置里的价格为本调用计费", draft.consentCharge, "失败不自动重试。")}
     <p class="field__hint">两项都勾选后才能生成候选。</p>`
   )}
   ${sec(
@@ -1640,8 +1846,8 @@ function candidatePanel(state) {
               </li>`;
             })
             .join("")}</ul>
-          <p class="field__hint">选中的层会按顺序在本地合成；不重新调用云端。</p>`
-        : `<p class="field__hint">生成云端候选后，这里会显示可选的层。选定前不会写入版本。</p>`
+          <p class="field__hint">选中的层会按顺序合成成一张候选。</p>`
+        : `<p class="field__hint">生成云端候选后，这里会显示可选的层。</p>`
     }`
   )}`;
 }
@@ -1672,7 +1878,7 @@ function maskPanel(state) {
           <div class="kv__row"><dt>基础蒙版</dt><dd class="mono">${esc(source.maskId)}</dd></div>
           <div class="kv__row"><dt>画布</dt><dd class="mono">${esc(dimsOf(asset))}</dd></div>
         </dl>
-        <p class="field__hint">画笔坐标使用源图 RGB 像素；提交后生成新的透明 PNG，旧 PNG 与来源记录保留。</p>`
+        <p class="field__hint">画笔坐标使用源图 RGB 像素；提交后生成新的透明 PNG。</p>`
       : `${noteBox(
           "当前资产不是可修正的透明 PNG（或缺少来源蒙版）。请先在 03 做颜色提取，或从下面选择一个透明 PNG。",
           "error"
@@ -1691,7 +1897,7 @@ function maskPanel(state) {
       ],
       draft.maskMode
     )}
-    <p class="field__hint">补前景加不透明像素，擦除只去掉杂点；原图不动。</p>`
+    <p class="field__hint">补前景写入不透明像素；擦除把笔迹范围改成透明。</p>`
   )}
   ${sec(
     "画笔",
@@ -1796,7 +2002,7 @@ function repairPanel(state) {
     "每次调用都要确认",
     `${checkRow("repairConsentUpload", "同意上传当前规范输入到云端服务商", draft.repairConsentUpload)}
     ${checkRow("repairConsentCharge", "同意按设置里的价格为本调用计费", draft.repairConsentCharge)}
-    <p class="field__hint">失败不自动重发；旧结果与来源记录保留。</p>`
+    <p class="field__hint">失败不自动重发。</p>`
   )}
   ${sec(
     "修复候选",
@@ -1810,7 +2016,7 @@ function repairPanel(state) {
         ? `${repairCandidateList(info)}
            ${info.decision ? `<p class="field__hint">已${info.decision.action === "accept" ? "接受" : "拒绝"}这次修复。</p>` : ""}
            ${checkRow("acceptFull", "接受全图 AI 候选前，我确认它可能改变整个画面", draft.acceptFull)}`
-        : `<p class="field__hint">提交后这里会显示全图候选与本地局部合成，由你决定接受或拒绝。</p>`
+        : `<p class="field__hint">提交后这里会显示全图候选与本地局部合成。</p>`
     }`
   )}`;
 }
@@ -1891,7 +2097,7 @@ function tilePanel(state) {
           ]),
           draft.tileUnitId
         )}
-        <p class="field__hint">只有裁切、透明 PNG、线稿 PNG 与已接受的修复图能作为平铺单元；单元本身不会被改写。</p>`
+        <p class="field__hint">只有裁切、透明 PNG、线稿 PNG 与已接受的修复图能作为平铺单元。</p>`
       : `<p class="field__hint">还没有可平铺的单元：先做 02 裁切，或在 03 生成透明 PNG / 线稿 PNG。</p>`
   )}
   ${sec(
@@ -2141,12 +2347,12 @@ function refreshLive(root, state) {
 
 function remember(root) {
   if (!root || !root.querySelector) return;
-  const film = root.querySelector(".wb-film");
+  const groups = root.querySelector(".wb-groups");
   const panel = root.querySelector(".wb-panel__body");
   const canvas = root.querySelector("[data-canvas]");
   scrollMemo = {
     at: Date.now(),
-    film: film ? film.scrollTop : 0,
+    film: groups ? groups.scrollTop : 0,
     panel: panel ? panel.scrollTop : 0,
     x: canvas ? canvas.scrollLeft : 0,
     y: canvas ? canvas.scrollTop : 0,
@@ -2171,8 +2377,10 @@ function restoreScroll(root) {
   const memo = scrollMemo;
   scrollMemo = null;
   if (Date.now() - memo.at > 2000) return;
-  const film = root.querySelector(".wb-film");
-  if (film) film.scrollTop = memo.film;
+  const groups = root.querySelector(".wb-groups");
+  // 刚切换过当前资产时，让 revealCurrentThumb 的滚动说了算，不再恢复旧位置。
+  if (groups && !filmRestoreSkip) groups.scrollTop = memo.film;
+  filmRestoreSkip = false;
   const panel = root.querySelector(".wb-panel__body");
   if (panel) panel.scrollTop = memo.panel;
   const canvas = root.querySelector("[data-canvas]");
@@ -2277,7 +2485,7 @@ function taskOutcomeCopy(final) {
       ? `任务已取消，但已发布的 ${labels} 已保留，可以继续在会话里使用。`
       : "任务已取消，没有已发布的保留产物。";
     const fee = cloud
-      ? "已请求取消本机任务；本地取消不等于撤回已经发出的云端请求，也不退费，费用以服务商结算为准。"
+      ? "已请求取消；已发出的云端请求不会撤回，也不退费，费用以服务商结算为准。"
       : "";
     return { state, retained, hasRetained, cloud, message: fee ? `${base}${fee}` : base };
   }
@@ -2764,18 +2972,24 @@ function bindMask(root, state, api) {
     };
   };
   const totalPoints = () => maskState.strokes.reduce((sum, stroke) => sum + stroke.points.length, 0);
+  // 每笔对应页面上的一条路径：继续画时只改它的 d，不重建元素。
+  const strokeNodes = new Map();
   const addPoint = (stroke, point) => {
     if (stroke.points.length >= MASK_MAX_POINTS || totalPoints() >= MASK_MAX_POINTS) return false;
-    const x = Math.round(point.x * 10) / 10;
-    const y = Math.round(point.y * 10) / 10;
-    stroke.points.push({ x, y });
+    // 采样点太密没有意义：先按笔刷大小抽稀，笔迹更顺，提交的点位也少。
+    const last = stroke.points[stroke.points.length - 1];
+    const step = Math.max(1.2, stroke.radius * 0.15);
+    if (last && Math.hypot(point.x - last.x, point.y - last.y) < step) return false;
+    stroke.points.push({ x: Math.round(point.x * 10) / 10, y: Math.round(point.y * 10) / 10 });
     if (svg) {
-      const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-      dot.setAttribute("cx", String(x));
-      dot.setAttribute("cy", String(y));
-      dot.setAttribute("r", String(stroke.radius));
-      dot.setAttribute("class", `wb-mask-dot${stroke.mode === "erase" ? " is-erase" : ""}`);
-      svg.appendChild(dot);
+      const node = strokeNodes.get(stroke);
+      if (node) {
+        const d = strokePath(stroke.points);
+        for (const path of node.querySelectorAll("path")) path.setAttribute("d", d);
+      } else {
+        svg.insertAdjacentHTML("beforeend", maskStrokeMarkup(stroke));
+        if (svg.lastElementChild) strokeNodes.set(stroke, svg.lastElementChild);
+      }
     }
     return true;
   };
@@ -3172,7 +3386,7 @@ async function decideRepair(api, action, assetId = "", full = false) {
         await adoptRepairAsset(api, fresh, token);
       } else if (fresh.decision?.action === "reject") {
         repairState.error = "";
-        ui.notice = "这次修复之前已被拒绝；没有生成新资产，原有结果保留。";
+        ui.notice = "这次修复之前已被拒绝，没有生成新资产。";
         api.toast(ui.notice, "info");
       }
       repaintIfHere(api);
@@ -3187,7 +3401,7 @@ async function decideRepair(api, action, assetId = "", full = false) {
   repairState.info = next;
   repairState.error = "";
   if (action === "reject") {
-    ui.notice = "已拒绝这次修复；没有生成新资产，原有结果保留。";
+    ui.notice = "已拒绝这次修复，没有生成新资产。";
     api.toast(ui.notice, "info");
     repaintIfHere(api);
     return;
@@ -3318,6 +3532,18 @@ function handleClick(root, state, api, event) {
     case "asset":
       switchAsset(api, root, el.dataset.id);
       break;
+    case "toggle-group": {
+      const open = el.getAttribute("aria-expanded") !== "false";
+      const key = el.dataset.group || "";
+      el.setAttribute("aria-expanded", open ? "false" : "true");
+      const grid = el.closest(".wb-group")?.querySelector(".wb-group__grid");
+      if (grid) grid.hidden = open;
+      if (key) {
+        if (open) collapsedGroups.add(key);
+        else collapsedGroups.delete(key);
+      }
+      break;
+    }
     case "prev-asset":
       cycleAsset(root, api, -1);
       break;
@@ -3635,6 +3861,7 @@ export default {
     bindCompare(wb, api);
     bindCrop(wb, state, api);
     bindMask(wb, state, api);
+    revealCurrentThumb(wb);
 
     const want = params?.get?.("image") || "";
     if (want && store.session.imageId !== want) {
@@ -3705,4 +3932,4 @@ export default {
 };
 
 /* 供 node:test 直接导入的行为纯函数；默认导出保持不变。 */
-export { buildLineartPayload, buildModelLineartPayload, taskOutcomeCopy };
+export { assetParamLine, buildLineartPayload, buildModelLineartPayload, groupAssets, taskOutcomeCopy };

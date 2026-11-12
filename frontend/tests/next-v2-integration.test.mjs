@@ -485,8 +485,8 @@ test("失败任务保留已发布产物，失败与取消文案区分有无产�
   assert.equal(cancelledCloud.cloud, true);
   assert.match(cancelledCloud.message, /已接受修复/);
   assert.match(cancelledCloud.message, /已保留/);
-  assert.match(cancelledCloud.message, /已请求取消本机任务/);
-  assert.match(cancelledCloud.message, /不等于撤回/);
+  assert.match(cancelledCloud.message, /已请求取消/);
+  assert.match(cancelledCloud.message, /不会撤回/);
   assert.match(cancelledCloud.message, /不退费/);
   assert.match(cancelledCloud.message, /费用以服务商结算为准/);
   assert.doesNotMatch(cancelledCloud.message, /已退费|费用已退还|已撤销云端|已撤回云端请求/);
@@ -662,4 +662,67 @@ test("health 能力：明确 false 才算不可用，缺失/非法/读取失败�
   assert.equal(store.settings, settingsSnapshot);
   assert.deepEqual(store.settings, { revision: 9, model: "doubao-seedream-5-0-pro-260628" });
   assert.equal(store.lineartModel.available, true);
+});
+
+/* ------------------------------------------------------------------ 8. 资产分组（同类多次处理） */
+
+test("资产按工序分组：同一步跑多次时按类型编号版本，跨工序不混组", () => {
+  const asset = (id, kind, created, extra = {}) => ({ asset_id: id, kind, created_at: created, ...extra });
+  const assets = [
+    asset("a1", "original", "2026-11-12T10:00:00+08:00"),
+    asset("a4", "transparent_png", "2026-11-12T10:12:00+08:00"),
+    asset("a2", "transparent_png", "2026-11-12T10:05:00+08:00"),
+    asset("a5", "svg", "2026-11-12T10:20:00+08:00"),
+    asset("a3", "transparent_png", "2026-11-12T10:09:00+08:00"),
+  ];
+  // 03 处理跑两次：两个透明 PNG（v1/v2）＋一个新跑的 SVG；05 蒙版又补了一个透明 PNG。
+  const stages = { a1: 1, a2: 3, a3: 3, a4: 5, a5: 3 };
+  const groups = workbench.groupAssets(assets, (item) => stages[item.asset_id]);
+
+  assert.deepEqual(
+    groups.map((group) => [group.stageNo, group.label, group.count]),
+    [
+      [1, "来源", 1],
+      [3, "处理", 3],
+      [5, "蒙版", 1],
+    ]
+  );
+  // 组内按生成时间升序，同类型单独编号；最新一条是最后一个（界面从 vN 往前显示）。
+  assert.deepEqual(
+    groups[1].entries.map((entry) => [entry.asset.asset_id, entry.version, entry.versions, entry.label]),
+    [
+      ["a2", 1, 2, "透明 PNG"],
+      ["a3", 2, 2, "透明 PNG"],
+      ["a5", 1, 1, "矢量 SVG"],
+    ]
+  );
+  // 05 蒙版的透明 PNG 与 03 的分开成组，不会续编成 v3。
+  assert.deepEqual(
+    groups[2].entries.map((entry) => [entry.asset.asset_id, entry.version, entry.versions]),
+    [["a4", 1, 1]]
+  );
+  assert.equal(groups[0].stage.name, "来源");
+  assert.equal(groups[1].stage.name, "处理");
+});
+
+test("资产参数摘要区分同类版本", () => {
+  const extracted = workbench.assetParamLine({
+    kind: "transparent_png",
+    parameters: { mode: "otsu", polarity: "dark", threshold: 115.4 },
+  });
+  assert.equal(extracted, "模式 Otsu · 前景 深色 · 阈值 115");
+
+  const svg = workbench.assetParamLine({
+    kind: "svg",
+    parameters: { options: { mode: "color", max_colors: 8, detail: "high" } },
+  });
+  assert.equal(svg, "模式 彩色 · 颜色 8 色 · 细节 高");
+
+  const lineart = workbench.assetParamLine({
+    kind: "lineart",
+    parameters: { method: "model", threshold: 0.5 },
+  });
+  assert.equal(lineart, "方法 模型 · 阈值 0.5");
+
+  assert.equal(workbench.assetParamLine({ kind: "lineart", parameters: null }), "");
 });

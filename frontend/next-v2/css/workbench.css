@@ -1,5 +1,5 @@
 /* =============================================================================
-   workbench.css — 工作台：三栏（文档/工序/版本 264 · 纸本画布 1fr · 参数 368）
+   workbench.css — 工作台：三栏（文档/工序/资产 · 纸本画布 · 参数；264 · 1fr · 368）
    主题：墨房。界面是墨与细线，纹样只出现在暖纸图版上。
    排版：正文 14px、标注不小于 12px；动画克制，prefers-reduced-motion 下全部静止。
    只使用 tokens.css 的变量与 base.css / shell.css 的组件类，不自造第二套按钮/表单。
@@ -216,7 +216,7 @@
   background: var(--cinnabar);
 }
 
-/* 版本胶片条 */
+/* 资产分组：按工序 + 类型分堆，组内按版本编号，同类结果跑多次也不会混成一列 */
 .wb-rail__sec--film {
   flex: 1 1 auto;
   display: flex;
@@ -225,85 +225,154 @@
   padding-bottom: 2px;
   border-bottom: 0;
 }
-.wb-film {
+.wb-groups {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  gap: 1px;
+  gap: 10px;
   min-height: 0;
-  padding: 0 8px;
+  padding: 0 8px 4px;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-.wb-ver {
-  display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 9px;
-  width: 100%;
-  padding: 2px 6px;
-  border-radius: var(--r-sm);
-  text-align: left;
-  transition: background var(--dur-2), box-shadow var(--dur-2),
-    transform var(--dur-2) var(--ease-emphasis);
-}
-.wb-ver:hover {
-  background: color-mix(in srgb, var(--text-1) 5%, transparent);
-  transform: translateX(2px);
-}
-.wb-ver:active {
-  transform: translateX(2px) scale(0.995);
-}
-.wb-ver__thumb {
-  display: block;
-  width: 30px;
-  height: 30px;
-  overflow: hidden;
-  border-radius: var(--r-xs);
-  background: var(--paper-0);
-  box-shadow: inset 0 0 0 1px var(--line-1);
-}
-.wb-ver__thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.wb-ver__text {
+.wb-group {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  min-width: 0;
+  gap: 4px;
 }
-.wb-ver__label {
+.wb-group__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 6px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  color: var(--text-3);
+  transition: background var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out);
+}
+.wb-group__head:hover {
+  color: var(--text-1);
+  background: color-mix(in srgb, var(--text-1) 5%, transparent);
+}
+.wb-group__no {
+  font-size: var(--text-min);
+  letter-spacing: 0.02em;
+  color: var(--text-4);
+}
+.wb-group__name {
+  min-width: 0;
   font-size: var(--text-label);
-  line-height: 1.25;
   color: var(--text-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.wb-ver__meta {
+.wb-group__head:hover .wb-group__name {
+  color: var(--text-1);
+}
+.wb-group__count {
+  margin-left: auto;
+  font-size: var(--text-min);
+  color: var(--text-4);
+}
+.wb-group__chev {
+  display: inline-flex;
+  color: var(--text-4);
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.wb-group__chev .icon {
+  width: 12px;
+  height: 12px;
+}
+.wb-group__head[aria-expanded="false"] .wb-group__chev {
+  transform: rotate(-90deg);
+}
+.wb-group__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  padding: 1px 6px 2px;
+  list-style: none;
+}
+.wb-group__grid[hidden] {
+  display: none;
+}
+
+/* 单个版本：纸面缩略图 + 版本号 + 生成时刻 */
+.wb-thumb {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  transition: transform var(--dur-2) var(--ease-emphasis);
+}
+.wb-thumb:hover {
+  transform: translateY(-1px);
+}
+.wb-thumb__plate {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: var(--r-xs);
+  box-shadow: inset 0 0 0 1px var(--line-1);
+  transition: box-shadow var(--dur-2) var(--ease-out);
+}
+.wb-thumb__plate .plate__img {
+  padding: 5px;
+  box-sizing: border-box;
+}
+.wb-thumb:hover .wb-thumb__plate {
+  box-shadow: inset 0 0 0 1px var(--line-3);
+}
+.wb-thumb__file {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: var(--text-4);
+}
+.wb-thumb__ver {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  padding: 0 4px;
+  border-radius: var(--r-xs);
+  background: color-mix(in srgb, var(--bg-0) 82%, transparent);
+  font-size: var(--text-min);
+  line-height: 1.65;
+  color: var(--text-3);
+}
+.wb-thumb__now {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  padding: 0 4px;
+  border-radius: var(--r-xs);
+  background: color-mix(in srgb, var(--bg-0) 86%, transparent);
+  box-shadow: inset 0 0 0 1px var(--cinnabar-line);
+  font-size: var(--text-min);
+  line-height: 1.65;
+  color: var(--cinnabar-hi);
+}
+.wb-thumb__cap {
   font-size: var(--text-min);
   line-height: 1.3;
-  letter-spacing: 0.01em;
   color: var(--text-3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.wb-ver__id {
-  font-size: var(--text-min);
-  letter-spacing: 0.02em;
-  color: var(--text-4);
+.wb-thumb[aria-current="true"] .wb-thumb__plate {
+  box-shadow: 0 0 0 2px var(--cinnabar), inset 0 0 0 1px var(--line-1);
 }
-.wb-ver[aria-current="true"] {
-  background: var(--bg-3);
-  box-shadow: inset 2px 0 0 var(--cinnabar);
+.wb-thumb[aria-current="true"] .wb-thumb__ver {
+  background: var(--cinnabar);
+  color: var(--bg-0);
 }
-.wb-ver[aria-current="true"] .wb-ver__label {
-  color: var(--text-1);
-}
-.wb-ver[aria-current="true"] .wb-ver__id {
+.wb-thumb[aria-current="true"] .wb-thumb__cap {
   color: var(--cinnabar-hi);
 }
 
@@ -520,7 +589,6 @@
   }
 }
 .wb-crop__frame,
-.wb-mask__stroke,
 .wb-repair__region {
   animation: wb-soft-in var(--dur-2) var(--ease-out) both;
 }
@@ -529,7 +597,6 @@
    不再每次淡入，工作时不闪。只在进入工作台时保留一次淡入。 */
 .view.is-repaint .wb-plate,
 .view.is-repaint .wb-crop__frame,
-.view.is-repaint .wb-mask__stroke,
 .view.is-repaint .wb-repair__region {
   animation: none;
 }
@@ -736,17 +803,6 @@
   color: var(--text-2);
   font-size: var(--text-min);
   letter-spacing: 0.02em;
-}
-.wb-mask__stroke {
-  position: absolute;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--cinnabar) 20%, transparent);
-  border: 1px solid var(--cinnabar-line);
-  transform: translate(-50%, -50%);
-}
-.wb-mask__stroke.is-erase {
-  background: color-mix(in srgb, var(--paper-ink) 16%, transparent);
-  border: 1px dashed color-mix(in srgb, var(--paper-ink) 42%, transparent);
 }
 .wb-brush {
   position: absolute;
@@ -1450,29 +1506,25 @@
   .wb-step[data-state="current"]::before {
     display: none;
   }
-  .wb-film {
+  .wb-groups {
     flex: none;
-    flex-direction: row;
-    gap: 6px;
+    padding: 0 0 4px;
+    overflow: visible;
+    gap: 8px;
+  }
+  .wb-group__grid {
+    grid-auto-flow: column;
+    grid-auto-columns: 104px;
+    grid-template-columns: none;
     padding: 0 0 4px;
     overflow-x: auto;
     overflow-y: hidden;
   }
-  .wb-film li {
-    flex: none;
-  }
-  .wb-ver {
-    grid-template-columns: 32px minmax(0, 1fr);
-    min-width: 190px;
-    padding: 6px 8px;
-    border: 1px solid var(--line-1);
-  }
-  .wb-ver__thumb {
-    width: 32px;
-    height: 32px;
-  }
-  .wb-ver__id {
+  .wb-group__grid[hidden] {
     display: none;
+  }
+  .wb-group__head {
+    padding-inline: 0;
   }
   .wb-rail__foot {
     padding-block: 10px;
@@ -1561,12 +1613,13 @@
 @media (prefers-reduced-motion: reduce) {
   .wb-plate,
   .wb-crop__frame,
-  .wb-mask__stroke,
   .wb-repair__region {
     animation: none;
   }
   .wb-step,
-  .wb-ver,
+  .wb-thumb,
+  .wb-group__head,
+  .wb-group__chev,
   .wb-toggle,
   .wb-brush,
   .wb-compare__handle,
@@ -1580,8 +1633,7 @@
   }
   .wb-step:hover,
   .wb-step:active,
-  .wb-ver:hover,
-  .wb-ver:active,
+  .wb-thumb:hover,
   .wb-cand:hover,
   .wb-cand:active,
   .wb-region:hover,
@@ -1754,16 +1806,27 @@
   pointer-events: none;
   z-index: 2;
 }
-.wb-mask-dot {
-  fill: color-mix(in srgb, var(--cinnabar) 26%, transparent);
-  stroke: var(--cinnabar-hi);
-  stroke-width: 0.8;
+/* 蒙版笔迹：一笔就是一条圆头描边（半透明宽带 + 细中线），线宽由笔刷半径决定 */
+.wb-mask-mark__body {
+  fill: none;
+  stroke: color-mix(in srgb, var(--cinnabar) 45%, transparent);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.wb-mask-mark__line {
+  fill: none;
+  stroke: color-mix(in srgb, var(--cinnabar-hi) 85%, transparent);
+  stroke-width: 1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
 }
-.wb-mask-dot.is-erase {
-  fill: color-mix(in srgb, var(--paper-ink) 20%, transparent);
-  stroke: color-mix(in srgb, var(--paper-ink) 60%, transparent);
-  stroke-dasharray: 2 2;
+.wb-mask-mark.is-erase .wb-mask-mark__body {
+  stroke: color-mix(in srgb, var(--paper-ink) 24%, transparent);
+}
+.wb-mask-mark.is-erase .wb-mask-mark__line {
+  stroke: color-mix(in srgb, var(--paper-ink) 56%, transparent);
+  stroke-dasharray: 2 3;
 }
 .wb-brush {
   z-index: 3;
