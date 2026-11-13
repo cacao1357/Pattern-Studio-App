@@ -39,7 +39,8 @@ def mount_workbench(app, current_store, current_service, current_worker):
             "database": database, "storage": storage, "worker": worker, "versions": versions.snapshot(),
             "capabilities": {"lineart_model": model_capability()},
             "limits": {"upload_bytes": DEFAULT_LIMITS.max_upload_bytes, "decode_pixels": DEFAULT_LIMITS.max_decode_pixels,
-                       "working_pixels": DEFAULT_LIMITS.max_vector_pixels, "tile_pixels": DEFAULT_LIMITS.max_tile_pixels,
+                       "working_pixels": DEFAULT_LIMITS.max_vector_pixels, "color_vector_pixels": DEFAULT_LIMITS.max_color_vector_pixels,
+                       "tile_pixels": DEFAULT_LIMITS.max_tile_pixels,
                        "provisional": True}}, status_code=200 if ready else 503)
 
     @app.post("/api/v1/images", status_code=201, responses={200: {"description": "Identical idempotent upload reused"}})

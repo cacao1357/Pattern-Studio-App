@@ -48,7 +48,7 @@ class ProviderValidationService:
         if any(secret and secret in key for secret in (self.settings.api_token.get_secret_value(), self.settings.ark_api_key.get_secret_value())):
             raise ServiceError("IDEMPOTENCY_KEY_INVALID", "Use an independent random idempotency key")
         if self.settings.blockers():
-            raise ServiceError("PROVIDER_DISABLED", "Configure the server-side key, payment switch, verified pricing and budget before calling Seedream", 503)
+            raise ServiceError("PROVIDER_DISABLED", "Configure the server-side key before calling Seedream", 503)
         metadata, source_png = self.store.read_asset(str(request.input_asset_id))
         if metadata.get("kind") != "normalized_input":
             raise ServiceError("PROVIDER_INPUT_KIND", "Select a registered normalized input asset")
@@ -62,12 +62,10 @@ class ProviderValidationService:
                     "prompt_version": request.prompt_version if request.operation == "decompose" else PROMPT_VERSION,
                     "prompt_text": payload["prompt"], "base_url": self.settings.base_url,
                     "coordinate_space_id": metadata["coordinate_space_id"],
-                    "input_size": [metadata["width"], metadata["height"]], "watermark": True,
-                    "pricing_confirmed": True, "budget_limit_cents": self.settings.budget_cents,
-                    "reservation_cents": self.settings.reservation_cents, "max_calls": self.settings.max_calls}
+                    "input_size": [metadata["width"], metadata["height"]], "watermark": False,
+                    "requested_size": payload.get("size")}
         call, created = self.store.reserve(key, snapshot, metadata["sha256"],
-                                          reservation=self.settings.reservation_cents, budget=self.settings.budget_cents,
-                                          max_calls=self.settings.max_calls)
+                                          reservation=0, budget=0, max_calls=1)
         if not created:
             return call, False
         call_id = call["call_id"]
@@ -76,18 +74,33 @@ class ProviderValidationService:
             basemap_space = str(uuid4())
             outputs = []
             basemap = None
+            target = (metadata["width"], metadata["height"]) if request.operation == "edit" else None
             for output in generated.outputs:
                 layer_space = basemap_space if output.z_index == 0 else str(uuid4())
                 kind = "generated_basemap" if request.operation == "decompose" and output.z_index == 0 else "generated_layer" if request.operation == "decompose" else "edit_candidate"
+                image = output.image
+                transform = None
+                if target is not None and image.size != target:
+                    provider_ratio = image.width / image.height
+                    input_ratio = target[0] / target[1]
+                    if abs(provider_ratio - input_ratio) / input_ratio <= 0.02:
+                        image = image.convert("RGBa").resize(target, Image.Resampling.LANCZOS).convert("RGBA")
+                        transform = {"from": [output.image.width, output.image.height], "to": list(target),
+                                     "resampling": "premultiplied_rgba_lanczos",
+                                     "reason": "provider_output_geometry"}
                 asset_meta = {
-                    **inherited, "kind": kind, "width": output.image.width, "height": output.image.height,
+                    **inherited, "kind": kind, "width": image.width, "height": image.height,
                     "coordinate_space_id": layer_space, "ai_inferred": True, "geometry_verified": False,
                     "source_asset_id": str(request.input_asset_id), "provider_call_id": call_id,
                     "algorithm_version": versions.algorithm_version(kind),
                 }
+                if payload.get("size"):
+                    asset_meta["requested_size"] = payload["size"]
+                if transform:
+                    asset_meta["geometry_transform"] = transform
                 if kind == "generated_layer":
-                    asset_meta["quality_metrics"] = quality.pattern_metrics(output.image)
-                asset = self.store.put_asset(png_bytes(output.image), ".png", asset_meta)
+                    asset_meta["quality_metrics"] = quality.pattern_metrics(image)
+                asset = self.store.put_asset(png_bytes(image), ".png", asset_meta)
                 item = {"asset": asset, "z_index": output.z_index, "bbox": output.bbox.model_dump() if output.bbox else None,
                         "bbox_source": output.bbox_source, "basemap_coordinate_space_id": basemap_space}
                 if output.z_index == 0:

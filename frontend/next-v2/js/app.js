@@ -158,8 +158,7 @@ function renderStatusbar() {
   const online = Boolean(health && health.status === "ok");
   const asset = store.currentAsset();
   const imageId = store.session.imageId;
-  const budget = store.seedream?.budget;
-  const cost = budget ? `¥${budget.committed_cny} / ¥${budget.limit_cny}` : "费用门禁 —";
+  const cloud = store.seedream?.enabled ? "云端已连接" : "云端未配置";
   const isWorkbench = state.route === "workbench";
   const datasetTotal = store.dataset?.total_images;
   bar.innerHTML = `
@@ -174,7 +173,7 @@ function renderStatusbar() {
         : `<span class="statusbar__item statusbar__item--hide-sm">数据集 ${datasetTotal ?? "—"} 张</span>
            <span class="statusbar__item statusbar__item--hide-sm">最近 ${store.recentAssets.length} 项成果</span>`
     }
-    <span class="statusbar__item statusbar__item--hide-sm">${cost}</span>
+    <span class="statusbar__item statusbar__item--hide-sm">${cloud}</span>
     <span class="statusbar__item statusbar__item--grow"></span>
     ${
       isWorkbench

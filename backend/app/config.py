@@ -14,6 +14,9 @@ from pydantic import SecretStr
 
 ARK_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 DEFAULT_MODEL = "doubao-seedream-5-0-pro-260628"
+# Ark serves Seedream 5.0 pro/flash and 5.5 on the same image endpoint and size
+# presets. Accept only documented Model IDs or a user-created endpoint ID.
+MODEL_PATTERN = r"(?:doubao-seedream-5-(?:0-(?:pro|flash)|5)-\d{6}|ep-[a-zA-Z0-9-]{4,100})"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -70,8 +73,8 @@ class Settings:
         if base_url not in {ARK_BASE_URL, ARK_BASE_URL + "/images/generations"}:
             raise ConfigurationError("ARK_BASE_URL must be the official Beijing Ark /api/v3 base URL or /api/v3/images/generations endpoint")
         object.__setattr__(self, "base_url", ARK_BASE_URL)
-        if not re.fullmatch(r"(?:doubao-seedream-5-0-(?:pro|flash)-\d{6}|ep-[a-zA-Z0-9-]{4,100})", self.model):
-            raise ConfigurationError("SEEDREAM_MODEL must identify a Seedream 5.0 pro/flash model or an Ark endpoint")
+        if not re.fullmatch(MODEL_PATTERN, self.model):
+            raise ConfigurationError("SEEDREAM_MODEL must identify a documented Seedream 5.0 pro/flash or 5.5 model, or an Ark endpoint")
         if key and key in self.model or token and token in self.model:
             raise ConfigurationError("SEEDREAM_MODEL must not contain a credential")
         if not 1 <= self.max_calls <= 100 or min(self.budget_cents, self.reservation_cents) < 0:
@@ -85,8 +88,6 @@ class Settings:
             issues.append("PAID_CALLS_DISABLED")
         if not self.pricing_confirmed:
             issues.append("PRICING_NOT_CONFIRMED")
-        if not self.budget_cents or not self.reservation_cents:
-            issues.append("BUDGET_NOT_CONFIGURED")
         return issues
 
 

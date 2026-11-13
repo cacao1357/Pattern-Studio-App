@@ -79,10 +79,10 @@ export default {
               <article class="card notes-why__card" data-reveal>
                 <p class="label">页面</p>
                 <ul class="notes-list">
-                  <li><a href="#/home">首页</a>：最近成果、接着上次、七道工序与费用说明</li>
+                  <li><a href="#/home">首页</a>：最近成果、接着上次、七道工序与云端说明</li>
                   <li><a href="#/workbench">工作台</a>：三栏——文档与工序、图版、参数</li>
                   <li><a href="#/library">纹样库</a>：真实资产的分页、筛选与档案</li>
-                  <li><a href="#/settings">设置</a>：付费生成、预算与本机状态</li>
+                  <li><a href="#/settings">设置</a>：云端 API Key、本机状态与版本</li>
                 </ul>
               </article>
               <article class="card notes-why__card notes-why__card--accent" data-reveal style="--i:1">
@@ -106,7 +106,7 @@ export default {
           <div class="wrap">
             <header class="sec-head">
               <div class="sec-head__main">
-                <span class="sec-head__no">三 · 数据与费用</span>
+                <span class="sec-head__no">三 · 数据与云端</span>
                 <h2 class="section-title">数据在哪，哪里会花钱</h2>
               </div>
               <p class="sec-head__aside">下面这些可以直接核对。</p>
@@ -119,7 +119,7 @@ export default {
                 ["运行方式", "只监听 127.0.0.1:8765；同源、无登录，只适合本机使用"],
                 ["数据位置", "图片、任务、资产与 SQLite 历史都在 storage/api/；保留该目录即可保留数据"],
                 ["密钥", "保存在本机服务配置里，接口只返回「是否已配置」，不回显明文"],
-                ["云端", "04 候选层与 06 局部修复会调用云端；每次调用都要勾选上传与计费确认"],
+                ["云端", "04 候选层与 06 局部修复会调用云端；每次调用前勾选上传与调用确认"],
                 ["旧前端", "原文件仍在 frontend/ 根目录，可通过 /legacy/ 只读打开对照；不参与新界面"],
                 ["备份", "优化前的静态版保存在 frontend/next-v2-backup-20261110/，可随时删除"],
               ]
@@ -160,7 +160,7 @@ export default {
                 <span class="stops__no">03</span>
                 <div class="stops__body">
                   <h3 class="h3">云端候选不可用</h3>
-                  <p class="stops__text">到设置里补齐 API Key、付费开关、价格确认与预算；保存只做本地校验，不会发起收费测试。</p>
+                  <p class="stops__text">到设置里填写 API Key 并开启云端调用；保存只做本地校验，不会发起调用。</p>
                 </div>
               </li>
               <li class="stops__item" data-reveal>

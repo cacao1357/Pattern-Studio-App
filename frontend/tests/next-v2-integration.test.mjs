@@ -40,6 +40,7 @@ async function loadRecord(specifier, baseUrl = JS_ROOT) {
 const { module: storeModule } = await loadRecord("./store.js");
 const { module: workbench } = await loadRecord("./views/workbench.js");
 const { module: apiModule } = await loadRecord("./api.js");
+const { module: formatModule } = await loadRecord("./format.js");
 const store = storeModule.store;
 
 /* ------------------------------------------------------------------ fetch mock */
@@ -487,8 +488,7 @@ test("失败任务保留已发布产物，失败与取消文案区分有无产�
   assert.match(cancelledCloud.message, /已保留/);
   assert.match(cancelledCloud.message, /已请求取消/);
   assert.match(cancelledCloud.message, /不会撤回/);
-  assert.match(cancelledCloud.message, /不退费/);
-  assert.match(cancelledCloud.message, /费用以服务商结算为准/);
+  assert.doesNotMatch(cancelledCloud.message, /费用|退费/);
   assert.doesNotMatch(cancelledCloud.message, /已退费|费用已退还|已撤销云端|已撤回云端请求/);
 });
 
@@ -588,7 +588,21 @@ test("LINEART_MODEL_UNAVAILABLE 错误文案包含“运行依赖不可用”", 
   await assert.rejects(apiModule.api.asset("model-check"), (error) => {
     assert.equal(error.code, "LINEART_MODEL_UNAVAILABLE");
     assert.match(error.message, /运行依赖不可用/);
-    assert.match(error.message, /segmentation_models_pytorch/);
+    assert.match(error.message, /README/);
+    return true;
+  });
+});
+
+test("LINEART_MODEL_GPU_OOM 显示显存不足与释放 GPU 任务提示", async () => {
+  setHandler((call) => {
+    if (call.path === "/api/v1/assets/oom-check") {
+      return json({ error: { code: "LINEART_MODEL_GPU_OOM", message: "GPU memory allocation failed" } }, 400);
+    }
+    throw new Error(`unexpected fetch: ${call.path}`);
+  });
+  await assert.rejects(apiModule.api.asset("oom-check"), (error) => {
+    assert.equal(error.code, "LINEART_MODEL_GPU_OOM");
+    assert.equal(error.message, "显存不足，释放竞争 GPU 任务后重试。");
     return true;
   });
 });
@@ -725,4 +739,342 @@ test("资产参数摘要区分同类版本", () => {
   assert.equal(lineart, "方法 模型 · 阈值 0.5");
 
   assert.equal(workbench.assetParamLine({ kind: "lineart", parameters: null }), "");
+});
+
+/* ------------------------------------------------------------------ 9. 云端候选生命周期 */
+
+test("云端候选/修复资产有中文标签并落在正确工序", () => {
+  assert.equal(formatModule.kindLabel("generated_basemap"), "云端底图");
+  assert.equal(formatModule.kindLabel("placed_generated_layer"), "候选层定位图");
+  assert.equal(formatModule.kindLabel("edit_candidate"), "修复全图候选");
+  assert.equal(formatModule.stageForKind("composed_candidate"), 4);
+  assert.equal(formatModule.stageForKind("placed_generated_layer"), 4);
+  assert.equal(formatModule.stageForKind("edit_candidate"), 6);
+  assert.equal(formatModule.stageForKind("repair_composite"), 6);
+  assert.equal(formatModule.stageForJobKind("decompose-layers"), 4);
+  assert.equal(formatModule.stageForJobKind("repair-candidate"), 6);
+  assert.equal(formatModule.jobKindLabel("compose-layers"), "候选合成");
+
+  store.resetSession();
+  const groups = workbench.groupAssets([
+    { asset_id: "layer-placement", kind: "placed_generated_layer", created_at: "2026-11-13T10:00:00+08:00" },
+    { asset_id: "repair-full", kind: "edit_candidate", created_at: "2026-11-13T10:01:00+08:00" },
+  ]);
+  assert.deepEqual(groups.map((group) => group.stageNo), [4, 6]);
+});
+
+test("候选流程请求构造：首次 continue、后续 rerun 与本地合成字段", () => {
+  const candidate = workbench.buildCandidatePayload("normalized-1", {
+    candSize: "1K",
+    candColors: 4,
+    candDetail: "low",
+  });
+  assert.deepEqual(Object.keys(candidate).sort(), [
+    "consent_to_charge",
+    "consent_to_upload",
+    "input_asset_id",
+    "size",
+    "vector",
+  ]);
+  assert.equal(candidate.input_asset_id, "normalized-1");
+  assert.equal(candidate.consent_to_charge, true);
+  assert.deepEqual(candidate.vector, { mode: "color", max_colors: 4, detail: "low" });
+
+  const compose = workbench.buildComposePayload("decomposition-1", ["layer-1", "layer-2"], {
+    candColors: 8,
+    candDetail: "high",
+  });
+  assert.deepEqual(Object.keys(compose).sort(), ["decomposition_job_id", "layer_ids", "vector"]);
+  assert.deepEqual(compose.layer_ids, ["layer-1", "layer-2"]);
+  assert.deepEqual(compose.vector, { mode: "color", max_colors: 8, detail: "high" });
+
+  const flow = { pipeline_id: "flow-1", revision: 3 };
+  const first = workbench.buildContinuePayload(flow, ["layer-1"], { candColors: 2, candDetail: "medium" });
+  assert.deepEqual(Object.keys(first).sort(), ["action", "layer_ids", "revision", "vector"]);
+  assert.equal(first.revision, 3);
+  assert.equal(first.action, "select_layers");
+  assert.equal("consent_to_charge" in first, false);
+
+  const again = workbench.buildRerunComposePayload({ ...flow, revision: 4 }, ["layer-2"], {});
+  assert.equal(again.revision, 4);
+  assert.equal(again.action, "compose");
+  assert.deepEqual(again.layer_ids, ["layer-2"]);
+  assert.equal("decomposition_job_id" in again, false);
+});
+
+test("修复请求只含契约字段并把框裁到规范输入范围", () => {
+  const payload = workbench.buildRepairPayload(
+    "normalized-repair",
+    { left: 2.4, top: 3.6, width: 500, height: 500 },
+    { width: 100, height: 80 },
+    { repairIntent: "reconnect_lines", repairFeather: 5.6, repairSize: "1K" }
+  );
+  assert.deepEqual(Object.keys(payload).sort(), [
+    "bbox",
+    "consent_to_charge",
+    "consent_to_upload",
+    "feather_px",
+    "input_asset_id",
+    "intent",
+    "size",
+  ]);
+  assert.deepEqual(payload.bbox, { left: 2, top: 4, right: 100, bottom: 80 });
+  assert.equal(payload.intent, "reconnect_lines");
+  assert.equal(payload.feather_px, 6);
+  assert.equal(payload.consent_to_upload, true);
+  assert.equal(payload.consent_to_charge, true);
+});
+
+test("恢复时只选本会话规范输入的云端流程，并区分等待/已选层/未知结果", () => {
+  const flows = [
+    {
+      kind: "ai_pipeline",
+      pipeline_id: "flow-new",
+      input_asset_id: "normalized-other",
+      decomposition_job_id: "decomp-other",
+      state: "waiting_user",
+      recovery: { can_compose: true },
+    },
+    {
+      kind: "ai_pipeline",
+      pipeline_id: "flow-ours",
+      input_asset_id: "normalized-ours",
+      decomposition_job_id: "decomp-ours",
+      state: "waiting_user",
+      recovery: { can_compose: true },
+    },
+    { kind: "local", pipeline_id: "not-a-flow" },
+  ];
+  assert.equal(workbench.pickCandidateFlow(flows, new Set(["normalized-ours"])).pipeline_id, "flow-ours");
+  assert.equal(workbench.pickCandidateFlow(flows, new Set(["missing"])), null);
+
+  const rejectedNewest = [
+    {
+      kind: "ai_pipeline",
+      pipeline_id: "flow-rejected",
+      input_asset_id: "normalized-ours",
+      decomposition_job_id: "decomp-rejected",
+      state: "rejected",
+      decision: { action: "reject" },
+      recovery: { can_compose: false },
+    },
+    ...flows,
+  ];
+  assert.equal(
+    workbench.pickCandidateFlow(rejectedNewest, new Set(["normalized-ours"])).pipeline_id,
+    "flow-ours"
+  );
+
+  assert.equal(
+    workbench.flowActiveJobId({ state: "queued", decomposition_job_id: "decomp", continuation_job_id: null }),
+    "decomp"
+  );
+  assert.equal(
+    workbench.flowActiveJobId({ state: "continuing", decomposition_job_id: "decomp", continuation_job_id: "compose" }),
+    "compose"
+  );
+  assert.equal(
+    workbench.flowActiveJobId({ state: "waiting_user", decomposition_job_id: "decomp", continuation_job_id: null }),
+    ""
+  );
+
+  assert.equal(workbench.flowCanCompose({ decision: null, recovery: { can_compose: true } }), true);
+  assert.equal(workbench.flowCanCompose({ decision: null, recovery: { can_compose: false } }), false);
+  assert.equal(
+    workbench.flowCanCompose({ decision: { action: "select_layers" }, recovery: { can_compose: false } }),
+    false
+  );
+  assert.equal(
+    workbench.flowCanCompose({ decision: { action: "select_layers" }, recovery: { can_compose: true } }),
+    true
+  );
+  assert.equal(
+    workbench.flowCanCompose({
+      state: "failed",
+      decision: { action: "select_layers" },
+      recovery: { can_compose: true },
+    }),
+    true
+  );
+  assert.equal(
+    workbench.flowCanCompose({ decision: { action: "use_local" }, recovery: { can_compose: true } }),
+    false
+  );
+  assert.equal(
+    workbench.flowCanCompose({ decision: { action: "reject" }, recovery: { can_compose: true } }),
+    false
+  );
+
+  assert.deepEqual(
+    workbench.candidateSelectionForFlow({
+      selected_layer_ids: ["first"],
+      branches: [
+        { action: "compose", parameters: { layer_ids: ["branch-old"] } },
+        { action: "vectorize", parameters: {} },
+        { action: "compose", parameters: { layer_ids: ["branch-new"] } },
+      ],
+    }),
+    ["branch-new"]
+  );
+  assert.deepEqual(
+    workbench.candidateSelectionForFlow({ selected_layer_ids: ["first"], branches: [] }),
+    ["first"]
+  );
+});
+
+test("imageHistory 按 next_cursor 读完 flows 分页，超出上限时标记不完整", async () => {
+  const seen = [];
+  setHandler((call) => {
+    if (call.path !== "/api/v1/images/image-history/history") throw new Error(`unexpected fetch: ${call.path}`);
+    const query = new URL(call.url, "http://local").searchParams;
+    seen.push(query.get("collection") + ":" + (query.get("cursor") || ""));
+    if (query.get("cursor") === "2") {
+      return json({ items: [{ pipeline_id: "flow-old" }], next_cursor: null });
+    }
+    return json({ items: [{ pipeline_id: "flow-new" }], next_cursor: "2" });
+  });
+
+  const all = await store.imageHistory("image-history", "flows", { limit: 1 });
+  assert.equal(all.complete, true);
+  assert.deepEqual(all.items.map((item) => item.pipeline_id), ["flow-new", "flow-old"]);
+  assert.deepEqual(seen, ["flows:", "flows:2"]);
+
+  network.calls.length = 0;
+  seen.length = 0;
+  const partial = await store.imageHistory("image-history", "flows", { limit: 1, maxPages: 1 });
+  assert.equal(partial.complete, false);
+  assert.deepEqual(partial.items.map((item) => item.pipeline_id), ["flow-new"]);
+  assert.equal(countCalls("/api/v1/images/image-history/history"), 1);
+});
+
+test("付费关闭时恢复归档候选：首次 continue 关闭流程，后续 rerun 重合成，不发新云端请求", async () => {
+  const originalDocument = globalThis.document;
+  const originalLocation = globalThis.location;
+  globalThis.location = { hash: "#/workbench" };
+  globalThis.document = { querySelector: () => null, querySelectorAll: () => [], activeElement: null };
+
+  let revision = 1;
+  let decision = null;
+  let selected = [];
+  let continuation = null;
+  let composeDone = false;
+  const makeFlow = (state = "waiting_user") => ({
+    pipeline_id: "flow-1",
+    kind: "ai_pipeline",
+    input_asset_id: "image-flow-normalized",
+    state,
+    revision,
+    decomposition_job_id: "decomp-1",
+    continuation_job_id: continuation,
+    selected_layer_ids: selected,
+    decision,
+    recovery: { can_compose: true, needs_reconcile: false, vector_input_asset_ids: [] },
+    vector: { mode: "color", max_colors: 4, detail: "low" },
+    result: { assets: [], steps: [] },
+  });
+  const calls = [];
+  setHandler((call) => {
+      calls.push(`${call.method} ${call.path}`);
+      if (call.method === "GET" && call.path === "/api/v1/images/image-flow") {
+        return imageHandler("image-flow");
+      }
+      if (call.path === "/api/v1/images/image-flow/history") {
+        return json({ items: [makeFlow()], next_cursor: null });
+      }
+      if (call.path === "/api/v1/pipelines/flow-1") {
+        return json(makeFlow(continuation && composeDone ? "succeeded" : continuation ? "continuing" : "waiting_user"));
+      }
+      if (call.path === "/api/v1/jobs/decomp-1/layers") {
+        return json({
+          decomposition_job_id: "decomp-1",
+          layers: [
+            { layer_id: "layer-1", z_index: 1, placed_asset: { asset_id: "placed-1", kind: "placed_generated_layer" } },
+            { layer_id: "layer-2", z_index: 2, placed_asset: { asset_id: "placed-2", kind: "placed_generated_layer" } },
+          ],
+        });
+      }
+      if (call.path === "/api/v1/pipelines/flow-1/continue") {
+        assert.equal(call.body.action, "select_layers");
+        assert.equal(call.body.revision, 1);
+        assert.deepEqual(call.body.layer_ids, ["layer-1"]);
+        revision = 2;
+        decision = { action: "select_layers", revision: 2, layer_ids: ["layer-1"] };
+        selected = ["layer-1"];
+        continuation = "compose-1";
+        composeDone = false;
+        return json({ ...makeFlow("continuing"), continuation_job_id: "compose-1" }, 202);
+      }
+      if (call.path === "/api/v1/pipelines/flow-1/rerun") {
+        assert.equal(call.body.action, "compose");
+        assert.equal(call.body.revision, 2);
+        assert.deepEqual(call.body.layer_ids, ["layer-1"]);
+        revision = 3;
+        continuation = "compose-2";
+        composeDone = false;
+        return json({ job_id: "compose-2", state: "queued", kind: "compose-layers" }, 202);
+      }
+      if (call.path === "/api/v1/jobs/compose-1") {
+        composeDone = true;
+        return json({
+          job_id: "compose-1",
+          state: "succeeded",
+          kind: "compose-layers",
+          result: { assets: [{ asset_id: "composed-1", kind: "composed_candidate" }] },
+        });
+      }
+      if (call.path === "/api/v1/jobs/compose-2") {
+        composeDone = true;
+        return json({
+          job_id: "compose-2",
+          state: "succeeded",
+          kind: "compose-layers",
+          result: { assets: [{ asset_id: "composed-2", kind: "composed_candidate" }] },
+        });
+      }
+      throw new Error(`unexpected fetch: ${call.method} ${call.path}`);
+  });
+
+  try {
+    store.resetSession();
+    store.patch({ seedream: { enabled: false, blockers: ["API_KEY_MISSING"] } });
+    await store.ensureSession("image-flow");
+    const apiStub = { state: { stage: 4 }, toast() {}, refresh() {}, patch() {} };
+
+    await workbench.restoreCandidateFlow(apiStub);
+    assert.equal(calls.filter((entry) => entry === "POST /api/v1/pipelines/ai").length, 0);
+    assert.equal(calls.filter((entry) => entry === "GET /api/v1/jobs/decomp-1/layers").length, 1);
+    assert.deepEqual(workbench.toggleCandidateLayer("layer-1"), ["layer-1"]);
+
+    await workbench.composeLayers(apiStub);
+    assert.equal(calls.filter((entry) => entry === "POST /api/v1/pipelines/flow-1/continue").length, 1);
+    assert.equal(calls.filter((entry) => entry === "POST /api/v1/jobs/compose-layers").length, 0);
+    assert.ok(store.session.assets.some((asset) => asset.asset_id === "composed-1"));
+
+    await workbench.composeLayers(apiStub);
+    assert.equal(calls.filter((entry) => entry === "POST /api/v1/pipelines/flow-1/continue").length, 1);
+    assert.equal(calls.filter((entry) => entry === "POST /api/v1/pipelines/flow-1/rerun").length, 1);
+    assert.equal(calls.filter((entry) => entry === "POST /api/v1/pipelines/ai").length, 0);
+    assert.ok(store.session.assets.some((asset) => asset.asset_id === "composed-2"));
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.location = originalLocation;
+  }
+});
+
+test("付费关闭时新生成入口只提示，不提交任何云端请求", async () => {
+  store.patch({ seedream: { enabled: false, blockers: ["API_KEY_MISSING"] } });
+  network.calls.length = 0;
+  const toasts = [];
+  const apiStub = {
+    state: { stage: 4 },
+    toast(message) {
+      toasts.push(message);
+    },
+    refresh() {},
+    patch() {},
+  };
+  await workbench.runCandidate(apiStub);
+  assert.equal(countCalls("/api/v1/pipelines/ai", "POST"), 0);
+  assert.equal(countCalls("/api/v1/jobs/repair", "POST"), 0);
+  assert.match(toasts[0] || "", /云端新生成已关闭/);
 });

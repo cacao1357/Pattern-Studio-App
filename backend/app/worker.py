@@ -13,8 +13,8 @@ from app.storage import ServiceError
 
 
 _MEMORY_HANDLE = None
-LOCAL_MEMORY_MIB = 1024
-LINEART_MODEL_MEMORY_MIB = 4096
+LOCAL_MEMORY_MIB = 6144
+LINEART_MODEL_MEMORY_MIB = 6144
 
 
 def bind_memory_limit(memory_mib=LOCAL_MEMORY_MIB):

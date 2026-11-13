@@ -292,11 +292,30 @@ def execute_assisted(store, job, token):
     published = store.publish(job_id, token, "compose-layers", outputs)
     if params.get("vector"):
         store.step(job_id, token, "vectorize", "running")
-        result = vectorize(canvas, VectorOptions.model_validate(params["vector"]))
         candidate = published[1]
+        vector_image, vector_source = canvas, candidate
+        max_vector_pixels = DEFAULT_LIMITS.max_vector_pixels
+        if params["vector"].get("mode") == "color":
+            max_vector_pixels = min(max_vector_pixels, DEFAULT_LIMITS.max_color_vector_pixels)
+        if canvas.width * canvas.height > max_vector_pixels:
+            scale = math.sqrt(max_vector_pixels / (canvas.width * canvas.height))
+            size = max(1, int(canvas.width * scale)), max(1, int(canvas.height * scale))
+            resized = canvas.convert("RGBa").resize(size, Image.Resampling.LANCZOS).convert("RGBA")
+            working = _output(resized, "working_copy", candidate, job_id,
+                              parents=[{"asset_id": candidate_id, "role": "vector_input"}],
+                              extra={"reason": "vector_pixel_limit",
+                                     "transform": {"operation": "vector_working_copy", "input_size": [canvas.width, canvas.height],
+                                                   "output_size": list(size), "scale_x": size[0] / canvas.width,
+                                                   "scale_y": size[1] / canvas.height,
+                                                   "resampling": "premultiplied_rgba_lanczos"}})
+            vector_source = store.publish(job_id, token, "vectorize", [working])[0]
+            vector_image = resized
+        result = vectorize(vector_image, VectorOptions.model_validate(params["vector"]))
         store.publish(job_id, token, "vectorize", [{"data": result.svg.encode(), "suffix": ".svg", "metadata": {
-            **{key: value for key, value in candidate.items() if key not in {"asset_id", "sha256", "bytes", "created_at", "parents", "kind"}},
-            "kind": "svg", "source_asset_id": candidate_id, "parents": [{"asset_id": candidate_id, "role": "vector_input"}],
+            **{key: value for key, value in candidate.items() if key not in {"asset_id", "sha256", "bytes", "created_at", "parents", "kind", "width", "height"}},
+            "kind": "svg", "width": vector_source["width"], "height": vector_source["height"],
+            "source_asset_id": vector_source["asset_id"],
+            "parents": [{"asset_id": vector_source["asset_id"], "role": "vector_input"}],
             "algorithm_version": result.metadata["adapter_version"],
             "parameters": result.metadata}}])
 

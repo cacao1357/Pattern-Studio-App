@@ -158,7 +158,7 @@ export const store = {
     return this.health;
   },
 
-  /** 只刷新云端费用状态（任务终态后的轻量刷新，失败静默）。 */
+  /** 只刷新云端调用状态（任务终态后的轻量刷新，失败静默）。 */
   async refreshBudget() {
     try {
       this.seedream = await api.seedreamStatus();
@@ -205,6 +205,24 @@ export const store = {
       this.dataset = null;
     }
     return this.dataset;
+  },
+
+  /**
+   * 按图读取一类历史（assets / jobs / flows），按 next_cursor 读完当前可读分页。
+   * 只读：不提交任务、不重试、不核销云端调用。分页中途失败返回已读部分并标记
+   * complete=false，调用方不能把它当作完整历史。
+   */
+  async imageHistory(imageId, collection, { limit = 50, maxPages = 20 } = {}) {
+    const items = [];
+    let cursor = "";
+    let pages = 0;
+    for (; pages < maxPages; pages += 1) {
+      const page = await api.imageHistory(imageId, { collection, limit, cursor });
+      items.push(...(page?.items || []));
+      cursor = page?.next_cursor || "";
+      if (!cursor) return { items, complete: true, pages: pages + 1 };
+    }
+    return { items, complete: false, pages };
   },
 
   async loadRecent() {

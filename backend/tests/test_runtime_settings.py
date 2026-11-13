@@ -84,6 +84,14 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.assertEqual(manager.public()["revision"], 1)
         self.assertEqual(manager.current().base_url, ARK_BASE_URL)
 
+    def test_seedream_5_5_model_is_accepted_and_unknown_models_rejected(self):
+        manager = RuntimeSettings(self.settings())
+        result = manager.update(SettingsUpdate(revision=1, model="doubao-seedream-5-5-261028"))
+        self.assertEqual(result["model"], "doubao-seedream-5-5-261028")
+        with self.assertRaises(ConfigurationError):
+            manager.update(SettingsUpdate(revision=2, model="doubao-seedream-9-9-999999"))
+        self.assertEqual(manager.current().model, "doubao-seedream-5-5-261028")
+
     def test_failed_atomic_write_does_not_publish_candidate(self):
         bad_path = self.root / "a-directory"
         bad_path.mkdir()

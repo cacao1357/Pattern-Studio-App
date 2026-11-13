@@ -18,7 +18,6 @@ import {
   kindLabel,
   relativeTime,
   shortId,
-  blockerLabel,
   escapeHtml,
   stageForJob,
   stageForKind,
@@ -79,11 +78,6 @@ function progressKey() {
   const { current, done } = progress();
   const job = store.recentJobs[0];
   return [current, [...done].sort((a, b) => a - b).join(","), job?.job_id || "", job?.state || ""].join("|");
-}
-
-function money(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? `¥${number.toFixed(2)}` : "—";
 }
 
 function hasPreview(asset) {
@@ -213,10 +207,10 @@ function renderFlow() {
         </button>`;
       }).join("")}
       <div class="flow__summary card" data-reveal style="--i:7">
-        <p class="label">付费调用</p>
+        <p class="label">云端调用</p>
         <p class="flow__summary-num">${store.seedream?.budget?.call_count ?? 0} <span class="flow__summary-unit">次</span></p>
-        <p class="flow__summary-copy">只有 04 候选层与 06 局部修复产生费用。</p>
-        <p class="flow__summary-foot">付费调用次数与预算在设置里配置。</p>
+        <p class="flow__summary-copy">只有 04 候选层与 06 局部修复会调用云端。</p>
+        <p class="flow__summary-foot">调用次数只作记录。</p>
       </div>
     </div>
   `;
@@ -260,9 +254,6 @@ function renderGate() {
   const budget = seedream?.budget;
   const enabled = Boolean(seedream?.enabled);
   const total = store.dataset?.total_images ?? "—";
-  const usedPct = budget && Number(budget.limit_cny) > 0
-    ? Math.min(100, Math.round((Number(budget.committed_cny) / Number(budget.limit_cny)) * 100))
-    : 0;
   return `
     <div class="gate">
       <article class="gate__card card" data-reveal data-spotlight>
@@ -270,7 +261,7 @@ function renderGate() {
           <span class="gate__icon">${icon("cpu")}</span>
           <div>
             <h3 class="h3">本机流程</h3>
-            <p class="gate__kicker">01–03、05、07 不产生费用</p>
+            <p class="gate__kicker">01–03、05、07 在本机完成</p>
           </div>
         </div>
         <ul class="gate__list">
@@ -280,7 +271,7 @@ function renderGate() {
         <div class="gate__stats">
           <div><strong class="num">${total}</strong><span>张图片</span></div>
           <div><strong class="num">${store.recentAssets.length}</strong><span>项已完成</span></div>
-          <div><strong class="num">${budget?.call_count ?? 0}</strong><span>次付费调用</span></div>
+          <div><strong class="num">${budget?.call_count ?? 0}</strong><span>次云端调用</span></div>
         </div>
         <div class="gate__pipe" aria-hidden="true">
           <span class="gate__node">原图</span>
@@ -297,31 +288,22 @@ function renderGate() {
         <div class="gate__head">
           <span class="gate__icon gate__icon--accent">${icon("cloud")}</span>
           <div>
-            <h3 class="h3">付费生成</h3>
+            <h3 class="h3">云端生成</h3>
             <p class="gate__kicker">用于 04 候选层与 06 局部修复</p>
           </div>
           <span class="chip ${enabled ? "chip--jade" : "chip--gold"} gate__chip">${enabled ? "已开通" : "未开通"}</span>
         </div>
         <div class="gate__budget">
-          <div class="gate__budget-row">
-            <span>预算使用</span>
-            <span class="num">${money(budget?.committed_cny)} / ${money(budget?.limit_cny)}</span>
-          </div>
-          <div class="gate__meter" role="progressbar" aria-label="付费生成预算使用比例" aria-valuenow="${usedPct}" aria-valuemin="0" aria-valuemax="100">
-            <span style="width:${Math.max(4, usedPct)}%"></span>
-          </div>
-          <p class="gate__budget-note">已用 ${budget?.call_count ?? 0} / ${budget?.max_calls ?? "—"} 次</p>
+          <p class="gate__budget-note">已调用 ${budget?.call_count ?? 0} 次</p>
         </div>
         ${
           blockers.length
-            ? `<ul class="gate__list gate__list--small">${blockers
-                .map((code) => `<li>${icon("alert")} ${escapeHtml(blockerLabel(code))}</li>`)
-                .join("")}</ul>`
+            ? `<ul class="gate__list gate__list--small"><li>${icon("alert")} 云端尚未就绪，到设置里完成配置即可调用。</li></ul>`
             : `<ul class="gate__list gate__list--small">
-                 <li>${icon("flask")} 每次调用都要勾选上传与计费确认</li>
+                 <li>${icon("flask")} 每次调用前勾选上传与调用确认</li>
                </ul>`
         }
-        <a class="btn btn--paper btn--sm gate__cta" href="#/settings">查看费用设置 ${icon("arrow")}</a>
+        <a class="btn btn--paper btn--sm gate__cta" href="#/settings">配置云端 ${icon("arrow")}</a>
       </article>
     </div>
   `;
@@ -451,10 +433,10 @@ export default {
           <div class="wrap">
             <header class="sec-head">
               <div class="sec-head__main">
-                <span class="sec-head__no">四 · 费用</span>
-                <h2 class="section-title">费用与预算</h2>
+                <span class="sec-head__no">四 · 云端</span>
+                <h2 class="section-title">云端生成</h2>
               </div>
-              <p class="sec-head__aside">付费调用按次预扣，达到上限后拒绝。</p>
+              <p class="sec-head__aside">只在 04 与 06 使用云端。</p>
             </header>
             ${renderGate()}
           </div>
@@ -465,7 +447,7 @@ export default {
             <div class="closing" data-reveal>
               <p class="eyebrow">工作方式</p>
               <h2 class="title closing__title">每一步都出独立产物。</h2>
-              <p class="copy">每道工序的结果是一个新资产；换参数重跑会生成新版本，旧版本仍留在会话与纹样库里。付费生成（04 / 06）每次调用前都要勾选确认。</p>
+              <p class="copy">每道工序的结果是一个新资产；换参数重跑会生成新版本，旧版本仍留在会话与纹样库里。云端生成（04 / 06）每次调用前都要勾选确认。</p>
               <div class="closing__actions">
                 <button class="btn btn--primary" type="button" data-upload data-magnetic>
                   从上传纹样开始 ${icon("arrow")}
@@ -559,7 +541,7 @@ export default {
 
 let homeUnsubscribe = null;
 
-/* 会改变首页高亮的 store 事件；设置变化单独整页重绘（费用卡要更新）。 */
+/* 会改变首页高亮的 store 事件；设置变化单独整页重绘（云端卡要更新）。 */
 const LIVE_REASONS = new Set(["session", "job-start", "job-end", "recent"]);
 
 let refreshTimer = null;

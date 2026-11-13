@@ -170,6 +170,24 @@ try {
   assert.equal(isolated.foreign,false);
   check("late task polling and success callbacks do not modify another image session");
 
+  // Reuse the fixture's archived cloud layers while payment is disabled.
+  await evaluate(`location.hash='#/workbench?asset='+${JSON.stringify(info.input_asset_id)}+'&stage=4'`);
+  await waitFor("document.querySelector('[data-act=layer]')", "archived cloud layers restored without a key");
+  await evaluate("document.querySelector('[data-act=layer][aria-pressed=false]')?.click()");
+  await waitFor("document.querySelector('[data-act=compose-layers]')?.disabled===false", "archived layers can compose locally");
+  await evaluate("document.querySelector('[data-act=compose-layers]').click()");
+  await waitFor(`fetch('/api/v1/pipelines/'+${JSON.stringify(info.pipeline_id)}).then(r=>r.json()).then(f=>f.state==='succeeded' && f.decision?.action==='select_layers')`, "first selection advances the cloud workflow", 30000);
+  await waitFor("import('/js/store.js').then(m=>!m.store.session.busy)", "first local composition adopted");
+  check("archived layers continue their workflow while cloud payment is disabled");
+
+  await call("Page.reload", { ignoreCache: true });
+  await waitFor("document.querySelector('[data-act=layer][aria-pressed=true]') && document.querySelector('[data-act=compose-layers]')?.disabled===false", "selected layers restored after reload");
+  await evaluate("document.querySelector('[data-act=compose-layers]').click()");
+  await waitFor(`fetch('/api/v1/pipelines/'+${JSON.stringify(info.pipeline_id)}).then(r=>r.json()).then(f=>f.branches?.some(b=>b.state==='succeeded' && b.action==='compose'))`, "local recomposition branch", 30000);
+  assert.equal(requests.filter(r=>r.method==='POST' && r.path.endsWith('/continue')).length,1);
+  assert.equal(requests.filter(r=>r.method==='POST' && r.path.endsWith('/rerun')).length,1);
+  check("reload restores selection and recomposition uses a local workflow branch");
+
   await call("Emulation.setDeviceMetricsOverride", {width:390,height:844,deviceScaleFactor:1,mobile:true});
   await evaluate("location.hash='#/workbench?asset='+"+JSON.stringify(uploaded.assetId)+"+'&stage=3'");
   await waitFor("document.querySelector('[data-act=run-model-lineart]')", "narrow model route");

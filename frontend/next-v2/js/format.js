@@ -27,7 +27,7 @@ export const KIND_LABELS = {
   mask: "前景蒙版",
   transparent_png: "透明 PNG",
   foreground: "透明 PNG",
-  contour_line_art: "轮廓线稿",
+  contour_line_art: "外轮廓线稿",
   contour: "轮廓线稿",
   lineart: "线稿 PNG",
   svg: "矢量 SVG",
@@ -40,10 +40,17 @@ export const KIND_LABELS = {
   tile: "平铺预览",
   ai_layer: "云端候选层",
   generated_layer: "云端候选层",
+  generated_basemap: "云端底图",
+  placed_generated_layer: "候选层定位图",
   composed_candidate: "候选合成",
   repair_composite: "修复局部保护版",
   accepted_repair: "已接受修复",
   repair_candidate: "修复全图候选",
+  edit_candidate: "修复全图候选",
+  edit_mask: "修复区域蒙版",
+  blend_weight: "羽化权重",
+  difference_map: "差异图",
+  damage_mask: "损伤蒙版",
 };
 
 export function kindLabel(kind) {
@@ -79,11 +86,18 @@ export function stageForKind(kind) {
       return 7;
     case "ai_layer":
     case "generated_layer":
+    case "generated_basemap":
+    case "placed_generated_layer":
     case "composed_candidate":
       return 4;
     case "repair_composite":
     case "accepted_repair":
     case "repair_candidate":
+    case "edit_candidate":
+    case "edit_mask":
+    case "blend_weight":
+    case "difference_map":
+    case "damage_mask":
       return 6;
     default:
       return 1;
@@ -102,10 +116,14 @@ const JOB_STAGE = {
   lineart: 3,
   vectorize: 3,
   "ai-pipeline": 4,
+  "decompose-layers": 4,
+  "select_layers": 4,
   compose: 4,
   "compose-layers": 4,
   "refine-mask": 5,
   repair: 6,
+  "repair-candidate": 6,
+  "protect-region": 6,
   "tile-preview": 7,
   export: 7,
 };
@@ -216,11 +234,8 @@ export function jobStateLabel(state) {
 export function blockerLabel(code) {
   const map = {
     API_KEY_MISSING: "未填写 API Key",
-    PAID_CALLS_DISABLED: "付费开关未开启",
+    PAID_CALLS_DISABLED: "云端调用未开启",
     PRICING_NOT_CONFIRMED: "价格未确认",
-    BUDGET_NOT_CONFIGURED: "预算未设置",
-    RESERVATION_NOT_CONFIGURED: "单次预留未设置",
-    MAX_CALLS_NOT_CONFIGURED: "调用上限未设置",
   };
   return map[code] || code;
 }
@@ -237,6 +252,11 @@ export function jobKindLabel(kind) {
     vectorize: "矢量化",
     pipeline: "一键处理",
     "refine-mask": "蒙版修正",
+    "repair-candidate": "修复候选",
+    "protect-region": "区域保护",
+    "decompose-layers": "云端候选拆分",
+    "compose-layers": "候选合成",
+    "select_layers": "选择候选层",
     "tile-preview": "平铺预览",
     export: "导出",
     repair: "局部修复",

@@ -55,12 +55,12 @@
 | 07 平铺 | `POST /jobs/tile-preview`、`PUT /assets/{id}/seam-observation` | tile_preview、接缝观察 |
 | 导出 | `POST /exports`、`GET /assets/{id}/download` | ZIP 包（含清单） |
 
-云端相关接口只在设置满足 `api_key_configured`、付费开关、价格确认与预算后可用；未满足时界面显示 blockers 并保持本地流程可用。所有写请求由 `js/api.js` 自动带 `X-Pattern-Studio: local` 与一次性 `Idempotency-Key`。
+云端相关接口只在设置满足 `api_key_configured`、付费开关与价格确认后可用；预算、单次预留和调用次数不再是门槛。未满足时界面显示 blockers 并保持本地流程可用。所有写请求由 `js/api.js` 自动带 `X-Pattern-Studio: local` 与一次性 `Idempotency-Key`。
 
 ## 5. 已知限制
 
 - 模型入口由 `/health` 的 `capabilities.lineart_model` 判断前置条件；未通过时说明原因，旧后端缺字段时按未知处理。前置检查不证明推理或 GPU 一定成功，真实任务仍展示后端错误。必须把模型依赖安装在启动服务的同一个 Python 环境。
-- 接近 100 万像素的图在部分环境下矢量化可能触及 worker 内存上限（1024 MiB）；先创建工作副本更稳。
+- 接近 100 万像素的图在部分环境下矢量化可能触及 worker 内存上限（当前为 6,144 MiB）；颜色矢量化的云端工作副本限制为 25 万像素，先创建工作副本更稳。
 - 前端没有构建步骤；修改后刷新即可，静态资源使用 `Cache-Control: no-store`。
 - 颜色用 `color-mix()` 派生明暗与透明层，需要 Chrome 111+ / Safari 16.2+ / Firefox 113+；更旧的浏览器会丢这些半透明层。
 - 页面按 Chrome 验证；Safari/Firefox 与完整屏幕阅读器走查未做。
@@ -79,7 +79,7 @@
 - 旧前端模块测试：`node --test frontend/tests/settings.test.mjs frontend/tests/workbench-regressions.test.mjs` → 30 passed（旧模块未改）。
 - 新前端模块：`node --check` 全部通过；页面无构建步骤。
 - 浏览器（Chrome，1440×900 与 390 宽）：首页、工作台七道工序、纹样库分页/筛选/抽屉、设置读写与 409/422、`?image/asset/stage` 深链、`/legacy/` 无报错；53 个请求全部同源，未写 `localStorage`/`sessionStorage`。
-- 已知环境限制见上文第 5 节；真实云端候选与局部修复仍需配置密钥和费用门禁后单独验收。
+- 已知环境限制见上文第 5 节；真实云端候选与局部修复仍需配置密钥和付费开关后单独验收。
 
 ## 8. 配色接入（蜜蜡 · 沉褐，2026-11-11）
 
@@ -127,11 +127,18 @@ node scripts/validate_v2_integration.mjs D:/CondaEnvs/pattern-studio/python.exe
 新版界面与旧版页面依然共享 `/api/v1`，静态挂载的只读对照不等于业务数据只读；测试应使用隔离数据目录。
 
 
-## 10. 第二批接口准备（前端尚未接入）
+## 10. 第二批：云端候选生命周期接入（2026-11-13）
 
-后端现提供 `/api/v1/images/{image_id}/history`，按 `collection=assets|jobs|flows` 分别分页；字段及边界见接口合同。恢复不能只取首页近期任务，也不能把分页中途失败当作完整恢复。排队和执行中的任务只能按已有 job ID 查询，不能重新提交云端请求。
+后端按图历史接口（`/api/v1/images/{image_id}/history`，`assets|jobs|flows`）已在新版工作台接入候选流程：
 
-新版前端第二批尚未实施：DSH 委派被自动审批阻止，需明确批准外部 DeepSeek 源码处理后继续。当前页面仍使用第一批的内存会话与独立合成逻辑，不能宣称已接通 `/continue`、`/rerun` 或完整历史恢复。本阶段后端离线验证共 17 项及 2 个子测试通过，当时未重启生产服务；代码已在 2026-11-12 的整理提交入库并推送到 `main`。
+- 进入或刷新工作台时读取 `flows` 分页，选当前图最近一条可用或进行中的流程，恢复候选层和已选层；只 `GET` 流程、层和已有任务，不提交云端请求。
+- 首次选层用 `POST /pipelines/{id}/continue`（`select_layers`），之后改选重合成用 `POST /pipelines/{id}/rerun`（`compose`）；没有流程记录时才回退 `POST /jobs/compose-layers`。`409` / `STALE_REVISION` 时重读流程再切换。
+- 关闭付费或缺少密钥时，已归档候选仍可读、选层并本地合成；新生成和 `runRepair` 才受门禁。已有修复候选的接受/拒绝不受门禁影响。
+- 未知云端结果按 `NEEDS_RECONCILIATION` 提示核对，不自动重发；恢复和轮询过程不重新提交任何云端调用。
+
+验证：`next-v2-integration` 25 项、旧版设置 8 项、工作台回归 22 项通过；后端 `tests/` 73 项、`backend/tests/` 23 项及 2 个子测试通过。Chrome 对 `backend/tests/browser_fixture_a.py` 隔离夹具（关闭付费、一条归档模拟调用）完成「归档层 → 选层 continue → 刷新恢复选择 → rerun 分支」；云端调用计数保持 1，页面异常 0；同一夹具跑通新模型 CUDA 线稿 → SVG。受本机沙箱限制，`scripts/validate_v2_integration.mjs` 无法整脚本执行（Node 子进程 `spawn EPERM`），以上浏览器步骤由等价的手动 CDP 操作完成，未计为脚本自动化通过。
+
+仍只消费 `flows` 一类历史；`assets`/`jobs` 历史页和修复候选的刷新恢复尚未接入。真实云端与真实素材验收仍未进行。
 
 ## 11. 配色接入的验证记录（2026-11-11）
 
