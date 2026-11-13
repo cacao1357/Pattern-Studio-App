@@ -13,9 +13,11 @@ from app.services.local_workbench import _output, _read_image
 from app.services.repair import composite_region
 from app.storage import ServiceError, canonical_json, digest
 from app.workbench_store import validate_key
+from app.services.provider_validation import PROVIDER_INPUT_KINDS
 
 
 MAX_REPAIR_PIXELS = 1_048_576
+TILE_UNIT_KINDS = {"cropped", "transparent_png", "lineart", "accepted_repair"}
 
 
 def archived_edit(store, call, values):
@@ -49,8 +51,8 @@ class FinishingWorkbench:
         if existing:
             return self.store.get_job(existing)
         source, _ = self.store.get_asset(input_id)
-        if source["kind"] != "normalized_input":
-            raise ServiceError("PROVIDER_INPUT_KIND", "Choose a normalized original for the repair branch", 422)
+        if source["kind"] not in PROVIDER_INPUT_KINDS:
+            raise ServiceError("PROVIDER_INPUT_KIND", "Choose a saved input, crop, working copy or accepted result for repair", 422)
         payload.bbox.within((source["width"], source["height"]))
         if source["width"] * source["height"] > MAX_REPAIR_PIXELS:
             raise ServiceError("REPAIR_SIZE_LIMIT", "Repair currently supports at most 1024x1024 pixels in total; explicitly prepare a smaller normalized input", 413)
@@ -152,8 +154,8 @@ class FinishingWorkbench:
         if existing:
             return self.store.get_job(existing)
         source, _ = self.store.get_asset(unit_id)
-        if source["kind"] != "cropped":
-            raise ServiceError("TILE_UNIT_REQUIRED", "Crop and save an explicit repeat unit first", 422)
+        if source["kind"] not in TILE_UNIT_KINDS:
+            raise ServiceError("TILE_UNIT_REQUIRED", "Select a saved crop, transparent PNG, line-art PNG or accepted repair", 422)
         if source["width"] * source["height"] * payload.rows * payload.cols > DEFAULT_LIMITS.max_tile_pixels:
             raise ServiceError("TILE_PIXEL_LIMIT", "The tiled result exceeds 4 MP; choose a smaller unit without resizing the saved original", 413)
         return self.store.submit("tile-preview", unit_id, values, key, retry_of=retry_of)
@@ -222,7 +224,7 @@ def execute_repair(store, job, token, settings=None, *, transport=None):
 def execute_tile(store, job, token):
     params, job_id = job["parameters"], job["job_id"]
     source, image = _read_image(store, job["input_asset_id"])
-    if source["kind"] != "cropped" or image.width * image.height * params["rows"] * params["cols"] > DEFAULT_LIMITS.max_tile_pixels:
+    if source["kind"] not in TILE_UNIT_KINDS or image.width * image.height * params["rows"] * params["cols"] > DEFAULT_LIMITS.max_tile_pixels:
         raise ServiceError("TILE_PIXEL_LIMIT", "Choose an explicit cropped unit within the 4 MP output limit", 413)
     store.step(job_id, token, "tile-preview", "running")
     tiled = Image.new("RGBA", (image.width * params["cols"], image.height * params["rows"]))

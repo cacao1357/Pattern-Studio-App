@@ -19,7 +19,8 @@ from app.schemas.contracts import DEFAULT_LIMITS, ProcessingError
 from app.schemas.provider import CostSettlement, ValidationRequest
 from app.services.provider_validation import ProviderValidationService
 from app.storage import ServiceError, Store
-from app.api.workbench import mount_workbench, FRONTEND_MODULES
+from app.api.workbench import mount_workbench
+from app.api.frontend import csp_for, document_policy, mount_frontend
 from app.api.assisted import mount_assisted
 from app.api.datasets import mount_datasets
 from app.api.finishing import mount_finishing
@@ -88,7 +89,10 @@ class LocalApiBoundary:
             return await JSONResponse({"error": {"code": "LOCAL_ACCESS_ONLY", "message": "Use the same-origin loopback workbench"}}, 403)(scope, receive, send)
         if headers.get(b"sec-fetch-site") not in (None, b"same-origin", b"none"):
             return await JSONResponse({"error": {"code": "LOCAL_ACCESS_ONLY", "message": "Cross-site workbench requests are unavailable"}}, 403)(scope, receive, send)
-        public_shell = scope.get("path") in {"/", "/workbench.js", "/styles.css", "/theme-saas.css", "/theme-glass.css", "/theme-glass.js", "/favicon.svg", "/assets/pattern-studio/bg-home.svg", "/assets/pattern-studio/bg-workspace.svg", "/assets/pattern-studio/motif-01-meander.svg", "/assets/pattern-studio/motif-04-cloud.svg", "/assets/pattern-studio/lotus-mark.svg", "/assets/pattern-studio/crane-line-blue.png", *("/" + name for name in FRONTEND_MODULES)} and scope.get("method") in {"GET", "HEAD"}
+        # Only browser document responses need a rendering policy; scripts,
+        # styles and images use their own media types and are same-origin.
+        policy = document_policy(scope.get("path") or "") if scope.get("method") in {"GET", "HEAD"} else None
+        csp = csp_for(policy)
         if scope.get("method") not in {"GET", "HEAD", "OPTIONS"} and headers.get(b"x-pattern-studio") != b"local":
             return await JSONResponse({"error": {"code": "LOCAL_REQUEST_HEADER_REQUIRED", "message": "Use the workbench or supply X-Pattern-Studio: local"}}, 403)(scope, receive, send)
         path = scope.get("path")
@@ -120,7 +124,7 @@ class LocalApiBoundary:
             if message["type"] == "http.response.start":
                 message["headers"] = list(message.get("headers", [])) + [
                     (b"cache-control", b"no-store"), (b"x-content-type-options", b"nosniff"),
-                    (b"content-security-policy", b"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'" if public_shell else b"default-src 'none'; frame-ancestors 'none'"),
+                    (b"content-security-policy", csp.encode("ascii")),
                     (b"referrer-policy", b"no-referrer"),
                 ]
             await send(message)
@@ -241,6 +245,7 @@ def create_app(settings: Settings | None = None, *, transport: httpx.BaseTranspo
         return JSONResponse({"error": {"code": "HTTP_ERROR", "message": "This method or resource is unavailable"}}, error.status_code)
 
     mount_workbench(app, current_store, current_local_service, current_worker)
+    mount_frontend(app)
     mount_svg_edit(app, current_store)
     mount_datasets(app, current_store)
     mount_assisted(app, current_assisted_service)

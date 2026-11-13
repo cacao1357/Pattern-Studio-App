@@ -6,11 +6,17 @@ __pycache__/
 .env.*
 !.env.example
 storage/
+/model/*
+!/model/inference.json
+!/model/model.pt
 _qa/
 node_modules/
 frontend/dist/
 build/
 dist/
+
+# Local model delivery packages (weights and private evaluation samples)
+/model-package-2026-11-13/
 
 # Local environments, tool caches and machine-generated files
 .venv/
@@ -24,3 +30,7 @@ Thumbs.db
 
 # Local IDE workspace
 .idea/
+
+# Superseded frontend drafts kept only on this machine, not part of the repo
+/frontend/next/
+/frontend/next-v2-backup-20261110/

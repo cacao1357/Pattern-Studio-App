@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="300" viewBox="0 0 900 300" fill="none">
+  <title>回纹边饰 · 原图</title>
+  <defs><filter id="meander-original-noise" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="3" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter></defs>
+  <rect width="900" height="300" fill="#22304F"/>
+  <g fill="none" stroke="#E8DFC8" stroke-linecap="square" stroke-linejoin="miter">
+  <rect x="16" y="16" width="868" height="268" stroke-width="2.4"/>
+  <rect x="34" y="34" width="832" height="232" stroke-width="1.3"/>
+  <path d="M66 188H834M66 188V116H162V188H90V134H138V170H114V152M162 188V116H258V188H186V134H234V170H210V152M258 188V116H354V188H282V134H330V170H306V152M354 188V116H450V188H378V134H426V170H402V152M450 188V116H546V188H474V134H522V170H498V152M546 188V116H642V188H570V134H618V170H594V152M642 188V116H738V188H666V134H714V170H690V152M738 188V116H834V188H762V134H810V170H786V152" stroke-width="2.4"/>
+  </g>
+  <g fill="#E8DFC8">
+  <circle cx="62" cy="62" r="5"/>
+  <circle cx="62" cy="238" r="5"/>
+  <circle cx="100.8" cy="62" r="5"/>
+  <circle cx="100.8" cy="238" r="5"/>
+  <circle cx="139.6" cy="62" r="5"/>
+  <circle cx="139.6" cy="238" r="5"/>
+  <circle cx="178.4" cy="62" r="5"/>
+  <circle cx="178.4" cy="238" r="5"/>
+  <circle cx="217.2" cy="62" r="5"/>
+  <circle cx="217.2" cy="238" r="5"/>
+  <circle cx="256" cy="62" r="5"/>
+  <circle cx="256" cy="238" r="5"/>
+  <circle cx="294.8" cy="62" r="5"/>
+  <circle cx="294.8" cy="238" r="5"/>
+  <circle cx="333.6" cy="62" r="5"/>
+  <circle cx="333.6" cy="238" r="5"/>
+  <circle cx="372.4" cy="62" r="5"/>
+  <circle cx="372.4" cy="238" r="5"/>
+  <circle cx="411.2" cy="62" r="5"/>
+  <circle cx="411.2" cy="238" r="5"/>
+  <circle cx="450" cy="62" r="5"/>
+  <circle cx="450" cy="238" r="5"/>
+  <circle cx="488.8" cy="62" r="5"/>
+  <circle cx="488.8" cy="238" r="5"/>
+  <circle cx="527.6" cy="62" r="5"/>
+  <circle cx="527.6" cy="238" r="5"/>
+  <circle cx="566.4" cy="62" r="5"/>
+  <circle cx="566.4" cy="238" r="5"/>
+  <circle cx="605.2" cy="62" r="5"/>
+  <circle cx="605.2" cy="238" r="5"/>
+  <circle cx="644" cy="62" r="5"/>
+  <circle cx="644" cy="238" r="5"/>
+  <circle cx="682.8" cy="62" r="5"/>
+  <circle cx="682.8" cy="238" r="5"/>
+  <circle cx="721.6" cy="62" r="5"/>
+  <circle cx="721.6" cy="238" r="5"/>
+  <circle cx="760.4" cy="62" r="5"/>
+  <circle cx="760.4" cy="238" r="5"/>
+  <circle cx="799.2" cy="62" r="5"/>
+  <circle cx="799.2" cy="238" r="5"/>
+  <circle cx="838" cy="62" r="5"/>
+  <circle cx="838" cy="238" r="5"/>
+  </g>
+  <rect width="900" height="300" filter="url(#meander-original-noise)" opacity=".05"/>
+</svg>

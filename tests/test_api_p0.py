@@ -7,6 +7,7 @@ from pydantic import SecretStr
 
 from app.config import Settings
 from app.main import create_app
+from app.providers.seedream import MAX_OUTPUT_PIXELS, MIN_OUTPUT_PIXELS, edit_output_size
 
 
 def checkerboard(width=700, height=500, block=32) -> bytes:
@@ -120,6 +121,18 @@ def test_invalid_provenance_is_rejected_without_echo(tmp_path):
         text = response.text
         assert response.json()["error"]["code"] == "INVALID_PROVENANCE"
         assert "javascript" not in text
+
+
+def test_edit_output_size_matches_input_when_provider_allows():
+    assert edit_output_size((1024, 1024)) == "1024x1024"
+    assert edit_output_size((1600, 1200)) == "1600x1200"
+
+
+def test_edit_output_size_stays_inside_provider_bounds():
+    for input_size in [(973, 730), (512, 512), (128, 128), (1439, 2460)]:
+        width, height = map(int, edit_output_size(input_size).split("x"))
+        assert MIN_OUTPUT_PIXELS <= width * height <= MAX_OUTPUT_PIXELS
+        assert abs(width / height - input_size[0] / input_size[1]) / (input_size[0] / input_size[1]) < 0.01
 
 
 def test_upload_without_new_fields_stays_compatible(tmp_path):

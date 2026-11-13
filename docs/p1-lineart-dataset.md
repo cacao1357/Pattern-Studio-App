@@ -32,6 +32,8 @@ label_status, missing_meta
 - 输出：透明背景、黑色墨线的 RGBA PNG，`kind=lineart`，可继续作为矢量化输入。
 - 元数据：`ink_ratio`、`ink_bright`、`local_gain`、`edges_px`、`components`、`med`、`min_area` 与算法版本 `lineart-global-local-v2`。
 - 说明：这是可编辑线稿草稿，不替代人工修线；实验中的 Zhang-Suen 骨架化因断线问题未开放。
+- 同一接口可提交 `{"input_asset_id":"…","method":"model"}` 启用本地模型，获取权重和安装依赖见 [README](../README.md#本地线稿模型)。模型模式只接收输入资产和方法。省略 `method` 或提交 `"opencv"` 均走传统算法。模型成果保持输入坐标系，记录模型版本、权重标识、缩放方式、阈值和实际推理设备 `inference_device`（`cuda` 或 `cpu`），供人工预览与复核。
+- 工作台默认的一键模型路线在同一任务发布 `lineart` PNG 和黑白 SVG。单独线稿工具的默认方法仍为 OpenCV。请求参数和向后兼容规则见 [一键接口](a-interface-contract.md#本地一键处理)。
 
 已知限制：
 
@@ -62,7 +64,7 @@ P1 新增测试覆盖：
 - 数据集 CSV 表头/BOM/行数、审计授权覆盖、批次、`label_status`。
 - 线稿任务真实 worker 执行并发布 `lineart` 资产。
 
-本机浏览器夹具截图（不入库）：`_qa/p1-ui/`。
+浏览器夹具验证产物见 [A 实施与交接记录](a-implementation-status.md#验证)。
 
 ## 2026-11-04 集成修复
 

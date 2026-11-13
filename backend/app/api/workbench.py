@@ -1,9 +1,9 @@
 """Same-origin local S1 endpoints; processing writes require idempotency."""
 
-from pathlib import Path
 import sqlite3
 import tempfile
 from uuid import UUID
+from typing import Literal
 
 from fastapi import File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
@@ -13,12 +13,7 @@ from app import versions
 from app.schemas.workbench import (CropRequest, PrepareRequest, WorkingCopyRequest, EnhanceRequest, ExtractRequest,
     LineartRequest, VectorRequest, PipelineRequest, ExportRequest, FeedbackRequest)
 from app.storage import ServiceError
-
-
-FRONTEND_MODULES = (
-    "brush-history.js", "edit-history.js", "guidance.js",
-    "job-cancel.js", "params.js", "preview-session.js", "settings.js",
-)
+from app.services.model_lineart import model_capability
 
 
 def mount_workbench(app, current_store, current_service, current_worker):
@@ -42,8 +37,10 @@ def mount_workbench(app, current_store, current_service, current_worker):
         ready = database and storage and worker["alive"] and not worker["error"]
         return JSONResponse({"status": "ok" if ready else "degraded", "scope": "s1_local_workbench",
             "database": database, "storage": storage, "worker": worker, "versions": versions.snapshot(),
+            "capabilities": {"lineart_model": model_capability()},
             "limits": {"upload_bytes": DEFAULT_LIMITS.max_upload_bytes, "decode_pixels": DEFAULT_LIMITS.max_decode_pixels,
-                       "working_pixels": DEFAULT_LIMITS.max_vector_pixels, "tile_pixels": DEFAULT_LIMITS.max_tile_pixels,
+                       "working_pixels": DEFAULT_LIMITS.max_vector_pixels, "color_vector_pixels": DEFAULT_LIMITS.max_color_vector_pixels,
+                       "tile_pixels": DEFAULT_LIMITS.max_tile_pixels,
                        "provisional": True}}, status_code=200 if ready else 503)
 
     @app.post("/api/v1/images", status_code=201, responses={200: {"description": "Identical idempotent upload reused"}})
@@ -72,9 +69,20 @@ def mount_workbench(app, current_store, current_service, current_worker):
     def image_record(image_id: UUID):
         return current_store().get_image(str(image_id))
 
+    @app.get("/api/v1/images/{image_id}/history")
+    def image_history(image_id: UUID, collection: Literal["assets", "jobs", "flows"] = "assets",
+                      limit: int = Query(default=50, ge=1, le=50),
+                      cursor: str | None = Query(default=None, max_length=18)):
+        return current_store().page_image_history(str(image_id), collection, limit, cursor)
+
     @app.get("/api/v1/images")
     def images(limit: int = Query(default=20, ge=1, le=50), cursor: str | None = Query(default=None, max_length=18)):
         return current_store().page("images", limit, cursor)
+
+    @app.get("/api/v1/assets")
+    def assets(limit: int = Query(default=20, ge=1, le=50), cursor: str | None = Query(default=None, max_length=18),
+               q: str = Query(default="", max_length=200), kind: list[str] | None = Query(default=None, max_length=50)):
+        return current_store().page_assets(limit, cursor, q.strip(), kind or [])
 
     @app.get("/api/v1/assets/{asset_id}")
     def asset_info(asset_id: UUID):
@@ -161,56 +169,3 @@ def mount_workbench(app, current_store, current_service, current_worker):
     def feedback(payload: FeedbackRequest, request: Request):
         return current_service().feedback(payload, request.headers.get("idempotency-key", ""))
 
-    frontend = Path(__file__).resolve().parents[3] / "frontend"
-
-    def static_response(filename, media_type):
-        path = frontend / filename
-        if not path.is_file():
-            raise ServiceError("WORKBENCH_UNAVAILABLE", "The local workbench files are unavailable", 503)
-        return Response(path.read_bytes(), media_type=media_type, headers={"Cache-Control": "no-store"})
-
-    @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
-    def index():
-        return static_response("index.html", "text/html")
-
-    @app.api_route("/workbench.js", methods=["GET", "HEAD"], include_in_schema=False)
-    def javascript():
-        return static_response("workbench.js", "text/javascript")
-
-    def module_endpoint(filename):
-        def endpoint():
-            return static_response(filename, "text/javascript")
-        return endpoint
-
-    for module_name in FRONTEND_MODULES:
-        app.add_api_route(f"/{module_name}",
-            module_endpoint(module_name),
-            methods=["GET", "HEAD"], include_in_schema=False)
-
-    @app.api_route("/styles.css", methods=["GET", "HEAD"], include_in_schema=False)
-    def styles():
-        return static_response("styles.css", "text/css")
-
-    @app.api_route("/theme-saas.css", methods=["GET", "HEAD"], include_in_schema=False)
-    def saas_styles():
-        return static_response("theme-saas.css", "text/css")
-
-    @app.api_route("/theme-glass.css", methods=["GET", "HEAD"], include_in_schema=False)
-    def glass_styles():
-        return static_response("theme-glass.css", "text/css")
-
-    @app.api_route("/theme-glass.js", methods=["GET", "HEAD"], include_in_schema=False)
-    def glass_script():
-        return static_response("theme-glass.js", "text/javascript")
-
-    @app.api_route("/assets/pattern-studio/{filename}", methods=["GET", "HEAD"], include_in_schema=False)
-    def pattern_asset(filename: str):
-        allowed = {"bg-home.svg", "bg-workspace.svg", "motif-01-meander.svg", "motif-04-cloud.svg", "lotus-mark.svg", "crane-line-blue.png"}
-        if filename not in allowed:
-            raise ServiceError("ASSET_NOT_FOUND", "Unknown pattern asset", 404)
-        media = "image/svg+xml" if filename.endswith(".svg") else "image/png" if filename.endswith(".png") else "application/octet-stream"
-        return static_response(f"assets/pattern-studio/{filename}", media)
-
-    @app.api_route("/favicon.svg", methods=["GET", "HEAD"], include_in_schema=False)
-    def favicon():
-        return static_response("favicon.svg", "image/svg+xml")

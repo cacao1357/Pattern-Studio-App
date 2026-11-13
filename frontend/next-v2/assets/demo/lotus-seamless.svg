@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="500" height="500">
+  <title>缠枝莲 · 无缝单元</title>
+  <defs>
+    <g id="lotus-seamless-flw">
+      <path d="M250 244C264 238 276 227 275 215C274 201 254 191 250 186C246 191 226 201 225 215C224 227 236 238 250 244ZM256 250C262 264 273 276 285 275C299 274 309 254 314 250C309 246 299 226 285 225C273 224 262 236 256 250ZM250 256C236 262 224 273 225 285C226 299 246 309 250 314C254 309 274 299 275 285C276 273 264 262 250 256ZM244 250C238 236 227 224 215 225C201 226 191 246 186 250C191 254 201 274 215 275C227 276 238 264 244 250ZM253 247C259 250 266 250 269 246C273 242 270 233 270 230C267 230 258 227 254 231C250 234 250 241 253 247ZM253 253C250 259 250 266 254 269C258 273 267 270 270 270C270 267 273 258 269 254C266 250 259 250 253 253ZM247 253C241 250 234 250 231 254C227 258 230 267 230 270C233 270 242 273 246 269C250 266 250 259 247 253ZM247 247C250 241 250 234 246 231C242 227 233 230 230 230C230 233 227 242 231 246C234 250 241 250 247 247Z" fill="#E8DFC8" stroke="#22304F" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M261 250C261 244 256 239 250 239C244 239 239 244 239 250C239 256 244 261 250 261C256 261 261 256 261 250Z" fill="#E8DFC8" stroke="#22304F" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M255 250C255 247 253 245 250 245C247 245 245 247 245 250C245 253 247 255 250 255C253 255 255 253 255 250Z" fill="none" stroke="#22304F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g id="lotus-seamless-vineh">
+      <path d="M0 250C5 251 21 255 31 256C42 258 52 259 62 259C73 259 83 258 94 256C104 255 115 252 125 250C135 248 146 245 156 244C167 242 177 241 188 241C198 241 208 242 219 244C229 245 240 248 250 250C260 252 271 255 281 256C292 258 302 259 312 259C323 259 333 258 344 256C354 255 365 252 375 250C385 248 396 245 406 244C417 242 427 241 438 241C448 241 458 242 469 244C479 245 495 249 500 250" fill="none" stroke="#E8DFC8" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g id="lotus-seamless-vinev">
+      <path d="M250 0C251 5 255 21 256 31C258 42 259 52 259 62C259 73 258 83 256 94C255 104 252 115 250 125C248 135 245 146 244 156C242 167 241 177 241 188C241 198 242 208 244 219C245 229 248 240 250 250C252 260 255 271 256 281C258 292 259 302 259 312C259 323 258 333 256 344C255 354 252 365 250 375C248 385 245 396 244 406C242 417 241 427 241 438C241 448 242 458 244 469C245 479 249 495 250 500" fill="none" stroke="#E8DFC8" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g id="lotus-seamless-cell">
+      <path d="M139 111C141 109 145 105 148 102C150 100 153 96 156 94C160 92 164 93 169 92C173 92 179 91 184 90C189 89 198 90 199 86C201 83 193 74 193 69C194 64 200 58 204 56C208 54 214 56 218 58C221 60 223 66 222 69C222 72 219 76 217 77C215 78 211 77 209 76C207 75 207 72 207 71" fill="none" stroke="#E8DFC8" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M139 111C141 109 145 105 148 102C150 100 154 97 156 94C158 90 157 86 158 81C158 77 159 71 160 66C161 61 160 52 164 51C167 49 176 57 181 57C186 56 192 50 194 46C196 42 194 36 192 32C190 29 184 27 181 28C178 28 174 31 173 33C172 35 173 39 174 41C175 43 178 43 179 43" fill="none" stroke="#E8DFC8" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M143 107C148 111 155 114 162 112C170 110 175 103 177 100C174 98 166 94 158 95C152 96 146 101 143 107ZM143 107C149 104 154 98 155 92C156 84 152 76 150 73C147 75 140 80 138 88C136 95 139 102 143 107ZM143 107C152 108 164 104 172 96C181 86 181 72 183 67C178 69 164 69 154 78C146 86 142 98 143 107Z" fill="#E8DFC8" stroke="#22304F" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </defs>
+  <rect x="0" y="0" width="500" height="500" fill="#22304F"/>
+  <g transform="translate(-250 -250)">
+    <use href="#lotus-seamless-flw"/>
+  </g>
+  <g transform="translate(-250 0)">
+    <use href="#lotus-seamless-flw"/>
+  </g>
+  <g transform="translate(-250 250)">
+    <use href="#lotus-seamless-flw"/>
+  </g>
+  <g transform="translate(0 -250)">
+    <use href="#lotus-seamless-flw"/>
+  </g>
+  <use href="#lotus-seamless-flw"/>
+  <g transform="translate(0 250)">
+    <use href="#lotus-seamless-flw"/>
+  </g>
+  <g transform="translate(250 -250)">
+    <use href="#lotus-seamless-flw"/>
+  </g>
+  <g transform="translate(250 0)">
+    <use href="#lotus-seamless-flw"/>
+  </g>
+  <g transform="translate(250 250)">
+    <use href="#lotus-seamless-flw"/>
+  </g>
+  <use href="#lotus-seamless-vineh"/>
+  <use href="#lotus-seamless-vinev"/>
+  <g transform="rotate(0 250 250)">
+    <use href="#lotus-seamless-cell"/>
+  </g>
+  <g transform="rotate(90 250 250)">
+    <use href="#lotus-seamless-cell"/>
+  </g>
+  <g transform="rotate(180 250 250)">
+    <use href="#lotus-seamless-cell"/>
+  </g>
+  <g transform="rotate(270 250 250)">
+    <use href="#lotus-seamless-cell"/>
+  </g>
+</svg>

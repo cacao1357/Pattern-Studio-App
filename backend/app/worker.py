@@ -13,9 +13,11 @@ from app.storage import ServiceError
 
 
 _MEMORY_HANDLE = None
+LOCAL_MEMORY_MIB = 6144
+LINEART_MODEL_MEMORY_MIB = 6144
 
 
-def bind_memory_limit(memory_mib=1024):
+def bind_memory_limit(memory_mib=LOCAL_MEMORY_MIB):
     global _MEMORY_HANDLE
     if os.name != "nt":
         import resource
@@ -54,6 +56,9 @@ def bind_memory_limit(memory_mib=1024):
     limits = Extended()
     limits.BasicLimitInformation.LimitFlags = 0x100
     limits.ProcessMemoryLimit = memory_mib * 1024 * 1024
+    if memory_mib == LINEART_MODEL_MEMORY_MIB:
+        limits.BasicLimitInformation.LimitFlags |= 0x200
+        limits.JobMemoryLimit = limits.ProcessMemoryLimit
     if not kernel.SetInformationJobObject(handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)) or not kernel.AssignProcessToJobObject(handle, kernel.GetCurrentProcess()):
         error = ctypes.get_last_error()
         kernel.CloseHandle(handle)
@@ -82,10 +87,10 @@ def _watch_parent(parent_pid):
         os._exit(3)
 
 
-def child_main(root, job_id, token, parent_pid):
+def child_main(root, job_id, token, parent_pid, memory_mib=LOCAL_MEMORY_MIB):
     threading.Thread(target=_watch_parent, args=(parent_pid,), daemon=True).start()
     try:
-        bind_memory_limit()
+        bind_memory_limit(memory_mib)
     except Exception:
         return 4  # Fail closed before loading algorithms if the limit is unavailable.
     from app.workbench_store import WorkbenchStore
@@ -95,7 +100,7 @@ def child_main(root, job_id, token, parent_pid):
     store = WorkbenchStore(Path(root))
     try:
         job = store.get_job(job_id)
-        if job["kind"] == "decompose-layers" or job["kind"] == "repair" and not job["parameters"].get("provider_call_id"):
+        if job["kind"] in {"decompose-layers", "cloud-lineart"} or job["kind"] == "repair" and not job["parameters"].get("provider_call_id"):
             from pydantic import SecretStr
             from app.config import Settings
             from app.services.assisted_workbench import execute_decomposition
@@ -106,7 +111,10 @@ def child_main(root, job_id, token, parent_pid):
             config["ark_api_key"] = SecretStr(config["ark_api_key"])
             config["api_token"] = SecretStr(config["api_token"])
             config["storage_root"] = Path(root)
-            if job["kind"] == "repair":
+            if job["kind"] == "cloud-lineart":
+                from app.services.cloud_lineart import execute_cloud_lineart
+                execute_cloud_lineart(store, job, token, Settings(**config))
+            elif job["kind"] == "repair":
                 from app.services.finishing_workbench import execute_repair
                 execute_repair(store, job, token, Settings(**config))
             else:
@@ -117,7 +125,8 @@ def child_main(root, job_id, token, parent_pid):
     except (ProcessingError, ServiceError) as error:
         store.finish_job(job_id, token, {"code": error.code, "message": str(error)})
     except MemoryError:
-        store.finish_job(job_id, token, {"code": "WORKER_MEMORY_LIMIT", "message": "Local processing reached the 1024 MiB memory limit; use a smaller working copy"})
+        store.finish_job(job_id, token, {"code": "WORKER_MEMORY_LIMIT",
+                                         "message": f"Local processing reached the {memory_mib} MiB memory limit; use a smaller working copy"})
     except Exception:
         store.finish_job(job_id, token, {"code": "LOCAL_PROCESSING_FAILED", "message": "Local processing failed; the original and previous versions remain available"})
     return 0
@@ -145,7 +154,8 @@ class LocalWorker:
                 "heartbeat_age_seconds": round(time.time() - self.last_heartbeat, 2),
                 "active_job_id": self.active_job_id, "error": self.last_error,
                 "timeout_seconds": self.timeout_seconds, "provider_timeout_seconds": max(180, self.timeout_seconds),
-                "memory_limit_mib": 1024, "concurrency": 1}
+                "memory_limit_mib": LOCAL_MEMORY_MIB, "lineart_model_memory_limit_mib": LINEART_MODEL_MEMORY_MIB,
+                "concurrency": 1}
 
     def _loop(self):
         from app.services.workflow import WorkflowCoordinator
@@ -172,13 +182,19 @@ class LocalWorker:
         backend = Path(__file__).resolve().parents[1]
         env = {k: os.environ[k] for k in ("SYSTEMROOT", "WINDIR", "PATH", "TEMP", "TMP") if k in os.environ}
         env.update(PYTHONPATH=str(backend), PYTHONDONTWRITEBYTECODE="1", PYTHONUTF8="1")
-        command = [sys.executable, "-B", "-m", "app.worker", str(self.store.root), job["job_id"], token, str(os.getpid())]
+        model_lineart = (
+            (job["kind"] == "lineart" and job["parameters"].get("method") == "model")
+            or (job["kind"] == "pipeline" and job["parameters"].get("recipe") == "model_lineart")
+        )
+        memory_mib = LINEART_MODEL_MEMORY_MIB if model_lineart else LOCAL_MEMORY_MIB
+        command = [sys.executable, "-B", "-m", "app.worker", str(self.store.root), job["job_id"], token,
+                   str(os.getpid()), str(memory_mib)]
         child = None
         diagnostics = bytearray()
         reader = None
         error = None
         started = time.monotonic()
-        provider_task = job["kind"] == "decompose-layers" or job["kind"] == "repair" and not job["parameters"].get("provider_call_id")
+        provider_task = job["kind"] in {"decompose-layers", "cloud-lineart"} or job["kind"] == "repair" and not job["parameters"].get("provider_call_id")
         deadline_seconds = max(180, self.timeout_seconds) if provider_task else self.timeout_seconds
         try:
             current_settings = self.provider_settings() if callable(self.provider_settings) else self.provider_settings
@@ -244,7 +260,8 @@ class LocalWorker:
                 child.stderr.close()
             if child and child.returncode not in (None, 0):
                 if re.search(rb"memory allocation of [0-9]+ bytes failed", diagnostics):
-                    error = {"code": "WORKER_MEMORY_LIMIT", "message": "Image processing reached the 1024 MiB memory limit; use a smaller working copy and review any interrupted AI call before retrying"}
+                    error = {"code": "WORKER_MEMORY_LIMIT",
+                             "message": f"Image processing reached the {memory_mib} MiB memory limit; use a smaller working copy and review any interrupted AI call before retrying"}
                 if error:
                     error["worker_exit_code"] = child.returncode
             if self.store.get_job(job["job_id"])["state"] == "running":
@@ -261,4 +278,4 @@ class LocalWorker:
 
 
 if __name__ == "__main__":
-    raise SystemExit(child_main(sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])))
+    raise SystemExit(child_main(sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5])))

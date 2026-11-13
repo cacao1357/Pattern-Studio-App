@@ -11,7 +11,7 @@ from app.storage import Store, ServiceError, canonical_json, digest, now
 
 
 TERMINAL = {"succeeded", "failed", "cancelled"}
-EXTERNAL_CALL_JOBS = {"decompose-layers"}
+EXTERNAL_CALL_JOBS = {"decompose-layers", "cloud-lineart"}
 
 # Image-level facts copied onto every derived asset so a manifest can be read
 # without walking the whole parent graph.
@@ -26,6 +26,12 @@ def validate_key(key: str) -> str:
     if not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", key):
         raise ServiceError("IDEMPOTENCY_KEY_REQUIRED", "Supply a random Idempotency-Key of 16..128 ASCII letters, digits, underscores or hyphens", 422)
     return key
+
+
+def page_offset(cursor):
+    if cursor is not None and not re.fullmatch(r"[1-9][0-9]{0,17}", cursor):
+        raise ServiceError("INVALID_CURSOR", "Use the next_cursor returned by the listing", 422)
+    return int(cursor) if cursor else 9223372036854775807
 
 
 class WorkbenchStore(Store):
@@ -501,7 +507,7 @@ class WorkbenchStore(Store):
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             job = self._leased(db, job_id, token)
-            name = step_name or ("repair-candidate" if job["kind"] == "repair" else "decompose-layers")
+            name = step_name or ("repair-candidate" if job["kind"] == "repair" else job["kind"])
             assets = []
             for layer in call.get("result", {}).get("outputs", []):
                 assets.append(layer["asset"])
@@ -591,18 +597,98 @@ class WorkbenchStore(Store):
     def page(self, table, limit, cursor):
         if table not in {"images", "local_jobs"}:
             raise ValueError("Unsupported history table")
-        if cursor is not None and not re.fullmatch(r"[1-9][0-9]{0,17}", cursor):
-            raise ServiceError("INVALID_CURSOR", "Use the next_cursor returned by history", 422)
         with self.connection() as db:
             rows = db.execute(f"SELECT rowid AS sequence,* FROM {table} WHERE rowid<? ORDER BY rowid DESC LIMIT ?",
-                              (int(cursor) if cursor else 9223372036854775807, limit + 1)).fetchall()
+                              (page_offset(cursor), limit + 1)).fetchall()
         selected = rows[:limit]
         return {"items": [self.get_image(r["id"]) if table == "images" else self.get_job(r["id"]) for r in selected],
                 "next_cursor": str(selected[-1]["sequence"]) if len(rows) > limit else None}
 
-    def submit(self, kind, input_id, parameters, key, *, retry_of=None):
+    def page_image_history(self, image_id, collection, limit, cursor):
+        """Read persisted image history without submitting, reconciling or retrying work."""
+        if collection not in {"assets", "jobs", "flows"}:
+            raise ValueError("Unsupported image history collection")
+        offset = page_offset(cursor)
+        with self.connection() as db:
+            image = db.execute("SELECT original_id, normalized_id FROM images WHERE id=?", (image_id,)).fetchone()
+            if image is None:
+                raise ServiceError("IMAGE_NOT_FOUND", "Image history entry not found", 404)
+            # Follow registered parents as well as copied metadata: older assets may
+            # lack image_id. UNION makes duplicate paths and cycles harmless.
+            ownership = """WITH RECURSIVE owned(id) AS (
+                SELECT id FROM assets WHERE id IN (?,?) OR metadata->>'image_id'=?
+                UNION SELECT r.child_id FROM asset_relations r JOIN owned o ON r.parent_id=o.id
+                UNION SELECT a.id FROM assets a JOIN owned o ON a.metadata->>'source_asset_id'=o.id
+            ) """
+            source, condition = {
+                "assets": ("assets", "t.id IN (SELECT id FROM owned)"),
+                "jobs": ("local_jobs", "t.input_id IN (SELECT id FROM owned)"),
+                "flows": ("ai_flows", "t.input_id IN (SELECT id FROM owned)"),
+            }[collection]
+            rows = db.execute(ownership + f"""SELECT t.rowid AS sequence,t.* FROM {source} t
+                WHERE t.rowid<? AND {condition} ORDER BY t.rowid DESC LIMIT ?""",
+                (image["original_id"], image["normalized_id"], image_id, offset, limit + 1)).fetchall()
+        selected = rows[:limit]
+        if collection == "assets":
+            items = [json.loads(row["metadata"]) for row in selected]
+        else:
+            read = self.get_job if collection == "jobs" else self.get_ai_flow
+            items = [read(row["id"]) for row in selected]
+        return {"items": items,
+                "next_cursor": str(selected[-1]["sequence"]) if len(rows) > limit else None}
+
+    def page_assets(self, limit, cursor, query, kinds):
+        offset = page_offset(cursor)
+        search = ""
+        values = [offset]
+        if query or kinds:
+            conditions = []
+            if query:
+                conditions.append("""instr(lower(id || ' ' || coalesce(metadata->>'kind', '') || ' ' ||
+                    coalesce(metadata->>'filename', '') || ' ' || coalesce(metadata->>'source_name', '') || ' ' ||
+                    coalesce(metadata->>'grade', '')), lower(?)) > 0""")
+                values.append(query)
+            if kinds:
+                placeholders = ",".join("?" for _ in kinds)
+                conditions.append(f"metadata->>'kind' IN ({placeholders})")
+                values.extend(kinds)
+            search = " AND (" + " OR ".join(conditions) + ")"
+        with self.connection() as db:
+            rows = db.execute(f"SELECT rowid,metadata FROM assets WHERE rowid<?{search} ORDER BY rowid DESC LIMIT ?",
+                              (*values, limit + 1)).fetchall()
+        return {"items": [json.loads(row["metadata"]) for row in rows[:limit]],
+                "next_cursor": str(rows[limit - 1]["rowid"]) if len(rows) > limit else None}
+
+    def set_tile_observation(self, asset_id, observation, revision):
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT metadata FROM assets WHERE id=?", (asset_id,)).fetchone()
+            if row is None:
+                raise ServiceError("ASSET_NOT_FOUND", "Registered asset not found", 404)
+            asset = json.loads(row["metadata"])
+            if asset["kind"] != "tile_preview":
+                raise ServiceError("TILE_PREVIEW_REQUIRED", "Select a saved tile preview", 422)
+            current_revision = asset.get("seam_observation_revision", 0)
+            if asset.get("seam_observation") == observation:
+                return asset
+            if revision != current_revision:
+                raise ServiceError("STALE_SEAM_OBSERVATION", "Reload the tile preview before updating its seam observation", 409)
+            job_id = asset.get("generated_by_job_id")
+            job = db.execute("SELECT state,result_json FROM local_jobs WHERE id=? AND kind='tile-preview'", (job_id,)).fetchone()
+            if job is None or job["state"] != "succeeded":
+                raise ServiceError("TILE_PREVIEW_NOT_READY", "Wait for the saved tile preview before recording an observation", 409)
+            result = json.loads(job["result_json"])
+            asset.update(seam_observation=observation, seam_observation_revision=current_revision + 1,
+                         seam_observation_source="not_reviewed" if observation == "not_reviewed" else "human")
+            result["assets"] = [asset if item["asset_id"] == asset_id else item for item in result["assets"]]
+            db.execute("UPDATE assets SET metadata=? WHERE id=?", (canonical_json(asset), asset_id))
+            db.execute("UPDATE local_jobs SET result_json=?,updated_at=? WHERE id=?", (canonical_json(result), now(), job_id))
+            db.commit()
+        return asset
+
+    def submit(self, kind, input_id, parameters, key, *, retry_of=None, request_hash=None):
         scope = "jobs/" + kind if retry_of is None else "retry/" + retry_of
-        request_hash = digest(canonical_json({"input": input_id, "parameters": parameters, "retry_of": retry_of}).encode())
+        request_hash = request_hash or digest(canonical_json({"input": input_id, "parameters": parameters, "retry_of": retry_of}).encode())
         job_id, timestamp = str(uuid4()), now()
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")

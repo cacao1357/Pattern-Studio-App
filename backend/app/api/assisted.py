@@ -6,6 +6,8 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from app.schemas.assisted import AiPipelineRequest, ComposeLayersRequest, ContinueRequest, RefineMaskRequest, RerunRequest
+from app.schemas.provider import CloudLineartRequest
+from app.services.cloud_lineart import submit_cloud_lineart
 
 
 def mount_assisted(app, current_service):
@@ -17,6 +19,10 @@ def mount_assisted(app, current_service):
     @app.post("/api/v1/pipelines/ai", status_code=202)
     def ai_pipeline(payload: AiPipelineRequest, request: Request):
         return JSONResponse(current_service().create_pipeline(payload, key(request)), status_code=202)
+
+    @app.post("/api/v1/jobs/cloud-lineart", status_code=202)
+    def cloud_lineart(payload: CloudLineartRequest, request: Request):
+        return JSONResponse(submit_cloud_lineart(current_service(), payload, key(request)), status_code=202)
 
     @app.get("/api/v1/jobs/{job_id}/layers")
     def layers(job_id: UUID):

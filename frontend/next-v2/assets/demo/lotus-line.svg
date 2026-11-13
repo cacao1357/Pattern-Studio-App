@@ -1,0 +1,240 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" width="1000" height="1000">
+  <title>缠枝莲团花 · 线稿</title>
+  <defs>
+    <g id="lotus-line-stem">
+      <path d="M427 324C428 323 433 321 435 319C438 317 441 315 443 313C446 311 449 309 451 306C454 304 457 301 460 299C463 297 466 294 469 292C472 290 476 288 479 286C482 285 486 283 489 282C493 281 496 281 500 281C504 281 507 281 511 282C514 283 518 285 521 286C524 288 528 290 531 292C534 294 537 297 540 299C543 301 546 304 549 306C551 309 554 311 557 313C559 315 562 317 565 319C567 321 572 323 573 324" fill="none" stroke="#1B2B54" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g id="lotus-line-orn">
+      <path d="M500 309C500 307 500 301 500 297C500 293 498 288 500 284C502 280 506 276 510 272C514 268 518 263 521 258C524 253 531 246 530 242C529 238 516 239 513 235C509 232 507 224 508 219C508 215 513 209 516 207C520 205 526 205 530 207C533 208 536 212 537 215C538 218 536 222 535 224C533 226 530 227 528 227C525 227 523 225 522 224" fill="none" stroke="#1B2B54" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M500 309C500 307 500 301 500 297C500 293 502 288 500 284C498 280 494 276 490 272C486 268 482 263 479 258C476 253 469 246 470 242C471 238 484 239 487 235C491 232 493 224 492 219C492 215 487 209 484 207C480 205 474 205 470 207C467 208 464 212 463 215C462 218 464 222 465 224C467 226 470 227 472 227C475 227 477 225 478 224" fill="none" stroke="#1B2B54" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M500 294C508 294 517 289 522 282C528 273 527 261 527 257C523 258 512 260 505 269C499 276 498 287 500 294ZM500 294C502 287 501 276 495 269C488 260 477 258 473 257C473 261 472 273 478 282C483 289 492 294 500 294ZM500 294C509 286 516 271 516 256C515 238 503 224 500 218C497 224 485 238 484 256C484 271 491 286 500 294Z" fill="none" stroke="#1B2B54" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g id="lotus-line-bloom">
+      <path d="M504 257C516 260 530 256 536 247C543 236 536 219 535 213C529 214 511 213 503 223C496 232 497 246 504 257ZM506 264C507 277 515 289 525 292C538 295 552 283 557 281C554 275 550 257 538 253C528 249 514 255 506 264ZM500 268C488 273 479 284 479 295C480 308 496 318 500 322C504 318 520 308 521 295C521 284 512 273 500 268ZM494 264C486 255 472 249 462 253C450 257 446 275 443 281C448 283 462 295 475 292C485 289 493 277 494 264ZM496 257C503 246 504 232 497 223C489 213 471 214 465 213C464 219 457 236 464 247C470 256 484 260 496 257Z" fill="none" stroke="#1B2B54" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M510 262C510 256 506 252 500 252C494 252 490 256 490 262C490 268 494 272 500 272C506 272 510 268 510 262Z" fill="none" stroke="#1B2B54" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M505 262C505 259 503 257 500 257C497 257 495 259 495 262C495 265 497 267 500 267C503 267 505 265 505 262Z" fill="none" stroke="#1B2B54" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g id="lotus-line-rbig">
+      <path d="M500 474C518 461 532 436 531 411C530 381 505 358 500 348C495 358 470 381 469 411C468 436 482 461 500 474Z" fill="none" stroke="#1B2B54" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g id="lotus-line-rsmall">
+      <path d="M500 480C513 470 523 449 523 428C522 403 504 384 500 376C496 384 478 403 477 428C477 449 487 470 500 480Z" fill="none" stroke="#1B2B54" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g id="lotus-line-ribbig">
+      <path d="M500 456C500 448 500 425 500 410C500 395 500 373 500 366" fill="none" stroke="#1B2B54" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g id="lotus-line-ribsmall">
+      <path d="M500 462C500 456 500 438 500 426C500 414 500 398 500 392" fill="none" stroke="#1B2B54" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g id="lotus-line-pod">
+      <path d="M532 500C532 482 518 468 500 468C482 468 468 482 468 500C468 518 482 532 500 532C518 532 532 518 532 500Z" fill="none" stroke="#1B2B54" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g id="lotus-line-podring">
+      <path d="M521 500C521 488 512 479 500 479C488 479 479 488 479 500C479 512 488 521 500 521C512 521 521 512 521 500Z" fill="none" stroke="#1B2B54" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g id="lotus-line-seed">
+      <path d="M503 487C503 485 502 484 500 484C498 484 497 485 497 487C497 489 498 490 500 490C502 490 503 489 503 487Z" fill="none" stroke="#1B2B54" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g id="lotus-line-ring_ros">
+      <path d="M666 500C666 408 592 334 500 334C408 334 334 408 334 500C334 592 408 666 500 666C592 666 666 592 666 500Z" fill="none" stroke="#1B2B54" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g id="lotus-line-ring_out">
+      <path d="M918 500C918 269 731 82 500 82C269 82 82 269 82 500C82 731 269 918 500 918C731 918 918 731 918 500Z" fill="none" stroke="#1B2B54" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g id="lotus-line-ring_outf">
+      <path d="M904 500C904 277 723 96 500 96C277 96 96 277 96 500C96 723 277 904 500 904C723 904 904 723 904 500Z" fill="none" stroke="#1B2B54" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g id="lotus-line-ring_in">
+      <path d="M838 500C838 313 687 162 500 162C313 162 162 313 162 500C162 687 313 838 500 838C687 838 838 687 838 500Z" fill="none" stroke="#1B2B54" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g id="lotus-line-ring_inf">
+      <path d="M828 500C828 319 681 172 500 172C319 172 172 319 172 500C172 681 319 828 500 828C681 828 828 681 828 500Z" fill="none" stroke="#1B2B54" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g id="lotus-line-lappet">
+      <path d="M470 104C469 115 473 129 484 140C492 148 498 152 500 154C502 152 508 148 516 140C527 129 531 115 530 104C516 106 484 106 470 104Z" fill="none" stroke="#1B2B54" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g id="lotus-line-bead">
+      <path d="M541 129C541 126 539 125 537 125C534 125 532 126 532 129C532 131 534 133 537 133C539 133 541 131 541 129Z" fill="none" stroke="#1B2B54" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g id="lotus-line-lappet4">
+      <use href="#lotus-line-lappet" transform="rotate(0 500 500)"/>
+      <use href="#lotus-line-lappet" transform="rotate(90 500 500)"/>
+      <use href="#lotus-line-lappet" transform="rotate(180 500 500)"/>
+      <use href="#lotus-line-lappet" transform="rotate(270 500 500)"/>
+    </g>
+    <g id="lotus-line-bead4">
+      <use href="#lotus-line-bead" transform="rotate(0 500 500)"/>
+      <use href="#lotus-line-bead" transform="rotate(90 500 500)"/>
+      <use href="#lotus-line-bead" transform="rotate(180 500 500)"/>
+      <use href="#lotus-line-bead" transform="rotate(270 500 500)"/>
+    </g>
+  </defs>
+  <g transform="rotate(0 500 500)">
+    <use href="#lotus-line-stem"/>
+    <use href="#lotus-line-bloom"/>
+    <use href="#lotus-line-rbig"/>
+    <use href="#lotus-line-ribbig"/>
+  </g>
+  <g transform="rotate(45 500 500)">
+    <use href="#lotus-line-stem"/>
+    <use href="#lotus-line-bloom"/>
+    <use href="#lotus-line-rbig"/>
+    <use href="#lotus-line-ribbig"/>
+  </g>
+  <g transform="rotate(90 500 500)">
+    <use href="#lotus-line-stem"/>
+    <use href="#lotus-line-bloom"/>
+    <use href="#lotus-line-rbig"/>
+    <use href="#lotus-line-ribbig"/>
+  </g>
+  <g transform="rotate(135 500 500)">
+    <use href="#lotus-line-stem"/>
+    <use href="#lotus-line-bloom"/>
+    <use href="#lotus-line-rbig"/>
+    <use href="#lotus-line-ribbig"/>
+  </g>
+  <g transform="rotate(180 500 500)">
+    <use href="#lotus-line-stem"/>
+    <use href="#lotus-line-bloom"/>
+    <use href="#lotus-line-rbig"/>
+    <use href="#lotus-line-ribbig"/>
+  </g>
+  <g transform="rotate(225 500 500)">
+    <use href="#lotus-line-stem"/>
+    <use href="#lotus-line-bloom"/>
+    <use href="#lotus-line-rbig"/>
+    <use href="#lotus-line-ribbig"/>
+  </g>
+  <g transform="rotate(270 500 500)">
+    <use href="#lotus-line-stem"/>
+    <use href="#lotus-line-bloom"/>
+    <use href="#lotus-line-rbig"/>
+    <use href="#lotus-line-ribbig"/>
+  </g>
+  <g transform="rotate(315 500 500)">
+    <use href="#lotus-line-stem"/>
+    <use href="#lotus-line-bloom"/>
+    <use href="#lotus-line-rbig"/>
+    <use href="#lotus-line-ribbig"/>
+  </g>
+  <g transform="rotate(22.5 500 500)">
+    <use href="#lotus-line-orn"/>
+    <use href="#lotus-line-rsmall"/>
+    <use href="#lotus-line-ribsmall"/>
+  </g>
+  <g transform="rotate(67.5 500 500)">
+    <use href="#lotus-line-orn"/>
+    <use href="#lotus-line-rsmall"/>
+    <use href="#lotus-line-ribsmall"/>
+  </g>
+  <g transform="rotate(112.5 500 500)">
+    <use href="#lotus-line-orn"/>
+    <use href="#lotus-line-rsmall"/>
+    <use href="#lotus-line-ribsmall"/>
+  </g>
+  <g transform="rotate(157.5 500 500)">
+    <use href="#lotus-line-orn"/>
+    <use href="#lotus-line-rsmall"/>
+    <use href="#lotus-line-ribsmall"/>
+  </g>
+  <g transform="rotate(202.5 500 500)">
+    <use href="#lotus-line-orn"/>
+    <use href="#lotus-line-rsmall"/>
+    <use href="#lotus-line-ribsmall"/>
+  </g>
+  <g transform="rotate(247.5 500 500)">
+    <use href="#lotus-line-orn"/>
+    <use href="#lotus-line-rsmall"/>
+    <use href="#lotus-line-ribsmall"/>
+  </g>
+  <g transform="rotate(292.5 500 500)">
+    <use href="#lotus-line-orn"/>
+    <use href="#lotus-line-rsmall"/>
+    <use href="#lotus-line-ribsmall"/>
+  </g>
+  <g transform="rotate(337.5 500 500)">
+    <use href="#lotus-line-orn"/>
+    <use href="#lotus-line-rsmall"/>
+    <use href="#lotus-line-ribsmall"/>
+  </g>
+  <use href="#lotus-line-ring_ros"/>
+  <use href="#lotus-line-pod"/>
+  <use href="#lotus-line-podring"/>
+  <g transform="rotate(22.5 500 500)">
+    <use href="#lotus-line-seed"/>
+  </g>
+  <g transform="rotate(67.5 500 500)">
+    <use href="#lotus-line-seed"/>
+  </g>
+  <g transform="rotate(112.5 500 500)">
+    <use href="#lotus-line-seed"/>
+  </g>
+  <g transform="rotate(157.5 500 500)">
+    <use href="#lotus-line-seed"/>
+  </g>
+  <g transform="rotate(202.5 500 500)">
+    <use href="#lotus-line-seed"/>
+  </g>
+  <g transform="rotate(247.5 500 500)">
+    <use href="#lotus-line-seed"/>
+  </g>
+  <g transform="rotate(292.5 500 500)">
+    <use href="#lotus-line-seed"/>
+  </g>
+  <g transform="rotate(337.5 500 500)">
+    <use href="#lotus-line-seed"/>
+  </g>
+  <use href="#lotus-line-ring_out"/>
+  <use href="#lotus-line-ring_outf"/>
+  <use href="#lotus-line-ring_in"/>
+  <use href="#lotus-line-ring_inf"/>
+  <g transform="rotate(0 500 500)">
+    <use href="#lotus-line-lappet4"/>
+  </g>
+  <g transform="rotate(11.25 500 500)">
+    <use href="#lotus-line-lappet4"/>
+  </g>
+  <g transform="rotate(22.5 500 500)">
+    <use href="#lotus-line-lappet4"/>
+  </g>
+  <g transform="rotate(33.75 500 500)">
+    <use href="#lotus-line-lappet4"/>
+  </g>
+  <g transform="rotate(45 500 500)">
+    <use href="#lotus-line-lappet4"/>
+  </g>
+  <g transform="rotate(56.25 500 500)">
+    <use href="#lotus-line-lappet4"/>
+  </g>
+  <g transform="rotate(67.5 500 500)">
+    <use href="#lotus-line-lappet4"/>
+  </g>
+  <g transform="rotate(78.75 500 500)">
+    <use href="#lotus-line-lappet4"/>
+  </g>
+  <g transform="rotate(0 500 500)">
+    <use href="#lotus-line-bead4"/>
+  </g>
+  <g transform="rotate(11.25 500 500)">
+    <use href="#lotus-line-bead4"/>
+  </g>
+  <g transform="rotate(22.5 500 500)">
+    <use href="#lotus-line-bead4"/>
+  </g>
+  <g transform="rotate(33.75 500 500)">
+    <use href="#lotus-line-bead4"/>
+  </g>
+  <g transform="rotate(45 500 500)">
+    <use href="#lotus-line-bead4"/>
+  </g>
+  <g transform="rotate(56.25 500 500)">
+    <use href="#lotus-line-bead4"/>
+  </g>
+  <g transform="rotate(67.5 500 500)">
+    <use href="#lotus-line-bead4"/>
+  </g>
+  <g transform="rotate(78.75 500 500)">
+    <use href="#lotus-line-bead4"/>
+  </g>
+</svg>

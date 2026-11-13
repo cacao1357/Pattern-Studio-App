@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" width="640" height="640">
+  <title>缠枝莲团花 · 候选三（分色填涂）</title>
+  <defs>
+    <g id="lotus-candidate-3-stem">
+      <path d="M274 209C275 209 278 208 280 206C282 205 284 204 285 203C287 201 289 200 291 198C292 196 294 195 296 193C298 192 300 190 302 189C304 188 306 186 308 185C310 184 312 184 314 183C316 183 318 182 320 182C322 182 324 183 326 183C328 184 330 184 332 185C334 186 336 188 338 189C340 190 342 192 344 193C346 195 348 196 349 198C351 200 353 201 355 203C356 204 358 205 360 206C362 208 365 209 366 209L368 205C367 204 364 203 363 202C361 201 360 200 358 199C356 197 354 196 353 194C351 193 349 191 347 189C345 188 343 186 341 185C339 183 337 182 335 181C332 180 330 179 327 178C325 178 322 177 320 177C318 177 315 178 313 178C310 179 308 180 305 181C303 182 301 183 299 185C297 186 295 188 293 189C291 191 289 193 287 194C286 196 284 197 282 199C280 200 279 201 277 202C276 203 273 204 272 205Z" fill="#EFEBE2"/>
+    </g>
+    <g id="lotus-candidate-3-orn">
+      <path d="M323 198C323 196 323 193 323 190C323 188 321 185 322 183C323 180 326 178 328 176C331 173 333 170 336 167C338 163 343 157 342 154C341 151 332 151 330 149C328 147 327 143 328 141C328 138 330 136 332 135C334 134 336 134 338 135C340 135 341 137 341 138C341 140 341 141 340 142C340 143 338 143 338 143C337 143 336 142 336 141L333 146C334 146 336 148 338 148C339 148 343 147 344 145C346 143 347 140 346 137C345 134 343 131 340 130C337 129 332 129 329 130C326 132 323 136 322 140C322 144 324 150 326 152C329 155 336 154 337 156C338 158 333 161 331 164C329 166 327 170 324 172C322 175 319 178 318 181C316 184 317 187 317 190C317 193 317 196 317 198Z" fill="#EFEBE2"/>
+      <path d="M323 198C323 196 323 193 323 190C323 187 324 184 322 181C321 178 318 175 316 172C313 170 311 166 309 164C307 161 302 158 303 156C304 154 311 155 314 152C316 150 318 144 318 140C317 136 314 132 311 130C308 129 303 129 300 130C297 131 295 134 294 137C293 140 294 143 296 145C297 147 301 148 302 148C304 148 306 146 307 146L304 141C304 142 303 143 302 143C302 143 300 143 300 142C299 141 299 140 299 138C299 137 300 135 302 135C304 134 306 134 308 135C310 136 312 138 312 141C313 143 312 147 310 149C308 151 299 151 298 154C297 157 302 163 304 167C307 170 309 173 312 176C314 178 317 180 318 183C319 185 317 188 317 190C317 193 317 196 317 198Z" fill="#EFEBE2"/>
+      <path d="M320 188C325 188 331 185 334 180C338 174 337 167 337 164C334 165 327 167 323 172C319 177 319 184 320 188ZM320 188C321 184 321 177 317 172C313 167 306 165 303 164C303 167 302 174 306 180C309 185 315 188 320 188ZM320 188C326 183 330 174 330 164C330 152 322 143 320 140C318 143 310 152 310 164C310 174 314 183 320 188Z" fill="#EFEBE2"/>
+    </g>
+    <g id="lotus-candidate-3-bloom">
+      <path d="M322 165C330 166 339 164 343 158C348 151 343 140 343 137C339 137 327 136 322 143C317 148 318 157 322 165ZM324 169C325 177 329 185 336 187C344 189 353 181 357 180C355 176 352 165 344 162C338 159 329 163 324 169ZM320 172C313 175 307 182 307 189C307 197 317 203 320 206C323 203 333 197 333 189C333 182 327 175 320 172ZM316 169C311 163 302 159 296 162C288 165 285 176 283 180C287 181 296 189 304 187C311 185 315 177 316 169ZM318 165C322 157 323 148 318 143C313 136 301 137 297 137C297 140 292 151 297 158C301 164 310 166 318 165Z" fill="#B13A2B"/>
+      <path d="M326 168C326 164 324 161 320 161C316 161 314 164 314 168C314 171 316 174 320 174C324 174 326 171 326 168Z" fill="#EFEBE2"/>
+      <path d="M323 168C323 166 322 164 320 164C318 164 317 166 317 168C317 169 318 171 320 171C322 171 323 169 323 168Z" fill="none"/>
+    </g>
+    <g id="lotus-candidate-3-rbig">
+      <path d="M320 303C331 295 340 279 340 263C339 244 323 229 320 223C317 229 301 244 300 263C300 279 309 295 320 303Z" fill="#EFEBE2"/>
+    </g>
+    <g id="lotus-candidate-3-rsmall">
+      <path d="M320 307C328 301 335 287 334 274C334 258 322 246 320 241C318 246 306 258 306 274C305 287 312 301 320 307Z" fill="#EFEBE2"/>
+    </g>
+    <g id="lotus-candidate-3-pod">
+      <path d="M340 320C340 309 331 300 320 300C309 300 300 309 300 320C300 331 309 340 320 340C331 340 340 331 340 320Z" fill="#EFEBE2"/>
+    </g>
+    <g id="lotus-candidate-3-podring">
+      <path d="M333 320C333 313 327 307 320 307C313 307 307 313 307 320C307 327 313 333 320 333C327 333 333 327 333 320Z" fill="none"/>
+    </g>
+    <g id="lotus-candidate-3-seed">
+      <path d="M322 312C322 311 321 310 320 310C319 310 318 311 318 312C318 313 319 313 320 313C321 313 322 313 322 312Z" fill="#B13A2B"/>
+    </g>
+    <g id="lotus-candidate-3-ring_ros">
+      <path d="M427 320C427 261 379 213 320 213C261 213 213 261 213 320C213 379 261 427 320 427C379 427 427 379 427 320ZM425 320C425 262 378 215 320 215C262 215 215 262 215 320C215 378 262 425 320 425C378 425 425 378 425 320Z" fill="#EFEBE2" fill-rule="evenodd"/>
+    </g>
+    <g id="lotus-candidate-3-ring_out">
+      <path d="M589 320C589 172 468 51 320 51C172 51 51 172 51 320C51 468 172 589 320 589C468 589 589 468 589 320ZM586 320C586 173 467 54 320 54C173 54 54 173 54 320C54 467 173 586 320 586C467 586 586 467 586 320Z" fill="#EFEBE2" fill-rule="evenodd"/>
+    </g>
+    <g id="lotus-candidate-3-ring_outf">
+      <path d="M579 320C579 177 463 61 320 61C177 61 61 177 61 320C61 463 177 579 320 579C463 579 579 463 579 320ZM578 320C578 178 462 62 320 62C178 62 62 178 62 320C62 462 178 578 320 578C462 578 578 462 578 320Z" fill="#EFEBE2" fill-rule="evenodd"/>
+    </g>
+    <g id="lotus-candidate-3-ring_in">
+      <path d="M538 320C538 200 440 102 320 102C200 102 102 200 102 320C102 440 200 538 320 538C440 538 538 440 538 320ZM535 320C535 201 439 105 320 105C201 105 105 201 105 320C105 439 201 535 320 535C439 535 535 439 535 320Z" fill="#EFEBE2" fill-rule="evenodd"/>
+    </g>
+    <g id="lotus-candidate-3-ring_inf">
+      <path d="M531 320C531 204 436 109 320 109C204 109 109 204 109 320C109 436 204 531 320 531C436 531 531 436 531 320ZM529 320C529 205 435 111 320 111C205 111 111 205 111 320C111 435 205 529 320 529C435 529 529 435 529 320Z" fill="#EFEBE2" fill-rule="evenodd"/>
+    </g>
+    <g id="lotus-candidate-3-lappet">
+      <path d="M301 67C300 74 303 83 310 90C315 94 319 97 320 99C321 97 325 94 330 90C337 83 340 74 339 67C331 68 309 68 301 67Z" fill="#EFEBE2"/>
+    </g>
+    <g id="lotus-candidate-3-bead">
+      <path d="M346 82C346 81 345 80 343 80C342 80 341 81 341 82C341 84 342 85 343 85C345 85 346 84 346 82Z" fill="#B13A2B"/>
+    </g>
+    <g id="lotus-candidate-3-lappet4">
+      <use href="#lotus-candidate-3-lappet" transform="rotate(0 320 320)"/>
+      <use href="#lotus-candidate-3-lappet" transform="rotate(90 320 320)"/>
+      <use href="#lotus-candidate-3-lappet" transform="rotate(180 320 320)"/>
+      <use href="#lotus-candidate-3-lappet" transform="rotate(270 320 320)"/>
+    </g>
+    <g id="lotus-candidate-3-bead4">
+      <use href="#lotus-candidate-3-bead" transform="rotate(0 320 320)"/>
+      <use href="#lotus-candidate-3-bead" transform="rotate(90 320 320)"/>
+      <use href="#lotus-candidate-3-bead" transform="rotate(180 320 320)"/>
+      <use href="#lotus-candidate-3-bead" transform="rotate(270 320 320)"/>
+    </g>
+  </defs>
+  <rect x="0" y="0" width="640" height="640" fill="#1B2B54"/>
+  <g transform="rotate(0 320 320)">
+    <use href="#lotus-candidate-3-stem"/>
+    <use href="#lotus-candidate-3-bloom"/>
+    <use href="#lotus-candidate-3-rbig"/>
+  </g>
+  <g transform="rotate(45 320 320)">
+    <use href="#lotus-candidate-3-stem"/>
+    <use href="#lotus-candidate-3-bloom"/>
+    <use href="#lotus-candidate-3-rbig"/>
+  </g>
+  <g transform="rotate(90 320 320)">
+    <use href="#lotus-candidate-3-stem"/>
+    <use href="#lotus-candidate-3-bloom"/>
+    <use href="#lotus-candidate-3-rbig"/>
+  </g>
+  <g transform="rotate(135 320 320)">
+    <use href="#lotus-candidate-3-stem"/>
+    <use href="#lotus-candidate-3-bloom"/>
+    <use href="#lotus-candidate-3-rbig"/>
+  </g>
+  <g transform="rotate(180 320 320)">
+    <use href="#lotus-candidate-3-stem"/>
+    <use href="#lotus-candidate-3-bloom"/>
+    <use href="#lotus-candidate-3-rbig"/>
+  </g>
+  <g transform="rotate(225 320 320)">
+    <use href="#lotus-candidate-3-stem"/>
+    <use href="#lotus-candidate-3-bloom"/>
+    <use href="#lotus-candidate-3-rbig"/>
+  </g>
+  <g transform="rotate(270 320 320)">
+    <use href="#lotus-candidate-3-stem"/>
+    <use href="#lotus-candidate-3-bloom"/>
+    <use href="#lotus-candidate-3-rbig"/>
+  </g>
+  <g transform="rotate(315 320 320)">
+    <use href="#lotus-candidate-3-stem"/>
+    <use href="#lotus-candidate-3-bloom"/>
+    <use href="#lotus-candidate-3-rbig"/>
+  </g>
+  <g transform="rotate(22.5 320 320)">
+    <use href="#lotus-candidate-3-orn"/>
+    <use href="#lotus-candidate-3-rsmall"/>
+  </g>
+  <g transform="rotate(67.5 320 320)">
+    <use href="#lotus-candidate-3-orn"/>
+    <use href="#lotus-candidate-3-rsmall"/>
+  </g>
+  <g transform="rotate(112.5 320 320)">
+    <use href="#lotus-candidate-3-orn"/>
+    <use href="#lotus-candidate-3-rsmall"/>
+  </g>
+  <g transform="rotate(157.5 320 320)">
+    <use href="#lotus-candidate-3-orn"/>
+    <use href="#lotus-candidate-3-rsmall"/>
+  </g>
+  <g transform="rotate(202.5 320 320)">
+    <use href="#lotus-candidate-3-orn"/>
+    <use href="#lotus-candidate-3-rsmall"/>
+  </g>
+  <g transform="rotate(247.5 320 320)">
+    <use href="#lotus-candidate-3-orn"/>
+    <use href="#lotus-candidate-3-rsmall"/>
+  </g>
+  <g transform="rotate(292.5 320 320)">
+    <use href="#lotus-candidate-3-orn"/>
+    <use href="#lotus-candidate-3-rsmall"/>
+  </g>
+  <g transform="rotate(337.5 320 320)">
+    <use href="#lotus-candidate-3-orn"/>
+    <use href="#lotus-candidate-3-rsmall"/>
+  </g>
+  <use href="#lotus-candidate-3-ring_ros"/>
+  <use href="#lotus-candidate-3-pod"/>
+  <use href="#lotus-candidate-3-podring"/>
+  <g transform="rotate(22.5 320 320)">
+    <use href="#lotus-candidate-3-seed"/>
+  </g>
+  <g transform="rotate(67.5 320 320)">
+    <use href="#lotus-candidate-3-seed"/>
+  </g>
+  <g transform="rotate(112.5 320 320)">
+    <use href="#lotus-candidate-3-seed"/>
+  </g>
+  <g transform="rotate(157.5 320 320)">
+    <use href="#lotus-candidate-3-seed"/>
+  </g>
+  <g transform="rotate(202.5 320 320)">
+    <use href="#lotus-candidate-3-seed"/>
+  </g>
+  <g transform="rotate(247.5 320 320)">
+    <use href="#lotus-candidate-3-seed"/>
+  </g>
+  <g transform="rotate(292.5 320 320)">
+    <use href="#lotus-candidate-3-seed"/>
+  </g>
+  <g transform="rotate(337.5 320 320)">
+    <use href="#lotus-candidate-3-seed"/>
+  </g>
+  <use href="#lotus-candidate-3-ring_out"/>
+  <use href="#lotus-candidate-3-ring_outf"/>
+  <use href="#lotus-candidate-3-ring_in"/>
+  <use href="#lotus-candidate-3-ring_inf"/>
+  <g transform="rotate(0 320 320)">
+    <use href="#lotus-candidate-3-lappet4"/>
+  </g>
+  <g transform="rotate(11.25 320 320)">
+    <use href="#lotus-candidate-3-lappet4"/>
+  </g>
+  <g transform="rotate(22.5 320 320)">
+    <use href="#lotus-candidate-3-lappet4"/>
+  </g>
+  <g transform="rotate(33.75 320 320)">
+    <use href="#lotus-candidate-3-lappet4"/>
+  </g>
+  <g transform="rotate(45 320 320)">
+    <use href="#lotus-candidate-3-lappet4"/>
+  </g>
+  <g transform="rotate(56.25 320 320)">
+    <use href="#lotus-candidate-3-lappet4"/>
+  </g>
+  <g transform="rotate(67.5 320 320)">
+    <use href="#lotus-candidate-3-lappet4"/>
+  </g>
+  <g transform="rotate(78.75 320 320)">
+    <use href="#lotus-candidate-3-lappet4"/>
+  </g>
+  <g transform="rotate(0 320 320)">
+    <use href="#lotus-candidate-3-bead4"/>
+  </g>
+  <g transform="rotate(11.25 320 320)">
+    <use href="#lotus-candidate-3-bead4"/>
+  </g>
+  <g transform="rotate(22.5 320 320)">
+    <use href="#lotus-candidate-3-bead4"/>
+  </g>
+  <g transform="rotate(33.75 320 320)">
+    <use href="#lotus-candidate-3-bead4"/>
+  </g>
+  <g transform="rotate(45 320 320)">
+    <use href="#lotus-candidate-3-bead4"/>
+  </g>
+  <g transform="rotate(56.25 320 320)">
+    <use href="#lotus-candidate-3-bead4"/>
+  </g>
+  <g transform="rotate(67.5 320 320)">
+    <use href="#lotus-candidate-3-bead4"/>
+  </g>
+  <g transform="rotate(78.75 320 320)">
+    <use href="#lotus-candidate-3-bead4"/>
+  </g>
+</svg>

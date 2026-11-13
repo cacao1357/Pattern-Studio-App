@@ -9,6 +9,7 @@ from uuid import uuid4
 from pydantic import SecretStr
 
 from app.config import ConfigurationError, Settings
+from app.credential_store import CredentialProtectionError, protect_key
 from app.schemas.settings import SettingsUpdate
 
 
@@ -24,6 +25,7 @@ class RuntimeSettings:
         self._lock = threading.RLock()
         self._settings = initial
         self._revision = self._disk_revision(default=1)
+        self._api_key_storage = self._stored_key_mode()
         self._secrets = {initial.ark_api_key.get_secret_value(), initial.api_token.get_secret_value()}
         self._secrets.discard("")
 
@@ -51,6 +53,16 @@ class RuntimeSettings:
             raise ConfigurationError("Private settings revision is invalid")
         return revision
 
+    def _stored_key_mode(self):
+        document = self._disk_document()
+        if document is None:
+            return "not_saved"
+        if "api_key_protected" in document:
+            return "windows_dpapi"
+        if "api_key" in document:
+            return "private_file"
+        return "not_saved"
+
     def current(self) -> Settings:
         with self._lock:
             return self._settings
@@ -68,6 +80,7 @@ class RuntimeSettings:
         return {
             "revision": self._revision,
             "api_key_configured": bool(settings.ark_api_key.get_secret_value()),
+            "api_key_storage": self._api_key_storage,
             "model": settings.model,
             "base_url": settings.base_url,
             "paid_calls_enabled": settings.paid_calls_enabled,
@@ -119,7 +132,6 @@ class RuntimeSettings:
             next_revision = self._revision + 1
             document = {
                 "revision": next_revision,
-                "api_key": candidate.ark_api_key.get_secret_value(),
                 "model": candidate.model,
                 "base_url": candidate.base_url,
                 "paid_calls_enabled": candidate.paid_calls_enabled,
@@ -128,6 +140,17 @@ class RuntimeSettings:
                 "reservation_cents": candidate.reservation_cents,
                 "max_calls": candidate.max_calls,
             }
+            api_key = candidate.ark_api_key.get_secret_value()
+            if os.name == "nt":
+                try:
+                    document["api_key_protected"] = protect_key(api_key)
+                except CredentialProtectionError:
+                    raise ConfigurationError("Private API key could not be protected; settings were not saved") from None
+                next_key_storage = "windows_dpapi"
+            else:
+                # Preserve the established private-file behavior on other platforms.
+                document["api_key"] = api_key
+                next_key_storage = "private_file"
             self._atomic_write(document)
             if old.ark_api_key.get_secret_value():
                 self._secrets.add(old.ark_api_key.get_secret_value())
@@ -135,6 +158,7 @@ class RuntimeSettings:
                 self._secrets.add(candidate.ark_api_key.get_secret_value())
             self._settings = candidate
             self._revision = next_revision
+            self._api_key_storage = next_key_storage
             return self._public_locked()
 
     def _atomic_write(self, document):

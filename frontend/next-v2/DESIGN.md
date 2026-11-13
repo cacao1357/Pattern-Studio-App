@@ -1,0 +1,184 @@
+# 纹样工作台 · 前端设计规范
+
+> 状态：已接入本机服务（`/api/v1`）。旧前端文件保留在 `frontend/` 根目录，通过 `/legacy/` 只读对照。
+> 接入架构、接口映射与回退见 [docs/frontend-integration.md](../../docs/frontend-integration.md)。
+
+---
+
+## 1. 主题：蜜蜡 · 沉褐
+
+焦褐底的暗房，一盏灯下的琥珀光；纹样永远放在**放旧的绢图版**上。
+界面本身是陈褐漆与旧金细线，强调色只有陈年琥珀（配墨字）。品牌只写「纹样工作台」四个字，不加昵称、不加英文副标。
+
+- 背景层级：`--bg-0`（页面）→ `--bg-1`（区块）→ `--bg-2`（卡面）→ `--bg-3/4`（浮起、控件），
+  `#1e1506 → #493819` 暖褐逐层亮起，不是一片死黑；顶部一层极淡灯光、四角压一层暗角。
+- 纹样一律放进 `.plate`（旧绢）；不把纹样直接铺在暖褐背景上。
+- 强调色只出现在：主操作、当前工序、评级 A、焦点环。**错误不再复用强调色**，另用砖红 `--error`；
+  通过用铜绿、待办/B 级用旧金、信息用灰青。
+- 主次反转：主操作是「琥珀实心 + 墨字」（`--action-bg` / `--action-fg`），屏上最亮的一块就是下一步。
+- 不用紫色/科技蓝渐变、不用霓虹级发光与彩色雾、不用玻璃拟态大卡片、不用弹跳动画。
+- 质感来自绢的纸纤维、细颗粒、内高光与旧金细线，不靠大面积渐变。
+
+配色参数、被否方案与验证记录见 [docs/palette-review.md](../../docs/palette-review.md)；
+令牌集中在 [css/tokens.css](css/tokens.css)，改配色只动令牌，视图样式不写死颜色。
+
+## 2. 颜色 / 字体 / 尺度
+
+只使用 `css/tokens.css` 的变量，不在视图样式里写死颜色；透明度用 `color-mix(in srgb, var(--token) n%, transparent)`
+（派生色，改令牌即全站跟随；需要 Chrome 111+ / Safari 16.2+ / Firefox 113+）。
+改完令牌跑 `python scripts/check_contrast.py` 复核 WCAG 对比度。
+
+字体（全部本机已有，不联网）：
+
+- 中文展示/标题：`var(--font-serif)` = Noto Serif SC；
+- 正文/界面：`var(--font-sans)` = Noto Sans SC；
+- 拉丁大字与数字：`var(--font-latin)` = Bahnschrift；
+- 元数据、编号、快捷键：`var(--font-mono)` = Cascadia Code / Consolas。
+
+字号令牌：`.display`、`.title`、`.section-title`、`.h3`、`.lead`、`.copy`、`.mono`、`.label`、`.eyebrow`。
+
+**字号地板（硬性）**：
+
+- 界面可见文字不得小于 **12px**，正文默认 **14px**；标签 12–12.5px，辅助说明 12.5–13.5px。
+- mono 只留给编号、路径、单位、快捷键；普通标签用 `--font-sans`。
+- 中文界面：可见文案不中英混杂；允许保留英文的只有模型名、文件格式、路径、单位、编号、评级与快捷键。
+- 文案以功能与结果为主：先写能做什么、产出什么，再写限制；「本机 / 云端」等系统边界只在必要处出现，首屏不堆状态小字。
+- 只写功能事实，不写自我保证：不写「不上传云端」「不写入浏览器存储」「不加载第三方脚本」「原图不动 / 结果保留」「不影响其他步骤」这类隐私与稳定性承诺，也不在正文重复按钮上已有的动作。系统边界只在设置与使用说明的「现状」表里按事实写一次（如「04 候选层与 06 局部修复会调用云端」）；云端调用、失败与取消的后果属于功能信息，必须保留。
+- 标题用 `text-wrap: balance`，窄屏下调低 `--text-hero`，避免最后一行只剩一个字。
+
+间距：4 / 8 / 12 / 16 / 24 / 32 / 48。圆角：控件 `--r-sm` / `--r`，纸面 `--r-xs`，大卡 `--r-lg`，胶囊 `--r-pill`。
+
+动效：`--dur-1…4` + `--ease-out`；只动 opacity / transform / 颜色；`prefers-reduced-motion` 下必须静止。
+过渡只属于「换页」：同一页内的局部重绘（切工序、改参数、筛选、选项切换）直接替换内容，
+不播整页淡入、不重放图版淡入，避免反复闪动打断注意力（`app.js` 用 `paintedRoute` 区分，宿主加 `.is-repaint`）。
+
+## 3. 可直接复用的组件（base.css / shell.css）
+
+| 类 | 用途 |
+| --- | --- |
+| `.wrap` / `.wrap--tight` | 页面容器（最大 1320 / 1080，左右 `--pad`） |
+| `.section` / `.sec-head` / `.section-title` / `.eyebrow` / `.label` / `.mono` | 区块与标题体系 |
+| `.btn` + `.btn--primary` / `--ghost` / `--quiet` / `--paper`；`.btn--sm`；`[data-magnetic]` | 按钮 |
+| `.icon-btn` / `.icon` / `svg use #i-xxx` | 图标（图标集在 `js/icons.js`） |
+| `.chip`（`--accent` / `--jade` / `--gold` / `--solid`）、`.dot`、`.stamp--a/b/c/u`、`.kbd` | 标签、状态点、评级章、快捷键 |
+| `.card` / `.card--hover` / `[data-spotlight]` | 卡面与光斑跟随 |
+| `.plate` / `.plate--grain` / `.plate__img` | 纸本图版 |
+| `.field` / `.field__label` / `.field__hint` / `.input` / `.select` / `.textarea` / `.range` / `.seg` + `.seg__btn` / `.switch` | 表单 |
+| `.kv` / `.kv__row` / `.drawer-plate` / `.drawer-actions` | 元数据行 |
+| `.toast-stack` | 由 `api.toast()` 使用，视图不要自建 |
+| `.drawer` | 由 `api.drawer({title, meta, body})` 生成，视图不要自建 |
+| `[data-reveal]`（可用 `style="--i:n"` 排队） | 进入视口淡入 |
+| `.line-draw` | 内联 SVG 逐笔画出（JS 用 `drawLineArt`） |
+
+## 4. 前端结构与视图契约
+
+| 文件 | 职责 |
+| --- | --- |
+| `js/app.js` | 外壳：路由、共享状态、视图挂载、状态条、提示、抽屉、命令面板、上传、快捷键 |
+| `js/api.js` | `/api/v1` 客户端：统一中文错误、幂等键、写标记、`waitForJob` |
+| `js/store.js` | 服务端数据：健康、设置、云端状态、数据集、最近资产/任务、会话、纹样库 |
+| `js/format.js` | 后端枚举 → 中文、时间/尺寸/字节格式化、转义 |
+| `js/data.js` | 静态工序定义（编号、名称、标题、说明） |
+| `js/samples.js` | 八道工序的样例图定义（`assets/demo`，首页与导览共用） |
+
+```js
+export default {
+  id: "workbench",
+  title: "工作台",
+  flush: true,                          // true：视图自己管滚动布局
+  render(state, api, params) { return "<div>…</div>"; },
+  mount(root, state, api, params) {},   // 绑事件、触发数据加载；不要在这里无限重绘
+  unmount() {},                         // 解绑全局事件/计时器/订阅
+};
+```
+
+- `api.patch(partial)` → 改外壳状态并重绘当前视图；`api.refresh()` → 仅重绘。
+- `api.go(route, { query })` → 路由跳转；`api.toast(msg, "info"|"warn"|"done")`。
+- `api.drawer({ title, meta, body })` / `api.closeDrawer()`；`api.stage(key?)`。
+- 异步数据由视图在 `mount` 里订阅 `store`；加载方法本身会 emit，**必须加守卫**（Loaded 标记/时间戳，或只对非本次加载的 reason 刷新），否则会 mount→加载→refresh→mount 循环。
+
+路由：`#/home`、`#/workbench?image=<id>&asset=<id>&stage=1…8&v=2&compare=1&tile=2x2|3x3`、
+`#/library?open=<assetId>`、`#/settings`、`#/notes`。
+快捷键：`1`–`7` 切工序、`[` / `]` 在会话资产间切换、`C` 对比、`Ctrl/⌘K` 命令面板、`Esc` 关闭。
+
+## 5. 页面规格（实现现状）
+
+### 5.1 工作台（`js/views/workbench.js`）
+
+满宽四栏，`flush: true`：
+
+```
+[文档与工序轨]       [图片资产]          [纸本图版]                 [本工序参数]
+ 图片信息 / 评级       按工序分组           工序标签 + 画布说明 + 工具    工序标题 + 描述
+ 01–08 工序            两列缩略图           深色画布井 + 暖纸图版        本工序控件
+ 自适应纵向行高         独立纵向滚动         缩放 / 对比 / 裁切 / 蒙版     动作按钮 / 错误与进度
+ 打包 ZIP              当前资产标记         画布脚注                     云端调用（云端工序）
+```
+
+- 宽度 ≥1301 时四栏为 `232px | 268px | 1fr | 368px`；1001–1300 为 `220px | 244px | 1fr`，821–1000 为 `204px | 224px | 1fr`，参数改为画布下方抽屉。整页高度 = 视口 − 顶栏 − 状态条；资产整列独立滚动，工序八步自适应分配纵向空间（最小行高 38px、上限 64px），矮窗口整条工序栏可滚动。宽 ≤820 改为单栏页面滚动，工序和组内缩略图横向滑动。
+- 独立资产列按**工序分组**（`01 来源 / 02 裁切 / 03 修复 / 04 候选 / 05 处理 / 06 蒙版 / 07 矢量化 / 08 平铺`），头行显示本步资产数量，可点击折叠；组内是两列纸面缩略图
+  （宽 ≤820 时改为每组一行横向滑动）。同一步里同一类型跑过多次时，按生成时间编号 `v1…vN`，最新在前并与同类型相邻；
+  `title` 写明类型、尺寸、生成时刻、参数与资产 id。当前资产用琥珀描边 +「当前」标出，切图后自动滚进视野。
+- 缩略图来自 `/assets/{id}/preview`，点击切换当前资产；切工序用局部重绘，不播整页动画。
+- 画布只显示真实资产；对比只在有同图原件/规范输入时可用；裁切框、蒙版笔触坐标按真实像素换算。
+- 右侧参数按工序切换：来源=上传/库入口；裁切=坐标+比例；修复=可跳过的云端局部修复；候选=云端同意与选层；提取=本地/云端/OpenCV/颜色；蒙版=笔刷；矢量=PNG 转 SVG 参数；平铺=规格/接缝/导出。
+- 蒙版笔迹按真实像素记录：一笔是**一条圆头描边路径**（半透明宽带 + 一条细中线），不是逐点圆圈；
+  采样点按笔刷大小抽稀后再提交，提交给后端的仍是 `{mode, radius, points[]}`。
+- 任务运行中按钮禁用，显示真实步骤进度与 `job.error.message`；云端未配置时整段显示 blockers 与「去设置」。
+
+### 5.2 纹样库（`js/views/library.js`）
+
+- 页头 + 真实统计条（来自 `/datasets/audit`）；筛选：搜索、类型（映射后端 kind）、评级、排序、网格/列表。
+- 卡片缩略图来自资产预览；zip 等不可预览的用图标占位。点击打开档案抽屉：真实元数据、下载、在工作台打开。
+- 分页「加载更多」用 `next_cursor`；空态/错误态可重试；`?open=<id>` 深链打开抽屉并清理地址参数。
+
+### 5.3 设置（`js/views/settings.js`）
+
+- 左侧粘性目录（云端服务 / 本机处理 / 关于）+ 右侧区块卡；≤900 目录变横向 tabs。
+- 云端：模型、接口地址、API Key 输入与行内保存、清除；密钥不回显。
+- 云端调用：付费开关、价格确认与 blockers；不再设置预算、单次预留或调用上限。
+- 本机处理：`/health` 的 worker、版本与 limits（只读），提示数据在 `storage/api`。
+- 底部粘性保存条：有字段改动或已配置密钥需要从旧存储迁移时启用；迁移只提交 `revision + api_key_action=keep`，无需重输密钥。PUT 带 `revision`，409 提示重新读取；保存后刷新 settings 与云端状态。
+
+### 5.4 首页（`js/views/home.js`）
+
+- 首屏：左侧标题 + 一句功能说明 + 入口，右侧最近成果的真实纸本图版；不放处理版本、云端状态等小字条；「看八道工序」打开页内导览浮层，不跳转。
+- 「八道工序」：八张工序卡各配一张样例图（`assets/demo` 的缠枝莲团花，同一张纹样从原图走到无缝平铺），
+  图放在旧绢图版上；编号、图标、状态一起说明这一步做什么。
+- 高亮跟随真实进度：有会话时按会话内的资产与任务算「已完成 / 最近一步」，没有会话时退到最近成果；
+  用户当前停在哪一道（`store.lastStage`）优先于按资产推断。会话、任务或最近成果一变就重算，
+  进度指纹不变则不重绘，避免同一页里反复闪动。
+- 「接着上次」：最近任务/资产真实数据；继续处理 → 工作台对应资产与工序；最近任务按钮打开任务抽屉。
+- 「最近成果」：真实资产卡片（预览、评级、尺寸、时间）→ 档案抽屉；右上角去纹样库。
+- 「云端」：先出结果、按需调用；不调用云端也可完成提取、矢量化、蒙版与平铺，云端生成按次确认；CTA 只去设置。
+- 动效：章节线画出、卡片交错淡入、导览切换；全部受 `prefers-reduced-motion` 控制。
+
+### 5.5 使用说明（`js/views/notes.js`）
+
+- 工序说明表、快捷键、数据与安全边界、故障排查、已知限制、`/legacy/` 旧版入口。
+
+## 6. 验收清单
+
+- `node --check js/views/*.js`、`node --check js/*.js` 通过。
+- 页面在 1440 / 1280 / 1024 / 820 / 390 宽无横向溢出；工作台 1440×900 与 1280×800 锁视口。
+- 可见文字没有 <12px；中文界面（技术标识除外）。
+- 控制台无报错；所有请求同源 `/api/v1`；不写浏览器存储。
+- 云端与模型不可用时显示原因，不伪装成功；失败任务保留错误信息。
+- 不改旧前端文件；`/legacy/` 仍可打开。
+
+## 7. 文件清单
+
+```
+frontend/next-v2/
+├─ index.html
+├─ css/  tokens.css base.css shell.css home.css workbench.css library.css settings.css notes.css
+├─ js/   app.js api.js store.js format.js motion.js icons.js motifs.js data.js samples.js
+│        views/ home.js workbench.js library.js settings.js notes.js
+├─ assets/  favicon.svg 与 assets/demo 的工序样例图（页面成果仍用真实资产）
+├─ review/  评审期截图（可整目录删除）
+├─ README.md
+└─ DESIGN.md
+```
+
+同级 `frontend/next-v2-backup-20261110/` 与 `frontend/next/` 是仅保留在本机的旧版草稿，
+已写入 `.gitignore`；本目录的最终版以 Git 中的提交为准。
