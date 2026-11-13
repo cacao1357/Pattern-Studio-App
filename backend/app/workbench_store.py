@@ -11,7 +11,7 @@ from app.storage import Store, ServiceError, canonical_json, digest, now
 
 
 TERMINAL = {"succeeded", "failed", "cancelled"}
-EXTERNAL_CALL_JOBS = {"decompose-layers"}
+EXTERNAL_CALL_JOBS = {"decompose-layers", "cloud-lineart"}
 
 # Image-level facts copied onto every derived asset so a manifest can be read
 # without walking the whole parent graph.
@@ -507,7 +507,7 @@ class WorkbenchStore(Store):
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             job = self._leased(db, job_id, token)
-            name = step_name or ("repair-candidate" if job["kind"] == "repair" else "decompose-layers")
+            name = step_name or ("repair-candidate" if job["kind"] == "repair" else job["kind"])
             assets = []
             for layer in call.get("result", {}).get("outputs", []):
                 assets.append(layer["asset"])
@@ -686,9 +686,9 @@ class WorkbenchStore(Store):
             db.commit()
         return asset
 
-    def submit(self, kind, input_id, parameters, key, *, retry_of=None):
+    def submit(self, kind, input_id, parameters, key, *, retry_of=None, request_hash=None):
         scope = "jobs/" + kind if retry_of is None else "retry/" + retry_of
-        request_hash = digest(canonical_json({"input": input_id, "parameters": parameters, "retry_of": retry_of}).encode())
+        request_hash = request_hash or digest(canonical_json({"input": input_id, "parameters": parameters, "retry_of": retry_of}).encode())
         job_id, timestamp = str(uuid4()), now()
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")

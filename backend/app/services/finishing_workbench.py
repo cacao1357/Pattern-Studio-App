@@ -13,6 +13,7 @@ from app.services.local_workbench import _output, _read_image
 from app.services.repair import composite_region
 from app.storage import ServiceError, canonical_json, digest
 from app.workbench_store import validate_key
+from app.services.provider_validation import PROVIDER_INPUT_KINDS
 
 
 MAX_REPAIR_PIXELS = 1_048_576
@@ -50,8 +51,8 @@ class FinishingWorkbench:
         if existing:
             return self.store.get_job(existing)
         source, _ = self.store.get_asset(input_id)
-        if source["kind"] != "normalized_input":
-            raise ServiceError("PROVIDER_INPUT_KIND", "Choose a normalized original for the repair branch", 422)
+        if source["kind"] not in PROVIDER_INPUT_KINDS:
+            raise ServiceError("PROVIDER_INPUT_KIND", "Choose a saved input, crop, working copy or accepted result for repair", 422)
         payload.bbox.within((source["width"], source["height"]))
         if source["width"] * source["height"] > MAX_REPAIR_PIXELS:
             raise ServiceError("REPAIR_SIZE_LIMIT", "Repair currently supports at most 1024x1024 pixels in total; explicitly prepare a smaller normalized input", 413)

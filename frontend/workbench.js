@@ -3519,6 +3519,7 @@ function lineartFailureText(job) {
   const code = String((error && error.code) || "");
   const message = error && error.message ? String(error.message).replace(/\s+/g, " ").trim() : "";
   if (code === "LINEART_MODEL_UNAVAILABLE") return lineartModelUnavailableText(message);
+  if (code === "LINEART_MODEL_GPU_OOM") return "线稿失败：显存不足，释放竞争 GPU 任务后重试。";
   if (message) return "线稿失败：" + message;
   if (code) return "线稿失败：" + code;
   return "线稿任务失败，未返回原因；可改回“OpenCV 结构线”重试。";

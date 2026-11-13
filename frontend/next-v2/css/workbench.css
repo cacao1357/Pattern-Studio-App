@@ -127,7 +127,7 @@
   color: var(--text-3);
 }
 
-/* 七道工序轨道 */
+/* 八道工序轨道 */
 .wb-steps {
   position: relative;
   display: flex;
@@ -593,7 +593,7 @@
   animation: wb-soft-in var(--dur-2) var(--ease-out) both;
 }
 
-/* 七道工序之间切换属于同一页内的重绘：图版与会话辅助层直接呈现，
+/* 八道工序之间切换属于同一页内的重绘：图版与会话辅助层直接呈现，
    不再每次淡入，工作时不闪。只在进入工作台时保留一次淡入。 */
 .view.is-repaint .wb-plate,
 .view.is-repaint .wb-crop__frame,
@@ -1214,7 +1214,7 @@
   display: none;
 }
 
-/* 费用闸门 */
+/* 云端调用 */
 .wb-cost {
   padding: 14px;
   border: 1px solid var(--line-2);

@@ -17,10 +17,32 @@ from app.schemas.contracts import BoundingBox, DEFAULT_LIMITS, ProcessingError
 from app.schemas.provider import ValidationRequest
 from app.services.imaging import normalize_image
 from app.storage import ServiceError
-from app.providers.prompts import DEFAULT_PROMPT_VERSION, decomposition_prompt
+from app.providers.prompts import DEFAULT_PROMPT_VERSION, decomposition_prompt, LINEART_PROMPT
 
 
 PROMPT_VERSION = DEFAULT_PROMPT_VERSION
+# Seedream 5.5 accepts explicit output pixels within these bounds. Editing must
+# return exactly the input geometry so the local region composite never resizes.
+MIN_OUTPUT_PIXELS = 921_600
+MAX_OUTPUT_PIXELS = 4_624_220
+
+
+def edit_output_size(size: tuple[int, int]) -> str:
+    """Return an explicit WxH that keeps the input ratio inside provider bounds."""
+    width, height = size
+    pixels = width * height
+    if MIN_OUTPUT_PIXELS <= pixels <= MAX_OUTPUT_PIXELS:
+        return f"{width}x{height}"
+    scale = math.sqrt((MIN_OUTPUT_PIXELS if pixels < MIN_OUTPUT_PIXELS else MAX_OUTPUT_PIXELS) / pixels)
+    target_width = max(8, math.ceil(width * scale / 8) * 8)
+    target_height = max(1, round(target_width * height / width))
+    while target_width * target_height < MIN_OUTPUT_PIXELS:
+        target_width += 8
+        target_height = max(1, round(target_width * height / width))
+    while target_width * target_height > MAX_OUTPUT_PIXELS and target_width > 8:
+        target_width -= 8
+        target_height = max(1, round(target_width * height / width))
+    return f"{target_width}x{target_height}"
 
 
 class ProviderFailure(ValueError):
@@ -88,6 +110,8 @@ def prepare_payload(request: ValidationRequest, source_png: bytes, settings: Set
         raise ServiceError("PROVIDER_INPUT_DIMENSIONS", "Seedream input requires 262144..25000000 pixels and an aspect ratio in 1/16..16; create an explicit working copy if needed")
     if request.operation == "decompose":
         prompt = decomposition_prompt(request.prompt_version)
+    elif request.operation == "lineart":
+        prompt = LINEART_PROMPT
     else:
         coordinates = edit_prompt_bbox(request.bbox, size)
         instruction = {"restore_small_gap": "补全小面积缺口，延续邻近纹样线条、颜色和粗细，不新增主体或改变整体结构",
@@ -95,8 +119,9 @@ def prepare_payload(request: ValidationRequest, source_png: bytes, settings: Set
         prompt = f"仅编辑图1 <bbox>{' '.join(map(str, coordinates))}</bbox> 区域：{instruction}。保持其他区域布局、图像比例和尺寸。"
     payload = {"model": settings.model, "prompt": prompt,
                "image": "data:image/png;base64," + base64.b64encode(source_png).decode("ascii"),
-               "layer_decomposition": request.operation == "decompose", "size": request.size,
-               "output_format": "png", "response_format": "b64_json", "watermark": True}
+               "layer_decomposition": request.operation == "decompose",
+               "size": request.size if request.operation == "decompose" else edit_output_size(size),
+               "output_format": "png", "response_format": "b64_json", "watermark": False}
     if request.operation == "edit" and transparent:
         payload["background"] = "transparent"
     return payload
@@ -114,7 +139,7 @@ class SeedreamClient:
 
     def generate(self, payload: dict, operation: str) -> ProviderResult:
         if self.settings.blockers():
-            raise ServiceError("PROVIDER_DISABLED", "Seedream credentials, pricing and budget must be configured locally before calling", 503)
+            raise ServiceError("PROVIDER_DISABLED", "Seedream credentials must be configured locally before calling", 503)
         # httpcore DEBUG logs include headers. This dedicated local service disables those logs.
         for name in ("httpx", "httpcore", "httpcore.connection", "httpcore.http11", "httpcore.http2", "httpcore.proxy", "httpcore.socks"):
             logging.getLogger(name).setLevel(logging.WARNING)

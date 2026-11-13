@@ -13,6 +13,9 @@ const browserExecutable = process.env.PATTERN_STUDIO_TEST_BROWSER || process.env
 const temp = await mkdtemp(path.join(tmpdir(), "pattern-v2-browser-"));
 const output = path.join(root, "storage", "validation", "v2-reliability");
 const checks = [];
+const archiveOnly = process.argv.includes("--archive-only");
+const sessionOnly = process.argv.includes("--session-only");
+const pagesOnly = process.argv.includes("--pages-only");
 let fixture, browser, socket;
 
 function firstLine(child, stream, matcher) {
@@ -95,7 +98,7 @@ try {
       if (await evaluate(expression)) return;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    const diagnostic = await evaluate("({stage:document.querySelector('.wb')?.dataset.stage,error:document.querySelector('.wb-error')?.textContent,notice:document.querySelector('.wb-note')?.textContent})");
+    const diagnostic = await evaluate("({stage:document.querySelector('.wb')?.dataset.stage,error:document.querySelector('.wb-error')?.textContent,notice:document.querySelector('.wb-note')?.textContent,layers:[...document.querySelectorAll('[data-act=layer]')].map(e=>({id:e.dataset.id,on:e.getAttribute('aria-pressed')})),compose:document.querySelector('[data-act=compose-layers]')?.outerHTML})");
     throw new Error("UI timeout: " + label + " " + JSON.stringify({ diagnostic, errors, requests: requests.slice(-12) }));
   };
   const check = (label) => { checks.push(label); console.log("PASS " + label); };
@@ -104,13 +107,15 @@ try {
 
 
   await call("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  let model, uploaded, isolated;
+  if (!archiveOnly && !pagesOnly) {
   await call("Page.navigate", { url: info.url + "/#/workbench?asset=" + info.input_asset_id + "&stage=3" });
   await waitFor("document.querySelector('[data-act=run-model-lineart]') && document.querySelector('.wb')?.dataset.stage==='process'", "model default route");
   await waitFor("import('/js/store.js').then(m=>m.store.lineartModel.available===true)", "model prerequisites");
   await waitFor(`import('/js/store.js').then(m=>m.store.session.currentAssetId===${JSON.stringify(info.input_asset_id)} && document.querySelector('[data-act=run-model-lineart]')?.disabled===false)`, "initial model input loaded");
   check("backend model capability enables the default model route");
 
-  const uploaded = await evaluate(`(async()=>{
+  uploaded = await evaluate(`(async()=>{
     const {api}=await import('/js/api.js');
     const canvas=document.createElement('canvas');canvas.width=128;canvas.height=128;
     const c=canvas.getContext('2d');c.fillStyle='white';c.fillRect(0,0,128,128);
@@ -121,27 +126,38 @@ try {
     return {imageId:a.image_id,assetId:a.normalized.asset_id};
   })()`);
   await waitFor(`import('/js/store.js').then(m=>m.store.session.currentAssetId===${JSON.stringify(uploaded.assetId)})`, "synthetic ring input");
+  if (!sessionOnly) {
   await evaluate("document.querySelector('[data-act=run-model-lineart]').click()");
   await waitFor("import('/js/store.js').then(m=>Boolean(m.store.session.activeJob?.job_id))", "model job admitted");
   const jobId=await evaluate("import('/js/store.js').then(m=>m.store.session.activeJob.job_id)");
-  await waitFor("import('/js/store.js').then(m=>m.store.session.jobs.some(j=>j.state==='succeeded' && j.parameters.recipe==='model_lineart'))", "model PNG and SVG", 105000);
-  const model = await evaluate(`import('/js/store.js').then(({store})=>{
+  await waitFor("import('/js/store.js').then(m=>m.store.session.jobs.some(j=>j.state==='succeeded' && j.kind==='lineart' && j.parameters.method==='model'))", "model PNG", 105000);
+  model = await evaluate(`import('/js/store.js').then(({store})=>{
     const j=store.session.jobs.find(j=>j.job_id===${JSON.stringify(jobId)});
     return {state:j.state,parameters:j.parameters,assets:j.result.assets.map(a=>({id:a.asset_id,kind:a.kind,source:a.source_asset_id,device:a.parameters?.inference_device})),current:store.currentAsset()?.kind};
   })`);
-  assert.equal(model.parameters.recipe, "model_lineart");
+  assert.equal(model.parameters.method, "model");
   assert.equal("extract" in model.parameters, false);
   assert.equal("enhance" in model.parameters, false);
   const png = model.assets.find(a=>a.kind==="lineart");
-  const vector = model.assets.find(a=>a.kind==="svg");
-  assert(png && vector, "model pipeline must publish both lineart PNG and SVG");
+  assert(png, "local model must publish lineart PNG");
+  assert(!model.assets.some(a=>a.kind==='svg'), "extraction must leave vectorization for the later stage");
   assert.equal(png.device, "cuda");
-  assert.equal(vector.source, png.id);
   assert.equal(model.current, "lineart");
-  check("UI submits the model pipeline and adopts real CUDA PNG/SVG outputs");
+  check("UI submits local model lineart and adopts the real CUDA PNG without automatic vectorization");
+  await evaluate("document.querySelector('[data-act=go-vector]').click()");
+  await waitFor("document.querySelector('.wb')?.dataset.stage==='vector' && document.querySelector('[data-act=run-vectorize]')?.disabled===false", "separate vector stage");
+  await evaluate("document.querySelector('[data-act=run-vectorize]').click()");
+  await waitFor("import('/js/store.js').then(m=>m.store.session.jobs.some(j=>j.kind==='vectorize' && j.state==='succeeded'))", "PNG to SVG");
+  const vector = await evaluate("import('/js/store.js').then(m=>m.store.session.assets.find(a=>a.kind==='svg'))");
+  assert.equal(vector.source_asset_id,png.id);
+  check("separate vectorization uses the selected lineart PNG");
   await writeFile(path.join(output,"workbench-model.png"), Buffer.from((await call("Page.captureScreenshot", {format:"png"})).data,"base64"));
+  }
 
   // Delay one real poll response, then change images before it reaches the store.
+  // Stage-only navigation preserves the selected SVG. Explicitly choose the RGB
+  // source for cropping, just as the user must after completing vectorization.
+  await evaluate(`document.querySelector('[data-act=asset][data-id="'+${JSON.stringify(uploaded.assetId)}+'"]')?.click()`);
   await evaluate(`(async()=>{
     location.hash='#/workbench?asset='+${JSON.stringify(uploaded.assetId)}+'&stage=2';
     window.__originalFetch=window.fetch.bind(window);
@@ -164,23 +180,79 @@ try {
   await evaluate("window.__releasePoll();window.fetch=window.__originalFetch");
   await waitFor(`fetch('/api/v1/jobs/'+${JSON.stringify(oldJob)}).then(r=>r.json()).then(j=>['succeeded','failed','cancelled'].includes(j.state))`, "old task completes");
   await new Promise(r=>setTimeout(r,1500));
-  const isolated=await evaluate(`import('/js/store.js').then(({store})=>({current:store.session.currentAssetId,busy:store.session.busy,foreign:store.session.assets.some(a=>a.image_id===${JSON.stringify(uploaded.imageId)})}))`);
+  isolated=await evaluate(`import('/js/store.js').then(({store})=>({current:store.session.currentAssetId,busy:store.session.busy,foreign:store.session.assets.some(a=>a.image_id===${JSON.stringify(uploaded.imageId)})}))`);
   assert.equal(isolated.current,info.input_asset_id);
   assert.equal(isolated.busy,false);
   assert.equal(isolated.foreign,false);
   check("late task polling and success callbacks do not modify another image session");
+  }
 
+  // Reuse the fixture's archived cloud layers while payment is disabled.
+  if (!pagesOnly) {
+  if (archiveOnly) await call("Page.navigate", {url:info.url+'/#/workbench?asset='+info.input_asset_id+'&stage=4'});
+  else await evaluate(`location.hash='#/workbench?asset='+${JSON.stringify(info.input_asset_id)}+'&stage=4'`);
+  await waitFor("document.querySelector('[data-act=layer]')", "archived cloud layers restored without a key");
+  await waitFor("document.querySelector('[data-act=compose-layers]')", "archived flow restoration completed before selection");
+  // Readiness and click share one evaluation: a legitimate repaint between two
+  // CDP calls must not turn optional chaining into a silently skipped click.
+  await waitFor("(()=>{const layer=document.querySelector('[data-act=layer][aria-pressed=false]');if(!layer||!document.querySelector('[data-act=compose-layers]'))return false;layer.click();return true})()", "select an archived layer");
+  await waitFor("document.querySelector('[data-act=compose-layers]')?.disabled===false", "archived layers can compose locally");
+  await evaluate("document.querySelector('[data-act=compose-layers]').click()");
+  await waitFor(`fetch('/api/v1/pipelines/'+${JSON.stringify(info.pipeline_id)}).then(r=>r.json()).then(f=>f.state==='succeeded' && f.decision?.action==='select_layers')`, "first selection advances the cloud workflow", 30000);
+  await waitFor("import('/js/store.js').then(m=>!m.store.session.busy)", "first local composition adopted");
+  check("archived layers continue their workflow while cloud payment is disabled");
+
+  await call("Page.reload", { ignoreCache: true });
+  await waitFor("document.querySelector('[data-act=layer][aria-pressed=true]') && document.querySelector('[data-act=compose-layers]')?.disabled===false", "selected layers restored after reload");
+  await evaluate("document.querySelector('[data-act=compose-layers]').click()");
+  await waitFor(`fetch('/api/v1/pipelines/'+${JSON.stringify(info.pipeline_id)}).then(r=>r.json()).then(f=>f.branches?.some(b=>b.state==='succeeded' && b.action==='compose'))`, "local recomposition branch", 30000);
+  assert.equal(requests.filter(r=>r.method==='POST' && r.path.endsWith('/continue')).length,1);
+  assert.equal(requests.filter(r=>r.method==='POST' && r.path.endsWith('/rerun')).length,1);
+  check("reload restores selection and recomposition uses a local workflow branch");
+  }
+
+  if (!archiveOnly && !pagesOnly) {
   await call("Emulation.setDeviceMetricsOverride", {width:390,height:844,deviceScaleFactor:1,mobile:true});
   await evaluate("location.hash='#/workbench?asset='+"+JSON.stringify(uploaded.assetId)+"+'&stage=3'");
   await waitFor("document.querySelector('[data-act=run-model-lineart]')", "narrow model route");
   await writeFile(path.join(output,"workbench-narrow.png"),Buffer.from((await call("Page.captureScreenshot", {format:"png"})).data,"base64"));
+  }
+  if (pagesOnly) {
+    const stageKeys=['source','crop','repair','candidate','process','mask','vector','tile'];
+    for (const width of [1440,390]) {
+      await call('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===390});
+      for (const [route,selector] of [['home','.home'],['settings','.st-page'],['notes','.notes']]) {
+        await call('Page.navigate',{url:info.url+'/#/'+route});
+        await waitFor(`Boolean(document.querySelector(${JSON.stringify(selector)}))`,route+' rendered');
+        const overflow=await evaluate('document.documentElement.scrollWidth>innerWidth+1');
+        assert.equal(overflow,false,route+' overflow at '+width);
+      }
+      for (let stage=1;stage<=8;stage++) {
+        await call('Page.navigate',{url:info.url+'/#/workbench?asset='+info.input_asset_id+'&stage='+stage+'&v=2'});
+        await waitFor(`document.querySelector('.wb')?.dataset.stage===${JSON.stringify(stageKeys[stage-1])}`, 'stage '+stage);
+        assert.equal(await evaluate('document.documentElement.scrollWidth>innerWidth+1'),false,'stage '+stage+' overflow at '+width);
+        if(stage===3) {
+          await waitFor("Boolean(document.querySelector('[data-act=skip-repair]'))",'skip repair visible');
+          await evaluate("document.querySelector('[data-act=skip-repair]').click()");
+          await waitFor("document.querySelector('.wb-note')?.textContent.includes('已跳过修复')",'repair skipped without generation');
+        }
+        if(stage===5) {
+          await waitFor("Boolean(document.querySelector('[data-seg=processRoute][data-val=cloud]'))",'cloud route available');
+          await evaluate("document.querySelector('[data-seg=processRoute][data-val=cloud]').click()");
+          await waitFor("document.querySelector('[data-act=run-cloud-lineart]')?.disabled===true",'disabled cloud route leaves local available');
+          await writeFile(path.join(output,'cloud-route-'+width+'.png'),Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
+        }
+      }
+      check('home/settings/notes and eight stages render without horizontal overflow at '+width+'px');
+    }
+  }
   const budget=await evaluate("fetch('/api/v1/seedream/status').then(r=>r.json()).then(s=>s.budget.call_count)");
   // The fixture begins with one synthetic archived call; this test must add none.
   assert.equal(budget,1);
-  const cloudRequests=requests.filter(r=>r.method==='POST' && /(?:pipelines\/ai|jobs\/repair|seedream\/validations)$/.test(r.path));
+  const cloudRequests=requests.filter(r=>r.method==='POST' && /(?:pipelines\/ai|jobs\/(?:repair|cloud-lineart)|seedream\/validations)$/.test(r.path));
   assert.equal(cloudRequests.length,0);
   assert.equal(errors.length,0,JSON.stringify(errors));
-  check("desktop/narrow page has no exceptions and sends no cloud-generation requests");
+  check("page has no exceptions and sends no cloud-generation requests");
   await writeFile(path.join(output,"browser-checks.json"),JSON.stringify({checks,model,isolated,cloudGenerationRequests:0,pageErrors:errors},null,2));
   await call("Browser.close",{},false);
 } finally {

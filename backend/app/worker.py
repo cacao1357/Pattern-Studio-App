@@ -13,8 +13,8 @@ from app.storage import ServiceError
 
 
 _MEMORY_HANDLE = None
-LOCAL_MEMORY_MIB = 1024
-LINEART_MODEL_MEMORY_MIB = 4096
+LOCAL_MEMORY_MIB = 6144
+LINEART_MODEL_MEMORY_MIB = 6144
 
 
 def bind_memory_limit(memory_mib=LOCAL_MEMORY_MIB):
@@ -100,7 +100,7 @@ def child_main(root, job_id, token, parent_pid, memory_mib=LOCAL_MEMORY_MIB):
     store = WorkbenchStore(Path(root))
     try:
         job = store.get_job(job_id)
-        if job["kind"] == "decompose-layers" or job["kind"] == "repair" and not job["parameters"].get("provider_call_id"):
+        if job["kind"] in {"decompose-layers", "cloud-lineart"} or job["kind"] == "repair" and not job["parameters"].get("provider_call_id"):
             from pydantic import SecretStr
             from app.config import Settings
             from app.services.assisted_workbench import execute_decomposition
@@ -111,7 +111,10 @@ def child_main(root, job_id, token, parent_pid, memory_mib=LOCAL_MEMORY_MIB):
             config["ark_api_key"] = SecretStr(config["ark_api_key"])
             config["api_token"] = SecretStr(config["api_token"])
             config["storage_root"] = Path(root)
-            if job["kind"] == "repair":
+            if job["kind"] == "cloud-lineart":
+                from app.services.cloud_lineart import execute_cloud_lineart
+                execute_cloud_lineart(store, job, token, Settings(**config))
+            elif job["kind"] == "repair":
                 from app.services.finishing_workbench import execute_repair
                 execute_repair(store, job, token, Settings(**config))
             else:
@@ -191,7 +194,7 @@ class LocalWorker:
         reader = None
         error = None
         started = time.monotonic()
-        provider_task = job["kind"] == "decompose-layers" or job["kind"] == "repair" and not job["parameters"].get("provider_call_id")
+        provider_task = job["kind"] in {"decompose-layers", "cloud-lineart"} or job["kind"] == "repair" and not job["parameters"].get("provider_call_id")
         deadline_seconds = max(180, self.timeout_seconds) if provider_task else self.timeout_seconds
         try:
             current_settings = self.provider_settings() if callable(self.provider_settings) else self.provider_settings

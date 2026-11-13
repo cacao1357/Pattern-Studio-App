@@ -1,7 +1,7 @@
 /* =============================================================================
-   views/settings.js — 设置：云端服务、费用门禁、本机处理（只读）与边界说明。
+   views/settings.js — 设置：云端服务、API Key、本机处理（只读）与边界说明。
    数据层：store.settings（GET/PUT /api/v1/settings，带 revision 校验）、
-           store.seedream（/seedream/status 的预算读数）、store.health（本机状态）。
+           store.seedream（/seedream/status 的云端状态）、store.health（本机状态）。
    交互约定：
    - 表单先在本页编辑，按「保存设置」才 PUT；只提交改动字段 + 当前 revision；
    - 密钥只显示“是否配置”，替换时输 password，留空不修改；清除密钥是显式动作；
@@ -16,10 +16,9 @@ import { blockerLabel, escapeHtml as esc, formatBytes, shortId } from "../format
 /* ---------- 常量 ---------- */
 
 const SECTIONS = [
-  { id: "cloud", n: "01", title: "云端服务", note: "只在生成候选时用到" },
-  { id: "cost", n: "02", title: "费用门禁", note: "超出预算即拒绝" },
-  { id: "local", n: "03", title: "本机处理", note: "只读 · 来自 /health" },
-  { id: "about", n: "04", title: "关于", note: "配置与版本" },
+  { id: "cloud", n: "01", title: "云端服务", note: "云端线稿、候选与修复" },
+  { id: "local", n: "02", title: "本机处理", note: "只读 · 来自 /health" },
+  { id: "about", n: "03", title: "关于", note: "配置与版本" },
 ];
 
 const VERSION_LABELS = {
@@ -37,6 +36,7 @@ const LIMIT_LABELS = {
   upload_bytes: "上传上限",
   decode_pixels: "解码像素",
   working_pixels: "工作像素",
+  color_vector_pixels: "颜色矢量化像素",
   tile_pixels: "平铺像素",
 };
 
@@ -58,8 +58,6 @@ const prefersReduced = () =>
   typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const settings = () => store.settings;
-const yuan = (cents) => (Number(cents || 0) / 100).toFixed(2);
-const money = (cents) => `¥${(Number(cents || 0) / 100).toFixed(2)}`;
 
 function switchValue(page, name) {
   return page.querySelector(`[data-cfg="${name}"]`)?.getAttribute("aria-checked") === "true";
@@ -74,6 +72,69 @@ function revLabel(settingsRecord) {
   return settingsRecord && Number.isInteger(settingsRecord.revision) ? String(settingsRecord.revision) : "—";
 }
 
+/**
+ * 密钥存储方式的如实说明。字段来自服务端公开设置 `api_key_storage`：
+ * windows_dpapi / private_file / not_saved；缺失或未知时不猜测，也绝不声称
+ * 密钥已经验证可用——页面只显示服务端报告的“是否已配置”。
+ */
+export function apiKeyStorageText(record) {
+  const mode = String(record?.api_key_storage || "");
+  const configured = Boolean(record?.api_key_configured);
+  const map = {
+    windows_dpapi: "密钥用 Windows 当前用户的 DPAPI 加密后保存在本机 storage/settings.json；接口只返回是否已配置。",
+    private_file: configured
+      ? "密钥保存在本机私有配置文件（旧版明文存储）；可以点「保存设置」重新写入本机配置，无需重新粘贴密钥。"
+      : "密钥保存在本机私有配置文件（旧版明文存储）；接口只返回是否已配置。",
+    not_saved: configured
+      ? "当前密钥尚未写入本机配置文件；可以点「保存设置」写入本机存储，无需重新粘贴密钥。"
+      : "还没有保存密钥；填写后按「保存密钥」写入本机配置。",
+  };
+  return map[mode] || "服务端没有说明密钥存储方式；页面只显示是否已配置，不回显内容。";
+}
+
+/**
+ * 已配置密钥但还没有落到当前本机存储（环境变量未保存、旧明文文件）时，
+ * 允许用 revision + api_key_action=keep 显式保存一次，不必重新粘贴密钥。
+ */
+export function keyStorageNeedsRewrite(record) {
+  if (!record?.api_key_configured) return false;
+  const mode = String(record?.api_key_storage || "");
+  return mode === "not_saved" || mode === "private_file";
+}
+
+/** 只做密钥存储迁移的请求体；没有可迁移状态时返回 null。 */
+export function keepOnlySettingsUpdate(record) {
+  if (!keyStorageNeedsRewrite(record) || !Number.isInteger(record?.revision)) return null;
+  return { revision: record.revision, api_key_action: "keep" };
+}
+
+/**
+ * 保存条状态：除了字段改动，密钥存储迁移也会让「保存设置」可用。
+ * `migrationDone` 用于保存后页面仍报告 private_file 的平台（非 Windows），
+ * 避免按钮一直停在“待更新”。
+ */
+export function settingsSaveState(
+  record,
+  dirty,
+  { saving = false, stale = false, saved = false, migrationDone = false } = {}
+) {
+  const migration = !migrationDone && keyStorageNeedsRewrite(record);
+  const blocked = !record || !Number.isInteger(record?.revision);
+  const enabled = !blocked && !saving && !stale && (dirty > 0 || migration);
+  const note = saving
+    ? "保存中…"
+    : stale
+      ? "设置已被其他操作更新 · 请重新加载"
+      : dirty > 0
+        ? `未保存的修改 · ${dirty} 处`
+        : migration
+          ? "密钥存储待更新 · 保存会由服务端重新写入本机配置"
+          : saved
+            ? "已保存 · 已写入本机配置"
+            : "尚未修改 · 保存写入本机配置";
+  return { enabled, note, migration, dirty };
+}
+
 /* ---------- 页头 / 目录 / 保存条 ---------- */
 
 function headHtml(record) {
@@ -84,7 +145,7 @@ function headHtml(record) {
       <p class="eyebrow">四 · 配置</p>
       <h1 class="title st-head__title">设置</h1>
       <p class="lead st-head__lead">
-        这些设置只影响付费生成，保存后用于下一次调用。<br />
+        这些设置只影响云端调用，保存后用于下一次调用。<br />
         密钥只显示是否已配置，不回显内容。
       </p>
     </div>
@@ -152,7 +213,7 @@ function blockersHtml(record) {
     return `
     <div class="st-blockers" data-blockers aria-live="polite">
       <p class="st-blockers__title">${icon("check")}当前云端配置已就绪</p>
-      <p class="st-blockers__copy">密钥、付费开关、价格确认与预算都已配置；实际调用仍会按费用门禁逐次检查。</p>
+      <p class="st-blockers__copy">API Key 已配置，云端可以发起调用；实际是否成功仍取决于服务商校验与网络。</p>
       <p class="field__hint">修改后按「保存设置」写入配置；保存不测试密钥，也不发起调用。</p>
     </div>`;
   }
@@ -175,101 +236,41 @@ function blockersHtml(record) {
 function cloudSection(record) {
   return `
   <section class="st-sec" id="st-cloud" data-sec="cloud" aria-labelledby="st-cloud-title">
-    ${secHead("01", "云端服务", "只在生成候选时用到", "st-cloud-title")}
+    ${secHead("01", "云端服务", "云端线稿、候选与修复", "st-cloud-title")}
     <div class="st-sec__body">
       <div class="st-row2">
         <div class="field">
           <label class="field__label" for="st-cloud-model">模型</label>
           <input class="input" id="st-cloud-model" name="cloud-model" type="text" data-cfg="model"
             value="${esc(record.model)}" spellcheck="false" autocomplete="off" />
-          <p class="field__hint">本机服务当前使用的云端模型名，保存后用于下一次云端任务。</p>
+          <p class="field__hint">填方舟控制台的 Model ID，例如 doubao-seedream-5-5-261028、doubao-seedream-5-0-pro-260628；保存时校验型号。</p>
         </div>
         <div class="field">
           <label class="field__label" for="st-cloud-base">接口地址</label>
           <input class="input" id="st-cloud-base" name="cloud-base" type="url" data-cfg="base_url"
             value="${esc(record.base_url)}" spellcheck="false" autocomplete="off" />
-          <p class="field__hint">只接受服务商官方接口根地址；不符合校验时保存会返回 422。</p>
+          <p class="field__hint">接受方舟北京区 /api/v3 根地址或完整的 /images/generations 地址；保存时归一化为根地址。</p>
         </div>
-      </div>
-
-      <div class="field">
-        <div class="field__label"><span>API Key</span><span class="st-field-note">只读状态</span></div>
-        <div class="st-keyrow" role="group" aria-label="API Key 状态">
-          <span class="mono st-keyrow__val" data-key-state>${record.api_key_configured ? "已配置" : "未配置"}</span>
-          <span class="chip ${record.api_key_configured ? "chip--jade" : "chip--gold"}" data-key-chip>
-            ${record.api_key_configured ? "已配置" : "未配置"}
-          </span>
-          <button class="btn btn--ghost btn--sm" type="button" data-act="clear-key" aria-pressed="false">清除密钥</button>
-        </div>
-        <p class="field__hint" data-key-hint>页面不回显密钥内容；替换时填写新值。</p>
       </div>
 
       <form class="field" data-key-form novalidate>
-        <label class="field__label" for="st-api-key">替换 API Key<span class="st-field-note">留空不修改</span></label>
-        <input class="input" id="st-api-key" name="api-key" type="password" data-cfg="api_key"
-          autocomplete="new-password" spellcheck="false" placeholder="仅在替换密钥时填写" />
-        <p class="field__hint">填入新值即替换当前密钥；留空表示保持现状。保存不测试密钥。</p>
+        <label class="field__label" for="st-api-key">API Key</label>
+        <div class="st-keyrow">
+          <span class="mono st-keyrow__val" data-key-state>${record.api_key_configured ? "已配置" : "未配置"}</span>
+          <input class="input st-keyrow__input" id="st-api-key" name="api-key" type="password" data-cfg="api_key"
+            autocomplete="new-password" spellcheck="false"
+            placeholder="${record.api_key_configured ? "留空保持不变；粘贴新值即替换" : "粘贴 API Key"}" />
+          <button class="btn btn--primary btn--sm" type="submit" data-key-save>保存密钥</button>
+          <button class="btn btn--ghost btn--sm" type="button" data-act="clear-key" aria-pressed="false">清除密钥</button>
+        </div>
+        <p class="field__hint" data-key-hint>页面不回显密钥内容；粘贴后按「保存密钥」写入本机配置。</p>
+        <p class="field__hint" data-key-storage>${esc(apiKeyStorageText(record))}</p>
       </form>
-
-      <div data-blockers-wrap>${blockersHtml(record)}</div>
-    </div>
-  </section>`;
-}
-
-/* ---------- 02 费用门禁 ---------- */
-
-function budgetFactsHtml() {
-  const budget = store.seedream && store.seedream.budget ? store.seedream.budget : null;
-  const calls = budget ? `${budget.call_count ?? 0} / ${budget.max_calls ?? "—"}` : "—";
-  return `
-    <dl class="st-facts" aria-label="费用概览" data-budget-facts>
-      <div><dt>预算上限</dt><dd class="mono">${budget ? `¥${esc(budget.limit_cny)}` : "—"}</dd></div>
-      <div><dt>云端已用</dt><dd class="mono">${budget ? `¥${esc(budget.committed_cny)}` : "—"}</dd></div>
-      <div><dt>剩余额度</dt><dd class="mono">${budget ? `¥${esc(budget.remaining_cny)}` : "—"}</dd></div>
-      <div><dt>云端调用</dt><dd class="mono">${esc(calls)}</dd></div>
-    </dl>`;
-}
-
-function costSection(record) {
-  return `
-  <section class="st-sec" id="st-cost" data-sec="cost" aria-labelledby="st-cost-title">
-    ${secHead("02", "费用门禁", "超出预算即拒绝", "st-cost-title")}
-    <div class="st-sec__body">
-      ${budgetFactsHtml()}
-
-      <div class="st-row2">
-        <div class="field">
-          <label class="field__label" for="st-budget">预算上限<span class="st-field-note">元</span></label>
-          <input class="input" id="st-budget" name="budget-yuan" type="number" min="0" max="1000000" step="0.01"
-            inputmode="decimal" data-cfg="budget" value="${esc(yuan(record.budget_cents))}" />
-          <p class="field__hint">单位是元，最多两位小数；提交时换算成“分”，范围 0–1,000,000 元。</p>
-        </div>
-        <div class="field">
-          <label class="field__label" for="st-reservation">单次预留<span class="st-field-note">元</span></label>
-          <input class="input" id="st-reservation" name="reservation-yuan" type="number" min="0" max="1000000"
-            step="0.01" inputmode="decimal" data-cfg="reservation" value="${esc(yuan(record.reservation_cents))}" />
-          <p class="field__hint">每次调用前先按这个金额预留；为 0 时云端调用会被拒绝。</p>
-        </div>
-      </div>
-
-      <div class="st-row2">
-        <div class="field">
-          <label class="field__label" for="st-max-calls">最大调用次数</label>
-          <input class="input" id="st-max-calls" name="max-calls" type="number" min="1" max="100" step="1"
-            inputmode="numeric" data-cfg="max_calls" value="${esc(String(record.max_calls))}" />
-          <p class="field__hint">1–100 次；达到上限后需要重新确认。</p>
-        </div>
-        <div class="field field--note">
-          <p class="field__hint">
-            预算、预留与次数都由本机服务校验。
-          </p>
-        </div>
-      </div>
 
       <div class="st-toggle">
         <div class="st-toggle__text">
-          <p class="st-toggle__label" id="st-paid-label">允许付费调用</p>
-          <p class="st-toggle__hint">关闭后所有云端调用都会被拒绝。</p>
+          <p class="st-toggle__label" id="st-paid-label">允许云端调用</p>
+          <p class="st-toggle__hint">关闭后云端调用会被拒绝。</p>
         </div>
         <button class="switch" type="button" role="switch" data-cfg="paid_calls_enabled"
           aria-checked="${record.paid_calls_enabled}" aria-labelledby="st-paid-label"></button>
@@ -284,12 +285,12 @@ function costSection(record) {
           aria-checked="${record.pricing_confirmed}" aria-labelledby="st-pricing-label"></button>
       </div>
 
-      <p class="st-warning" data-cost-warning role="status" hidden></p>
+      <div data-blockers-wrap>${blockersHtml(record)}</div>
     </div>
   </section>`;
 }
 
-/* ---------- 03 本机处理（只读） ---------- */
+/* ---------- 02 本机处理（只读） ---------- */
 
 function factRows(rows) {
   return rows
@@ -389,15 +390,16 @@ function localSection() {
 function aboutSection(record) {
   return `
   <section class="st-sec" id="st-about" data-sec="about" aria-labelledby="st-about-title">
-    ${secHead("04", "关于", "配置与版本", "st-about-title")}
+    ${secHead("03", "关于", "配置与版本", "st-about-title")}
     <div class="st-sec__body">
       <p class="copy">
-        数据、配置与密钥都在本机服务里；云端只在 04 候选层与 06 局部修复时被调用。
+        数据、配置与密钥都在本机服务里；云端只在 03 修复、04 候选与 05 云端线稿时被调用。
       </p>
       <dl class="st-facts st-facts--about">
         <div><dt>数据位置</dt><dd>本机 <span class="mono">storage/api/</span></dd></div>
         <div><dt>密钥</dt><dd>只显示「已配置 / 未配置」 · 不回显内容</dd></div>
-        <div><dt>云端</dt><dd>默认关闭</dd></div>
+        <div><dt>密钥存储</dt><dd>${esc(apiKeyStorageText(record))}</dd></div>
+        <div><dt>云端</dt><dd>默认关闭 · 每次调用都需确认</dd></div>
       </dl>
       <p class="field__hint">
         当前配置修订 <span class="mono" data-revision>${revLabel(record)}</span>。
@@ -420,18 +422,9 @@ function currentForm(page) {
     const el = page.querySelector(`[data-cfg="${name}"]`);
     return el ? el.value : "";
   };
-  const budgetRaw = raw("budget").trim();
-  const reservationRaw = raw("reservation").trim();
-  const callsRaw = raw("max_calls").trim();
   return {
     model: raw("model").trim(),
     baseUrl: raw("base_url").trim(),
-    budgetRaw,
-    reservationRaw,
-    callsRaw,
-    budget: budgetRaw === "" ? NaN : Number(budgetRaw),
-    reservation: reservationRaw === "" ? NaN : Number(reservationRaw),
-    maxCalls: callsRaw === "" ? NaN : Number(callsRaw),
     paid: switchValue(page, "paid_calls_enabled"),
     pricing: switchValue(page, "pricing_confirmed"),
     keyValue: raw("api_key").trim(),
@@ -443,17 +436,10 @@ function snapshotOf(record) {
   return {
     model: String(record?.model || ""),
     baseUrl: String(record?.base_url || ""),
-    budget: Number(record?.budget_cents || 0) / 100,
-    reservation: Number(record?.reservation_cents || 0) / 100,
-    maxCalls: Number(record?.max_calls || 1),
     paid: Boolean(record?.paid_calls_enabled),
     pricing: Boolean(record?.pricing_confirmed),
     keyAction: "keep",
   };
-}
-
-function numberChanged(now, base) {
-  return !(Number.isFinite(now) && now === base);
 }
 
 function changedFields(page) {
@@ -462,9 +448,6 @@ function changedFields(page) {
   const keys = [];
   if (now.model !== baseline.model) keys.push("model");
   if (now.baseUrl !== baseline.baseUrl) keys.push("base_url");
-  if (numberChanged(now.budget, baseline.budget)) keys.push("budget_cents");
-  if (numberChanged(now.reservation, baseline.reservation)) keys.push("reservation_cents");
-  if (numberChanged(now.maxCalls, baseline.maxCalls)) keys.push("max_calls");
   if (now.paid !== baseline.paid) keys.push("paid_calls_enabled");
   if (now.pricing !== baseline.pricing) keys.push("pricing_confirmed");
   if (now.keyValue || now.keyAction !== baseline.keyAction) keys.push("api_key");
@@ -490,13 +473,23 @@ function paintSaveState(page) {
   const { keys } = changedFields(page);
   const dirty = keys.length;
   const saveButton = page.querySelector('[data-act="save"]');
+  const keySaveButton = page.querySelector("[data-key-save]");
   const resetButton = page.querySelector('[data-act="reset"]');
   const reloadButton = page.querySelector('[data-act="reload"]');
   const note = page.querySelector("[data-st-note]");
   const bar = page.querySelector(".st-savebar");
-  const blocked = !settings();
+  const state = settingsSaveState(settings(), dirty, {
+    saving,
+    stale,
+    saved: page.dataset.saved === "true",
+    migrationDone: page.dataset.storageSaved === "true",
+  });
 
-  if (saveButton) saveButton.disabled = dirty === 0 || saving || stale || blocked;
+  if (saveButton) saveButton.disabled = !state.enabled;
+  if (keySaveButton) {
+    const keyValue = page.querySelector('[data-cfg="api_key"]')?.value.trim() || "";
+    keySaveButton.disabled = !keyValue || saving || stale || !settings();
+  }
   if (resetButton) resetButton.disabled = dirty === 0 || saving;
   if (reloadButton) reloadButton.hidden = !stale;
   if (bar) {
@@ -504,17 +497,8 @@ function paintSaveState(page) {
     bar.classList.toggle("is-stale", stale);
   }
   if (!note) return;
-  note.dataset.dirty = String(dirty > 0 && !saving);
-  const text = saving
-    ? "保存中…"
-    : stale
-      ? "设置已被其他操作更新 · 请重新加载"
-      : dirty
-        ? `未保存的修改 · ${dirty} 处`
-        : page.dataset.saved === "true"
-          ? "已保存 · 已写入本机配置"
-          : "尚未修改 · 保存写入本机配置";
-  if (note.textContent !== text) note.textContent = text;
+  note.dataset.dirty = String((dirty > 0 || state.migration) && !saving);
+  if (note.textContent !== state.note) note.textContent = state.note;
 }
 
 function flashSaved(page) {
@@ -538,6 +522,7 @@ function paintKeyState(page) {
   const clearButton = page.querySelector('[data-act="clear-key"]');
   const hint = page.querySelector("[data-key-hint]");
   const headChip = page.querySelector("[data-head-key]");
+  const storage = page.querySelector("[data-key-storage]");
 
   if (state) {
     state.textContent = pendingClear
@@ -558,7 +543,16 @@ function paintKeyState(page) {
   if (hint) {
     hint.textContent = pendingClear
       ? "保存设置后会清除本机保存的密钥；保存前可再次点击按钮撤销。"
-      : "页面不回显密钥内容；替换时填写新值。";
+      : "页面不回显密钥内容；保存只写本机配置，不验证密钥，也不发起调用。";
+  }
+  if (storage) storage.textContent = apiKeyStorageText(settings());
+  const keyInput = page.querySelector('[data-cfg="api_key"]');
+  if (keyInput) {
+    keyInput.placeholder = pendingClear
+      ? "将清除当前密钥"
+      : configured
+        ? "留空保持不变；粘贴新值即替换"
+        : "粘贴 API Key";
   }
   if (headChip) {
     headChip.textContent = pendingClear ? "密钥待清除" : configured ? "密钥已配置" : "密钥未配置";
@@ -577,42 +571,9 @@ function paintBlockers(page) {
   }
 }
 
-function paintBudgetFacts(page) {
-  const wrap = page.querySelector("[data-budget-facts]");
-  if (wrap) wrap.outerHTML = budgetFactsHtml();
-}
-
 function paintRevision(page) {
   const el = page.querySelector("[data-revision]");
   if (el) el.textContent = revLabel(settings());
-}
-
-function paintCostWarning(page) {
-  const form = currentForm(page);
-  const warnings = [];
-  if (form.budgetRaw !== "" && (!Number.isFinite(form.budget) || form.budget < 0)) {
-    warnings.push("预算金额无效");
-  } else if (Number.isFinite(form.budget) && form.budget <= 0) {
-    warnings.push("预算为 0 元");
-  }
-  if (form.reservationRaw !== "" && !Number.isFinite(form.reservation)) {
-    warnings.push("单次预留金额无效");
-  } else if (Number.isFinite(form.reservation) && form.reservation <= 0) {
-    warnings.push("单次预留为 0 元");
-  } else if (Number.isFinite(form.reservation) && Number.isFinite(form.budget) && form.reservation > form.budget) {
-    warnings.push("单次预留高于预算上限");
-  }
-  if (form.callsRaw !== "" && (!Number.isFinite(form.maxCalls) || form.maxCalls < 1)) {
-    warnings.push("最大调用次数需在 1–100 之间");
-  }
-  if (!form.paid) warnings.push("付费开关已关闭");
-  if (!form.pricing) warnings.push("价格尚未确认");
-
-  const el = page.querySelector("[data-cost-warning]");
-  if (!el) return;
-  const text = warnings.length ? `${warnings.join(" · ")} · 云端调用会被拒绝` : "";
-  if (el.textContent !== text) el.textContent = text;
-  el.hidden = !text;
 }
 
 function paintLocal(page) {
@@ -622,20 +583,24 @@ function paintLocal(page) {
 
 /* ---------- 保存 / 放弃 / 重新加载 ---------- */
 
-function yuanToCents(raw) {
-  const text = String(raw || "").trim();
-  if (!/^\d+(?:\.\d{1,2})?$/.test(text)) return null;
-  const amount = Number(text);
-  if (!Number.isFinite(amount) || amount < 0 || amount > 1_000_000) return null;
-  return Math.round(amount * 100);
-}
+/* 后端校验信息是英文且按字段提示；这里只翻译本页能改的字段，避免只显示“校验未通过”。 */
+const SETTINGS_ERROR_HINTS = [
+  [
+    /SEEDREAM_MODEL/,
+    "模型名不在允许的方舟型号内。请填控制台里的 Model ID，例如 doubao-seedream-5-5-261028 或 doubao-seedream-5-0-pro-260628。",
+  ],
+  [
+    /ARK_BASE_URL/,
+    "接口地址只接受方舟北京区的 https://ark.cn-beijing.volces.com/api/v3 或 .../api/v3/images/generations。",
+  ],
+  [/API[_ ]?KEY|api key/i, "API Key 只接受可见 ASCII 字符，且不能包含空格。"],
+];
 
-function intInRange(raw, min, max) {
-  const text = String(raw || "").trim();
-  if (!/^\d+$/.test(text)) return null;
-  const value = Number(text);
-  if (!Number.isInteger(value) || value < min || value > max) return null;
-  return value;
+function saveErrorMessage(error) {
+  const detail = String(error?.detail || "");
+  const hit = SETTINGS_ERROR_HINTS.find(([pattern]) => pattern.test(detail));
+  if (hit) return "设置未通过校验：" + hit[1];
+  return error?.message || "保存设置失败，请稍后重试。";
 }
 
 async function saveForm(page, api) {
@@ -647,8 +612,10 @@ async function saveForm(page, api) {
   }
 
   const { now, keys } = changedFields(page);
+  const migrationUpdate = keepOnlySettingsUpdate(record);
+  const migration = Boolean(migrationUpdate) && page.dataset.storageSaved !== "true";
   clearError(page);
-  if (!keys.length) {
+  if (!keys.length && !migration) {
     api.toast("没有需要保存的修改", "info");
     return;
   }
@@ -663,21 +630,6 @@ async function saveForm(page, api) {
   if (keys.includes("base_url")) {
     if (!now.baseUrl) problems.push("接口地址不能为空。");
     else payload.base_url = now.baseUrl;
-  }
-  if (keys.includes("budget_cents")) {
-    const cents = yuanToCents(now.budgetRaw);
-    if (cents === null) problems.push("预算请填写 0–1,000,000 元之间的金额，最多两位小数。");
-    else payload.budget_cents = cents;
-  }
-  if (keys.includes("reservation_cents")) {
-    const cents = yuanToCents(now.reservationRaw);
-    if (cents === null) problems.push("单次预留请填写 0–1,000,000 元之间的金额，最多两位小数。");
-    else payload.reservation_cents = cents;
-  }
-  if (keys.includes("max_calls")) {
-    const calls = intInRange(now.callsRaw, 1, 100);
-    if (calls === null) problems.push("最大调用次数需为 1–100 的整数。");
-    else payload.max_calls = calls;
   }
   if (keys.includes("paid_calls_enabled")) payload.paid_calls_enabled = now.paid;
   if (keys.includes("pricing_confirmed")) payload.pricing_confirmed = now.pricing;
@@ -694,6 +646,9 @@ async function saveForm(page, api) {
     } else {
       payload.api_key_action = "keep";
     }
+  } else if (migration) {
+    // 只迁移存储方式：不改任何字段，也不要求用户重新粘贴密钥。
+    payload.api_key_action = migrationUpdate.api_key_action;
   }
 
   if (problems.length) {
@@ -721,15 +676,24 @@ async function saveForm(page, api) {
 function afterSave(page, record, api) {
   pendingClear = false;
   stale = false;
-  const keyInput = page.querySelector('[data-cfg="api_key"]');
-  if (keyInput) keyInput.value = "";
+  const put = (name, value) => {
+    const el = page.querySelector(`[data-cfg="${name}"]`);
+    if (el) el.value = String(value ?? "");
+  };
+  // The service normalizes the endpoint to the /api/v3 root; reflect the
+  // canonical values so the form does not stay "dirty" after a successful save.
+  put("model", record?.model);
+  put("base_url", record?.base_url);
+  put("api_key", "");
   baseline = snapshotOf(record);
   page.dataset.saved = "true";
+  // 非 Windows 上服务端仍以 private_file 保存；本次页面已迁移过一次，
+  // 不让保存条一直停在“密钥存储待更新”，刷新后再按服务端状态重新判断。
+  if (keyStorageNeedsRewrite(record)) page.dataset.storageSaved = "true";
+  else delete page.dataset.storageSaved;
   paintKeyState(page);
   paintBlockers(page);
-  paintBudgetFacts(page);
   paintRevision(page);
-  paintCostWarning(page);
   paintSaveState(page);
   flashSaved(page);
   api.toast("设置已保存", "done");
@@ -745,8 +709,9 @@ function handleSaveError(page, error, api) {
     paintSaveState(page);
     return;
   }
-  showError(page, error?.message || "保存设置失败，请稍后重试。");
-  api.toast(error?.message || "保存设置失败", "warn");
+  const message = saveErrorMessage(error);
+  showError(page, message);
+  api.toast(message, "warn");
 }
 
 function resetForm(page, api) {
@@ -759,15 +724,11 @@ function resetForm(page, api) {
   };
   put("model", baseline.model);
   put("base_url", baseline.baseUrl);
-  put("budget", baseline.budget.toFixed(2));
-  put("reservation", baseline.reservation.toFixed(2));
-  put("max_calls", baseline.maxCalls);
   put("api_key", "");
   setSwitch(page, "paid_calls_enabled", baseline.paid);
   setSwitch(page, "pricing_confirmed", baseline.pricing);
   page.dataset.saved = "false";
   paintKeyState(page);
-  paintCostWarning(page);
   paintSaveState(page);
   api.toast("已放弃未保存的修改", "info");
 }
@@ -791,7 +752,6 @@ async function reloadSettings(page, api) {
 function toggleSwitch(button, page) {
   const on = button.getAttribute("aria-checked") === "true";
   button.setAttribute("aria-checked", String(!on));
-  paintCostWarning(page);
   paintSaveState(page);
 }
 
@@ -908,9 +868,8 @@ export default {
             ${
               record
                 ? `${cloudSection(record)}
-                   ${costSection(record)}
                    <section class="st-sec" id="st-local" data-sec="local" aria-labelledby="st-local-title">
-                     ${secHead("03", "本机处理", "只读 · 来自 /health", "st-local-title")}
+                     ${secHead("02", "本机处理", "只读 · 来自 /health", "st-local-title")}
                      <div class="st-sec__body">${localSection()}</div>
                    </section>
                    ${aboutSection(record)}`
@@ -944,7 +903,6 @@ export default {
     saving = false;
     clearError(page);
     paintKeyState(page);
-    paintCostWarning(page);
     paintSaveState(page);
 
     if (!store.health) {
@@ -968,7 +926,6 @@ export default {
           if (el.value.trim() && pendingClear) pendingClear = false;
           paintKeyState(page);
         }
-        paintCostWarning(page);
         paintSaveState(page);
       };
       el.addEventListener("input", onEdit);

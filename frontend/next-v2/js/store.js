@@ -10,6 +10,7 @@
    ============================================================================= */
 
 import { api, ApiError, waitForJob } from "./api.js";
+import { STAGES } from "./data.js";
 import { stageForKind } from "./format.js";
 
 const listeners = new Set();
@@ -116,13 +117,13 @@ export const store = {
 
   /* ------------------------------------------------------------ 当前位置 */
 
-  /* 用户最近停留的工序（1–7），只存在内存里；首页据此把高亮跟到当前位置。 */
+  /* 用户最近停留的工序（1–8），只存在内存里；首页据此把高亮跟到当前位置。 */
   lastStage: 0,
 
   /** 记下当前工序。不广播：换工序时首页不在屏幕上，重绘由下次进入首页负责。 */
   noteStage(stage) {
     const n = Number(stage);
-    if (!Number.isInteger(n) || n < 1 || n > 7) return;
+    if (!Number.isInteger(n) || n < 1 || n > STAGES.length) return;
     this.lastStage = n;
   },
 
@@ -158,7 +159,7 @@ export const store = {
     return this.health;
   },
 
-  /** 只刷新云端费用状态（任务终态后的轻量刷新，失败静默）。 */
+  /** 只刷新云端调用状态（任务终态后的轻量刷新，失败静默）。 */
   async refreshBudget() {
     try {
       this.seedream = await api.seedreamStatus();
@@ -205,6 +206,24 @@ export const store = {
       this.dataset = null;
     }
     return this.dataset;
+  },
+
+  /**
+   * 按图读取一类历史（assets / jobs / flows），按 next_cursor 读完当前可读分页。
+   * 只读：不提交任务、不重试、不核销云端调用。分页中途失败返回已读部分并标记
+   * complete=false，调用方不能把它当作完整历史。
+   */
+  async imageHistory(imageId, collection, { limit = 50, maxPages = 20 } = {}) {
+    const items = [];
+    let cursor = "";
+    let pages = 0;
+    for (; pages < maxPages; pages += 1) {
+      const page = await api.imageHistory(imageId, { collection, limit, cursor });
+      items.push(...(page?.items || []));
+      cursor = page?.next_cursor || "";
+      if (!cursor) return { items, complete: true, pages: pages + 1 };
+    }
+    return { items, complete: false, pages };
   },
 
   async loadRecent() {
@@ -339,7 +358,10 @@ export const store = {
       currentAssetId: asset.asset_id,
     };
     emit("session");
-    return { asset, stage: stage ?? stageForKind(asset.kind) };
+    const humanCorrected =
+      asset.annotation_source === "human_foreground_correction" ||
+      asset.parameters?.annotation_source === "human_foreground_correction";
+    return { asset, stage: stage ?? (humanCorrected ? 6 : stageForKind(asset.kind)) };
   },
 
   setCurrentAsset(assetId) {
@@ -354,6 +376,17 @@ export const store = {
 
   assetById(assetId) {
     return this.session.assets.find((asset) => asset.asset_id === assetId) || null;
+  },
+
+  /** 把按图恢复时读取到的资产并入当前会话；已存在则不重复加入。 */
+  rememberAsset(asset, { token } = {}) {
+    if (!asset?.asset_id) return null;
+    if (token !== undefined && token !== sessionEpoch) return null;
+    const existing = this.assetById(asset.asset_id);
+    if (existing) return existing;
+    this.session.assets = uniqueAssets([...this.session.assets, asset]);
+    emit("session");
+    return asset;
   },
 
   /**

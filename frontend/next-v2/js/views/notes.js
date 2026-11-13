@@ -1,5 +1,5 @@
 /* =============================================================================
-   views/notes.js — 使用说明：这套本机工作台是什么、七道工序怎么用、
+   views/notes.js — 使用说明：这套本机工作台是什么、八道工序怎么用、
    数据与安全边界、已知限制、旧版入口。
    ============================================================================= */
 
@@ -8,15 +8,16 @@ import { icon } from "../icons.js";
 const STAGE_GUIDE = [
   ["01 来源", "上传 PNG / JPEG，保留原件并生成规范输入；同时记录评级、来源与指纹。", "原图、规范输入"],
   ["02 裁切", "在真实图版上框出纹样单元；大图先创建工作副本可避免整页超限。", "裁切图、工作副本"],
-  ["03 处理", "颜色提取或线稿生成透明 PNG，再矢量化成可编辑 SVG。参数可改，可重复重跑。", "蒙版、透明 PNG、线稿、SVG"],
-  ["04 候选", "配置云端后按提示词拆分图层，勾选后在本地合成。", "候选层、合成候选"],
-  ["05 蒙版", "对透明 PNG 补前景或擦除杂点，提交后生成新的透明 PNG。", "修正后的透明 PNG"],
-  ["06 修复", "圈出问题区域，经明确确认后调用云端生成修复候选。", "修复候选、接受记录"],
-  ["07 平铺", "选单元生成 2×2 / 3×3 排列，记录接缝观察，并把成果打包成 ZIP。", "平铺预览、ZIP 包"],
+  ["03 修复", "圈出问题区域，经明确确认后调用云端生成修复候选；纹样完整时可以明确跳过。", "修复候选、接受记录"],
+  ["04 候选", "配置云端后按提示词拆分图层，勾选后在本地合成；这一步不生成线稿。", "候选层、合成候选"],
+  ["05 处理", "明确选择本地模型或云端模型生成线稿 PNG；也可用 OpenCV 或颜色提取。", "线稿 PNG、透明 PNG"],
+  ["06 蒙版", "对透明 PNG 补前景或擦除杂点，提交后生成新的透明 PNG。", "修正后的透明 PNG"],
+  ["07 矢量化", "把线稿或透明 PNG 转成可编辑 SVG；颜色与细节在这一步调整。", "矢量 SVG"],
+  ["08 平铺", "选单元生成 2×2 / 3×3 排列，记录接缝观察，并把成果打包成 ZIP。", "平铺预览、ZIP 包"],
 ];
 
 const SHORTCUTS = [
-  ["1 – 7", "在工作台切换七道工序"],
+  ["1 – 8", "在工作台切换八道工序"],
   ["[ / ]", "在当前会话的资产之间前后切换"],
   ["C", "开关对比（当前资产与同图原件）"],
   ["Ctrl / ⌘ K", "打开命令面板，搜索页面、工序与操作"],
@@ -31,8 +32,8 @@ export default {
     return `
       <div class="notes">
         <section class="notes-hero wrap wrap--tight">
-          <p class="eyebrow">七道工序 · 参数可改</p>
-          <h1 class="title notes-hero__title">从原图到可编辑 SVG，七道工序各有产物。</h1>
+          <p class="eyebrow">八道工序 · 参数可改</p>
+          <h1 class="title notes-hero__title">从原图到可编辑 SVG，八道工序各有产物。</h1>
           <p class="lead notes-hero__lead">
             上传后按工序推进，任意一步都可以重跑。
           </p>
@@ -48,12 +49,12 @@ export default {
           <div class="wrap">
             <header class="sec-head">
               <div class="sec-head__main">
-                <span class="sec-head__no">一 · 七道工序</span>
+                <span class="sec-head__no">一 · 八道工序</span>
                 <h2 class="section-title">每一步在做什么</h2>
               </div>
               <p class="sec-head__aside">不必按顺序走完，从任意一道工序都能进入。</p>
             </header>
-            <div class="notes-table notes-table--three" role="table" aria-label="七道工序说明">
+            <div class="notes-table notes-table--three" role="table" aria-label="八道工序说明">
               <div class="notes-table__row notes-table__row--head" role="row">
                 <span role="columnheader">工序</span><span role="columnheader">做什么</span><span role="columnheader">主要产物</span>
               </div>
@@ -79,10 +80,10 @@ export default {
               <article class="card notes-why__card" data-reveal>
                 <p class="label">页面</p>
                 <ul class="notes-list">
-                  <li><a href="#/home">首页</a>：最近成果、接着上次、七道工序与费用说明</li>
+                  <li><a href="#/home">首页</a>：最近成果、接着上次、八道工序与云端说明</li>
                   <li><a href="#/workbench">工作台</a>：三栏——文档与工序、图版、参数</li>
                   <li><a href="#/library">纹样库</a>：真实资产的分页、筛选与档案</li>
-                  <li><a href="#/settings">设置</a>：付费生成、预算与本机状态</li>
+                  <li><a href="#/settings">设置</a>：云端 API Key、本机状态与版本</li>
                 </ul>
               </article>
               <article class="card notes-why__card notes-why__card--accent" data-reveal style="--i:1">
@@ -106,7 +107,7 @@ export default {
           <div class="wrap">
             <header class="sec-head">
               <div class="sec-head__main">
-                <span class="sec-head__no">三 · 数据与费用</span>
+                <span class="sec-head__no">三 · 数据与云端</span>
                 <h2 class="section-title">数据在哪，哪里会花钱</h2>
               </div>
               <p class="sec-head__aside">下面这些可以直接核对。</p>
@@ -119,7 +120,7 @@ export default {
                 ["运行方式", "只监听 127.0.0.1:8765；同源、无登录，只适合本机使用"],
                 ["数据位置", "图片、任务、资产与 SQLite 历史都在 storage/api/；保留该目录即可保留数据"],
                 ["密钥", "保存在本机服务配置里，接口只返回「是否已配置」，不回显明文"],
-                ["云端", "04 候选层与 06 局部修复会调用云端；每次调用都要勾选上传与计费确认"],
+                ["云端", "03 修复、04 候选与 05 云端线稿会调用云端；每次调用前分别确认上传与调用"],
                 ["旧前端", "原文件仍在 frontend/ 根目录，可通过 /legacy/ 只读打开对照；不参与新界面"],
                 ["备份", "优化前的静态版保存在 frontend/next-v2-backup-20261110/，可随时删除"],
               ]
@@ -159,8 +160,8 @@ export default {
               <li class="stops__item" data-reveal>
                 <span class="stops__no">03</span>
                 <div class="stops__body">
-                  <h3 class="h3">云端候选不可用</h3>
-                  <p class="stops__text">到设置里补齐 API Key、付费开关、价格确认与预算；保存只做本地校验，不会发起收费测试。</p>
+                  <h3 class="h3">云端生成不可用</h3>
+                  <p class="stops__text">到设置里填写 API Key 并开启云端调用；保存只做本地校验，不会发起调用。云端线稿、修复与候选每次都要分别确认上传与调用。</p>
                 </div>
               </li>
               <li class="stops__item" data-reveal>
@@ -181,6 +182,7 @@ export default {
                 <p class="label">已知限制</p>
                 <ul class="notes-list">
                   <li>「本地线稿模型」需要本机已安装 torch、分割模型库与 model/ 权重；没有这些依赖时请用 OpenCV 线稿或颜色提取。</li>
+                  <li>云端线稿、修复与候选每次调用都要重新确认上传与调用；失败或结果未知时不会自动重发。</li>
                   <li>大图（接近 100 万像素）在部分机器的矢量化阶段可能触及内存上限，先创建工作副本更稳。</li>
                   <li>页面按 Chrome 验证；未做完整的屏幕阅读器人工走查（已有焦点环、aria 状态与减少动态效果适配）。</li>
                   <li>字体依赖本机 Noto Serif SC、Noto Sans SC、Bahnschrift、Cascadia Code；缺字体会回退。</li>

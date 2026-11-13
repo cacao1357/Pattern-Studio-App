@@ -32,7 +32,7 @@ ALGORITHM_BY_KIND = {
     "generated_basemap": "seedream-adapter-v1",
     "generated_layer": "seedream-adapter-v1",
     "placed_generated_layer": "seedream-placement-v1",
-    "edit_candidate": "seedream-adapter-v1",
+    "edit_candidate": "seedream-edit-v2-input-geometry",
     "repair_composite": "premultiplied-rgba-local-composite-v1",
     "accepted_repair": "premultiplied-rgba-local-composite-v1",
     "edit_mask": "rectangle-mask-v1",
