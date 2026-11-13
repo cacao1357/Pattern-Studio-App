@@ -10,13 +10,30 @@ from dataclasses import dataclass
 
 import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageChops, ImageOps
 
 
 @dataclass
 class LineartResult:
     image: Image.Image
     metadata: dict
+
+
+def normalize_cloud_lineart(image: Image.Image) -> LineartResult:
+    """Map white-background cloud ink to the same alpha contract as local ink.
+
+    Monochrome vectorization traces alpha, not luminance. Preserve antialiasing
+    and existing transparency; this does not re-detect edges or draw new lines.
+    """
+    rgba = image.convert("RGBA")
+    alpha = ImageChops.multiply(ImageOps.invert(rgba.convert("L")), rgba.getchannel("A"))
+    result = Image.new("RGBA", image.size)
+    result.putalpha(alpha)
+    return LineartResult(result, {
+        "algorithm": "cloud-lineart-luminance-alpha-v1", "background": "transparent",
+        "alpha_policy": "inverted_luminance_times_source_alpha",
+        "ink_ratio": round(float((np.asarray(alpha) >= 128).mean()), 4),
+    })
 
 
 def _flatten_rgb(image: Image.Image) -> Image.Image:

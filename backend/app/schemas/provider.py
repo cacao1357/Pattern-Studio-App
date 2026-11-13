@@ -6,14 +6,14 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.contracts import BoundingBox
-from app.providers.prompts import DEFAULT_PROMPT_VERSION
+from app.providers.prompts import DEFAULT_PROMPT_VERSION, LINEART_PROMPT_VERSION
 
 
 class ValidationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     input_asset_id: UUID
-    operation: Literal["decompose", "edit"]
-    intent: Literal["separate_pattern", "restore_small_gap", "reconnect_lines"]
+    operation: Literal["decompose", "edit", "lineart"]
+    intent: Literal["separate_pattern", "restore_small_gap", "reconnect_lines", "extract_lineart"]
     size: Literal["1K", "1.5K", "2K", "auto"] = "1K"
     prompt_version: str = Field(default=DEFAULT_PROMPT_VERSION, min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_.-]+$")
     bbox: BoundingBox | None = None
@@ -28,10 +28,26 @@ class ValidationRequest(BaseModel):
         if self.operation == "decompose":
             if self.intent != "separate_pattern" or self.bbox is not None:
                 raise ValueError("Decomposition requires separate_pattern and no edit rectangle")
-        elif self.intent == "separate_pattern" or self.bbox is None or self.size == "auto":
+        elif self.operation == "lineart":
+            if self.intent != "extract_lineart" or self.bbox is not None or self.prompt_version != LINEART_PROMPT_VERSION:
+                raise ValueError("Lineart requires extract_lineart, its registered prompt and no rectangle")
+        elif self.intent not in {"restore_small_gap", "reconnect_lines"} or self.bbox is None or self.size == "auto":
             raise ValueError("Editing requires a repair intent, rectangle and explicit resolution tier")
         elif self.prompt_version != DEFAULT_PROMPT_VERSION:
             raise ValueError("Editing uses the fixed repair prompt version")
+        return self
+
+
+class CloudLineartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    input_asset_id: UUID
+    consent_to_upload: bool = Field(strict=True)
+    consent_to_charge: bool = Field(strict=True)
+
+    @model_validator(mode="after")
+    def explicit_consents(self):
+        if not self.consent_to_upload or not self.consent_to_charge:
+            raise ValueError("Cloud lineart requires both per-request consents")
         return self
 
 

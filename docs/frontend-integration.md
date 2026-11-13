@@ -1,5 +1,7 @@
 # 前端接入说明（新版工作台）
 
+最新工序与验证见第 13 节。下方带日期的旧记录保留为历史，当前不再使用七步或提取后自动生成 SVG。
+
 日期：2026-11-10（2026-11-11 合并到 `main`；同日接入「蜜蜡 · 沉褐」配色）
 状态：新版工作台已接入本机服务并纳入版本库（提交 `016197b`）；旧前端文件原地保留并通过 `/legacy/` 只读访问。
 配色接入见第 8 节，配色参数与评审记录见 [配色决定记录](palette-review.md)。
@@ -29,7 +31,7 @@
 | `js/format.js` | 后端英文枚举 → 中文文案、时间/尺寸/字节格式化、HTML 转义 |
 | `js/views/*.js` | 首页、工作台、纹样库、设置、使用说明 |
 | `js/data.js` | 只剩静态工序定义（编号、名称、标题、说明） |
-| `js/samples.js` | 七道工序的样例图定义（`assets/demo` 下的缠枝莲团花，首页工序卡与导览共用） |
+| `js/samples.js` | 八道工序的样例图定义（`assets/demo` 下的缠枝莲团花，首页工序卡与导览共用） |
 
 视图契约不变：`{ id, title, flush, render(state, api, params), mount(root, state, api, params), unmount() }`。
 异步数据变化由视图自己在 `mount` 中订阅 `store` 并调用 `api.refresh()`，避免全局重绘打断输入。
@@ -38,7 +40,7 @@
 
 - `store.session`：`imageId`、`image`（`GET /api/v1/images/{id}`）、`assets[]`（本次会话出现过的资产）、`currentAssetId`、`jobs[]`、`busy`。
 - 上传：`POST /api/v1/images`（FormData，带幂等键）→ 用返回的 `original` / `normalized` 初始化会话。
-- 打开已有资产：`store.openAsset(assetId)` → `GET /assets/{id}` + 同图原件/规范输入；URL 参数 `#/workbench?image=<imageId>&asset=<assetId>&stage=<1-7>`。
+- 打开已有资产：`store.openAsset(assetId)` → `GET /assets/{id}` + 同图原件/规范输入；新版 URL 参数 `#/workbench?image=<imageId>&asset=<assetId>&stage=<1-8>&v=2`。没有 `v=2` 的旧链接按旧工序编号映射。
 - 任务：`store.runJob(() => http.xxx(...))` 在提交前捕获会话归属，再每 1.2s 轮询 `GET /jobs/{id}`，返回 `{ job, owned }`。切换会话后停止该页面的旧任务轮询，不取消服务端任务，不向新会话写产物、进度或成功回调；失败/取消已发布的产物仍保留。
 - 会话只存在内存里；刷新页面通过 URL 或纹样库重新进入（不写浏览器存储，与旧前端行为一致）。
 
@@ -48,19 +50,20 @@
 | --- | --- | --- |
 | 01 来源 | `POST /images`、`GET /images/{id}` | original、normalized_input |
 | 02 裁切 | `POST /jobs/crop`、`POST /jobs/working-copy` | crop、working_copy |
-| 03 处理 | 默认 `POST /pipelines`（`recipe: model_lineart`）；可选 `color`、`POST /jobs/lineart`（model/opencv）、`POST /jobs/vectorize` | foreground_mask、transparent_png、contour_line_art、lineart、svg |
+| 03 修复（可跳过） | `POST /jobs/repair`、`GET /repairs/{id}`、`POST /repairs/{id}/decision` | 修复候选、接受/拒绝记录 |
 | 04 候选 | `POST /pipelines/ai`、`GET /jobs/{id}/layers`、`POST /jobs/compose-layers` | 云端候选层、合成候选 |
-| 05 蒙版 | `POST /jobs/refine-mask` | 修正后的 transparent_png |
-| 06 修复 | `POST /jobs/repair`、`GET /repairs/{id}`、`POST /repairs/{id}/decision` | 修复候选、接受/拒绝记录 |
-| 07 平铺 | `POST /jobs/tile-preview`、`PUT /assets/{id}/seam-observation` | tile_preview、接缝观察 |
+| 05 处理 | `POST /jobs/lineart`（model/opencv）、`POST /jobs/cloud-lineart`、`POST /jobs/extract` | lineart 或 foreground_mask、transparent_png、contour_line_art |
+| 06 蒙版（按需） | `POST /jobs/refine-mask` | 修正后的 transparent_png |
+| 07 矢量化 | `POST /jobs/vectorize` | svg |
+| 08 平铺 | `POST /jobs/tile-preview`、`PUT /assets/{id}/seam-observation` | tile_preview、接缝观察 |
 | 导出 | `POST /exports`、`GET /assets/{id}/download` | ZIP 包（含清单） |
 
-云端相关接口只在设置满足 `api_key_configured`、付费开关、价格确认与预算后可用；未满足时界面显示 blockers 并保持本地流程可用。所有写请求由 `js/api.js` 自动带 `X-Pattern-Studio: local` 与一次性 `Idempotency-Key`。
+云端相关接口只在设置满足 `api_key_configured`、付费开关与价格确认后可用；预算、单次预留和调用次数不再是门槛。未满足时界面显示 blockers 并保持本地流程可用。所有写请求由 `js/api.js` 自动带 `X-Pattern-Studio: local` 与一次性 `Idempotency-Key`。
 
 ## 5. 已知限制
 
 - 模型入口由 `/health` 的 `capabilities.lineart_model` 判断前置条件；未通过时说明原因，旧后端缺字段时按未知处理。前置检查不证明推理或 GPU 一定成功，真实任务仍展示后端错误。必须把模型依赖安装在启动服务的同一个 Python 环境。
-- 接近 100 万像素的图在部分环境下矢量化可能触及 worker 内存上限（1024 MiB）；先创建工作副本更稳。
+- 接近 100 万像素的图在部分环境下矢量化可能触及 worker 内存上限（当前为 6,144 MiB）；颜色矢量化的云端工作副本限制为 25 万像素，先创建工作副本更稳。
 - 前端没有构建步骤；修改后刷新即可，静态资源使用 `Cache-Control: no-store`。
 - 颜色用 `color-mix()` 派生明暗与透明层，需要 Chrome 111+ / Safari 16.2+ / Firefox 113+；更旧的浏览器会丢这些半透明层。
 - 页面按 Chrome 验证；Safari/Firefox 与完整屏幕阅读器走查未做。
@@ -79,7 +82,7 @@
 - 旧前端模块测试：`node --test frontend/tests/settings.test.mjs frontend/tests/workbench-regressions.test.mjs` → 30 passed（旧模块未改）。
 - 新前端模块：`node --check` 全部通过；页面无构建步骤。
 - 浏览器（Chrome，1440×900 与 390 宽）：首页、工作台七道工序、纹样库分页/筛选/抽屉、设置读写与 409/422、`?image/asset/stage` 深链、`/legacy/` 无报错；53 个请求全部同源，未写 `localStorage`/`sessionStorage`。
-- 已知环境限制见上文第 5 节；真实云端候选与局部修复仍需配置密钥和费用门禁后单独验收。
+- 已知环境限制见上文第 5 节；真实云端候选与局部修复仍需配置密钥和付费开关后单独验收。
 
 ## 8. 配色接入（蜜蜡 · 沉褐，2026-11-11）
 
@@ -127,11 +130,18 @@ node scripts/validate_v2_integration.mjs D:/CondaEnvs/pattern-studio/python.exe
 新版界面与旧版页面依然共享 `/api/v1`，静态挂载的只读对照不等于业务数据只读；测试应使用隔离数据目录。
 
 
-## 10. 第二批接口准备（前端尚未接入）
+## 10. 第二批：云端候选生命周期接入（2026-11-13）
 
-后端现提供 `/api/v1/images/{image_id}/history`，按 `collection=assets|jobs|flows` 分别分页；字段及边界见接口合同。恢复不能只取首页近期任务，也不能把分页中途失败当作完整恢复。排队和执行中的任务只能按已有 job ID 查询，不能重新提交云端请求。
+后端按图历史接口（`/api/v1/images/{image_id}/history`，`assets|jobs|flows`）已在新版工作台接入候选流程：
 
-新版前端第二批尚未实施：DSH 委派被自动审批阻止，需明确批准外部 DeepSeek 源码处理后继续。当前页面仍使用第一批的内存会话与独立合成逻辑，不能宣称已接通 `/continue`、`/rerun` 或完整历史恢复。本阶段后端离线验证共 17 项及 2 个子测试通过，当时未重启生产服务；代码已在 2026-11-12 的整理提交入库并推送到 `main`。
+- 进入或刷新工作台时读取 `flows` 分页，选当前图最近一条可用或进行中的流程，恢复候选层和已选层；只 `GET` 流程、层和已有任务，不提交云端请求。
+- 首次选层用 `POST /pipelines/{id}/continue`（`select_layers`），之后改选重合成用 `POST /pipelines/{id}/rerun`（`compose`）；没有流程记录时才回退 `POST /jobs/compose-layers`。`409` / `STALE_REVISION` 时重读流程再切换。
+- 关闭付费或缺少密钥时，已归档候选仍可读、选层并本地合成；新生成和 `runRepair` 才受门禁。已有修复候选的接受/拒绝不受门禁影响。
+- 未知云端结果按 `NEEDS_RECONCILIATION` 提示核对，不自动重发；恢复和轮询过程不重新提交任何云端调用。
+
+验证：`next-v2-integration` 25 项、旧版设置 8 项、工作台回归 22 项通过；后端 `tests/` 73 项、`backend/tests/` 23 项及 2 个子测试通过。Chrome 对 `backend/tests/browser_fixture_a.py` 隔离夹具（关闭付费、一条归档模拟调用）完成「归档层 → 选层 continue → 刷新恢复选择 → rerun 分支」；云端调用计数保持 1，页面异常 0；同一夹具跑通新模型 CUDA 线稿 → SVG。受本机沙箱限制，`scripts/validate_v2_integration.mjs` 无法整脚本执行（Node 子进程 `spawn EPERM`），以上浏览器步骤由等价的手动 CDP 操作完成，未计为脚本自动化通过。
+
+仍只消费 `flows` 一类历史；`assets`/`jobs` 历史页和修复候选的刷新恢复尚未接入。真实云端与真实素材验收仍未进行。
 
 ## 11. 配色接入的验证记录（2026-11-11）
 
@@ -168,3 +178,27 @@ node scripts/validate_v2_integration.mjs D:/CondaEnvs/pattern-studio/python.exe
   视口 1081 / 1150 / 1200 / 1280 / 1300 / 1366 / 1440 / 1512 / 1680 / 1920 / 2560，以及 1080 / 1024 / 900 / 820 / 390
   均无横向溢出、控制台无报错；工作台三栏宽度、图版边长与原版逐档一致。
 - 未做：`frontend/next-v2/review/` 截图未重拍（首页、导览、工作台两张已过时）；未做真实素材质量、真实云端与 Safari/Firefox 验收。
+
+## 13. 2026-11-13 模型分流、修复前置与密钥持久化
+
+当前八步：来源 → 裁切 → 修复（完整纹样可跳过）→ 候选（可选）→ 提取 → 蒙版（按需）→ 矢量化 → 平铺/导出。提取显式选择本地模型、云端模型、OpenCV 或颜色；PNG 核对后独立生成 SVG。旧数字深链按旧工序映射，站内新链接使用 `v=2`。
+
+- 云端线稿走 `POST /jobs/cloud-lineart`，与拆分外轮廓区分；本地模型走 `POST /jobs/lineart`。每次云端生成要求上传与调用同意，产物记录来源和提示词版本。
+- 云端修复/候选/线稿使用当前选中资产，支持裁切、工作副本和已接受修复；不会偷偷切回原图。未接受的修复候选保留预览，不作为后续输入。
+- Windows 用当前用户 DPAPI 加密保存密钥，页面不回显、不写浏览器存储。已有环境/旧明文密钥可以留空保存迁移，无需重新粘贴；`api_key_storage` 如实显示存储形式。当前本机配置已迁移并在服务重启后验证（修订 19）。
+- 按图 jobs 历史恢复已完成修复的候选、接受决定及对应输入像素坐标下的旧框，不产生调用；仍未建设完整 assets/jobs 历史界面。
+- 同图只改 stage/compare/tile 不再重复 `openAsset` 清空会话，保留当前产物、选层和任务。用户选层不被晚到恢复覆盖；旧图任务与过时层响应不能覆盖新状态。
+
+验证：
+
+- 新版前端 40 项、旧设置 8 项、旧工作台 22 项通过；新版 JS 语法检查通过。后端云端线稿 5 项、设置 12 项、A 工作流 13 项、历史/API/页面挂载 14 项及相关线稿 3 项通过（47 项与 2 个子测试）；未跑不相关的全量算法回归。
+- `node scripts/validate_v2_integration.mjs D:/CondaEnvs/pattern-studio/python.exe`：隔离 Chrome 验证真实 CUDA PNG → 独立 SVG、跨图晚到轮询、付费关闭时归档层 continue、刷新恢复及 rerun。页面异常 0，新增云端生成请求 0；夹具已有一条模拟归档。
+- 同脚本 `--pages-only`：1440/390 宽的首页、设置、说明与八道工序无横向溢出；修复跳过、云端禁用选择通过。截图与结果在忽略的 `storage/validation/v2-reliability/`。`--session-only` 跳过 CUDA；`--archive-only` 单查归档流程。
+- 用户授权合理真实测试：现有 973×730 祥云图，局部修复一次（保护合成选区外改变像素为 0）→ 核对后接受 → 云端线稿一次 → 本地 SVG。两次调用均成功、无重试；结果与来源见 `storage/validation/cloud-lineart-20261113/report.json`、`repair-preview.png`、`lineart.png`、`lineart.svg`，均不入 Git。这是单例验证，不是固定样本集的保真验收。
+- 最终内容检查发现云端白底 PNG 在按 alpha 的黑白矢量化中变成实心黑块。已统一为透明底线稿，并补充白底/黑线/抗锯齿/透明像素及内部细节回归；用归档真实 PNG 在本地完成转换和重新矢量化，无新增云端调用。旧 PNG 与错误 SVG 留在同一私有验收目录以便核对；修正 SVG 为 69 条路径、377,710 字节，仍须人工判断可编辑性和保真。
+
+前端由 DSH `wb/deepseek-v4.1-flash` 实现，Codex 独立检查和浏览器验收。会话 `session-a6a1171f-778c-473a-af15-53e330e3d49e`；运行 `86ffffe2-569b-4875-9c88-d1b089e80b16`，同任务补充 `372e94ce-41b3-461b-b3f9-d11c9d71f268`、`d19ba85e-7f6b-4a02-abff-3c3aa405c9ad`、`c13d67ac-e0b7-4942-a095-82aa68e3b026` 均已成功。密钥实现由原生 `settings_encryption` 辅助，集成和真实调用由 Codex 负责。DSH 沙箱不能启动浏览器子进程，浏览器通过结果均由 Codex 外层取得。
+
+未做：固定素材集全面质量验收、Safari/Firefox、屏幕阅读器；`review/` 旧截图未重拍。既有脏工作区保留，本批未提交或推送。当前本机服务已加载新后端，静态页面刷新生效。
+
+清理限制：SVG 视觉复核使用的 `storage/validation/cloud-lineart-20261113/render-profile/` 临时浏览器配置清理被自动安全审核以 `blocked by policy` 拦截；目录保留于 Git 忽略的验证目录，不影响运行。

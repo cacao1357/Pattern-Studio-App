@@ -14,7 +14,7 @@
    ============================================================================= */
 
 import { injectIcons, icon } from "./icons.js";
-import { STAGES } from "./data.js";
+import { STAGES, resolveStage } from "./data.js";
 import { api as http } from "./api.js";
 import { store } from "./store.js";
 import { kindLabel, shortId, escapeHtml } from "./format.js";
@@ -58,8 +58,11 @@ const api = {
     renderView();
   },
   go(name, opts = {}) {
-    const query = new URLSearchParams(opts.query || {}).toString();
-    const hash = `#/${name}${query ? `?${query}` : ""}`;
+    const query = new URLSearchParams(opts.query || {});
+    // 新工序编号与旧深链共用 stage 参数：站内跳转带上 v=2，旧链接（没有 v）
+    // 仍按 data.js 的 LEGACY_STAGE_ALIAS 落到对应工序。
+    if (query.has("stage") && !query.has("v")) query.set("v", "2");
+    const hash = `#/${name}${query.toString() ? `?${query}` : ""}`;
     if (location.hash === hash) renderView();
     else location.hash = hash;
   },
@@ -103,31 +106,75 @@ function parseHash() {
   return { route, params: new URLSearchParams(query || "") };
 }
 
+/**
+ * 只有 URL 的 image/asset 是“要载入的目标”；stage/compare/tile 只是同一目标上的
+ * 展示参数，不能触发 openAsset（那会 sessionEpoch++ 并 blankSession）。
+ */
+export function loadTarget(params) {
+  return {
+    image: params.get("image") || "",
+    asset: params.get("asset") || "",
+  };
+}
+
+/**
+ * 判断本次 hash 变化是否需要重建会话。
+ * - previous 是上一次实际处理的 URL 目标，不是 currentAssetId：用户新产物被设为
+ *   当前后，URL 仍可能指原输入，切工序必须保留新产物。
+ * - asset 仍是同一个就不重开；URL 只去掉 asset、image 未变也不重置。
+ * - 没有 image/asset 的站内导航（纯 stage/compare/tile）不加载。
+ */
+export function shouldLoadTarget(next, previous) {
+  if (!next || (!next.asset && !next.image)) return false;
+  if (!previous) return true;
+  if (next.asset) {
+    if (next.asset !== previous.asset) return true;
+    // 同一资产但 URL 明确换了图片：按新目标打开，避免跨图错配。
+    return Boolean(next.image && previous.image && next.image !== previous.image);
+  }
+  if (!next.image) return false;
+  if (!previous.asset) return next.image !== previous.image;
+  // 只把 asset 查询参数去掉、图片没变：保留当前会话与已选层。
+  return next.image !== previous.image;
+}
+
+let lastAppliedTarget = null;
+
 function applyParams(params) {
-  const stage = Number(params.get("stage"));
-  if (stage && STAGES[stage - 1]) {
+  const stage = resolveStage(params.get("stage"), params.get("v"));
+  if (stage) {
     state.stage = stage;
     store.noteStage(stage);
   }
-  const asset = params.get("asset");
-  const image = params.get("image");
-  if (asset) {
-    // 从纹样库/首页带着具体资产进来：必须载入该资产及其同图来源，
-    // 不能只改 currentAssetId（会话资产里可能还没有它）。
-    // openAsset 在请求被更新的加载/会话取代时返回 null；此时不 refresh、不报错。
-    store
-      .openAsset(asset)
-      .then((opened) => {
-        if (opened) api.refresh();
-      })
-      .catch((error) => api.toast(error?.message || "载入资产失败", "warn"));
-  } else if (image) {
-    store
-      .ensureSession(image)
-      .then((session) => {
-        if (session) api.refresh();
-      })
-      .catch((error) => api.toast(error?.message || "载入纹样失败", "warn"));
+  const target = loadTarget(params);
+  if (shouldLoadTarget(target, lastAppliedTarget)) {
+    const previousTarget = lastAppliedTarget;
+    lastAppliedTarget = target;
+    if (target.asset) {
+      // 从纹样库/首页带着具体资产进来：必须载入该资产及其同图来源，
+      // 不能只改 currentAssetId（会话资产里可能还没有它）。
+      // openAsset 在请求被更新的加载/会话取代时返回 null；此时不 refresh、不报错。
+      store
+        .openAsset(target.asset)
+        .then((opened) => {
+          if (opened) api.refresh();
+        })
+        .catch((error) => {
+          // 真正失败时允许下一次 hash 变化重试；成功的会话不在这里重置。
+          if (lastAppliedTarget === target) lastAppliedTarget = previousTarget;
+          api.toast(error?.message || "载入资产失败", "warn");
+        });
+    } else {
+      store
+        .ensureSession(target.image)
+        .then((session) => {
+          if (session) api.refresh();
+        })
+        .catch((error) => {
+          if (lastAppliedTarget === target) lastAppliedTarget = previousTarget;
+          api.toast(error?.message || "载入纹样失败", "warn");
+        });
+    }
   }
   if (params.has("compare")) state.compare = params.get("compare") !== "0";
   const tile = params.get("tile");
@@ -158,8 +205,7 @@ function renderStatusbar() {
   const online = Boolean(health && health.status === "ok");
   const asset = store.currentAsset();
   const imageId = store.session.imageId;
-  const budget = store.seedream?.budget;
-  const cost = budget ? `¥${budget.committed_cny} / ¥${budget.limit_cny}` : "费用门禁 —";
+  const cloud = store.seedream?.enabled ? "云端已连接" : "云端未配置";
   const isWorkbench = state.route === "workbench";
   const datasetTotal = store.dataset?.total_images;
   bar.innerHTML = `
@@ -174,11 +220,11 @@ function renderStatusbar() {
         : `<span class="statusbar__item statusbar__item--hide-sm">数据集 ${datasetTotal ?? "—"} 张</span>
            <span class="statusbar__item statusbar__item--hide-sm">最近 ${store.recentAssets.length} 项成果</span>`
     }
-    <span class="statusbar__item statusbar__item--hide-sm">${cost}</span>
+    <span class="statusbar__item statusbar__item--hide-sm">${cloud}</span>
     <span class="statusbar__item statusbar__item--grow"></span>
     ${
       isWorkbench
-        ? `<span class="statusbar__item statusbar__item--hide-sm"><span class="statusbar__key">1</span>–<span class="statusbar__key">7</span> 工序</span>
+        ? `<span class="statusbar__item statusbar__item--hide-sm"><span class="statusbar__key">1</span>–<span class="statusbar__key">8</span> 工序</span>
            <span class="statusbar__item statusbar__item--hide-sm"><span class="statusbar__key">[</span><span class="statusbar__key">]</span> 资产</span>
            <span class="statusbar__item"><span class="statusbar__key">C</span> 对比</span>`
         : `<span class="statusbar__item statusbar__item--hide-sm"><span class="statusbar__key">Ctrl</span> <span class="statusbar__key">K</span> 命令面板</span>`
@@ -324,15 +370,15 @@ const COMMANDS = [
     group: "工序",
     label: `第 ${index + 1} 道 · ${stage.name} · ${stage.title}`,
     hint: String(index + 1),
-    icon: ["image", "crop", "flask", "layers", "mask", "brush", "tile"][index],
+    icon: ["image", "crop", "brush", "layers", "flask", "mask", "spark", "tile"][index],
     run: () => api.go("workbench", { query: { stage: index + 1 } }),
   })),
-  { group: "操作", label: "七道工序导览", hint: "", icon: "play", run: () => api.go("home", { query: { tour: 1 } }) },
+  { group: "操作", label: "八道工序导览", hint: "", icon: "play", run: () => api.go("home", { query: { tour: 1 } }) },
   { group: "操作", label: "上传纹样", hint: "", icon: "upload", run: () => pickUpload() },
   { group: "操作", label: "对比原图与当前资产", hint: "C", icon: "compare", run: () => api.go("workbench", { query: { compare: 1 } }) },
-  { group: "操作", label: "平铺 2 × 2", hint: "", icon: "tile", run: () => api.go("workbench", { query: { stage: 7, tile: "2x2" } }) },
-  { group: "操作", label: "平铺 3 × 3", hint: "", icon: "tile", run: () => api.go("workbench", { query: { stage: 7, tile: "3x3" } }) },
-  { group: "操作", label: "打包导出", hint: "", icon: "download", run: () => api.go("workbench", { query: { stage: 7 } }) },
+  { group: "操作", label: "平铺 2 × 2", hint: "", icon: "tile", run: () => api.go("workbench", { query: { stage: 8, tile: "2x2" } }) },
+  { group: "操作", label: "平铺 3 × 3", hint: "", icon: "tile", run: () => api.go("workbench", { query: { stage: 8, tile: "3x3" } }) },
+  { group: "操作", label: "打包导出", hint: "", icon: "download", run: () => api.go("workbench", { query: { stage: 8 } }) },
 ];
 
 let cmdkItems = [];
@@ -521,7 +567,7 @@ function bindShell() {
     if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
 
     if (state.route !== "workbench") return;
-    if (/^[1-7]$/.test(event.key)) {
+    if (/^[1-8]$/.test(event.key)) {
       api.patch({ stage: Number(event.key) });
     } else if (event.key === "[") {
       cycleAsset(-1);
@@ -559,6 +605,7 @@ export function boot() {
   renderView();
 }
 
-boot();
+// 浏览器里正常启动；Node 测试直接导入本模块的纯路由决策时不触碰 DOM。
+if (typeof document !== "undefined") boot();
 export { api as app, state };
 

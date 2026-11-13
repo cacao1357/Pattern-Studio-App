@@ -93,3 +93,28 @@ def test_missing_model_files_report_installation_error(tmp_path, monkeypatch):
     with pytest.raises(ProcessingError) as exc:
         model_lineart.extract_model_lineart(Image.new("RGB", (8, 8), "white"))
     assert exc.value.code == "LINEART_MODEL_UNAVAILABLE"
+
+
+@pytest.mark.parametrize("shape", [(40, 80), (512, 512), (513, 777), (80, 1300)])
+def test_model_tiles_preserve_native_coordinates_and_edge_padding(shape):
+    height, width = shape
+    pixels = np.zeros((height, width, 3), dtype=np.uint8)
+    pixels[:, :, 0] = np.arange(width, dtype=np.uint16) % 256
+    pixels[:, :, 1] = np.arange(height, dtype=np.uint16)[:, None] % 256
+    seen = []
+
+    def predict(tile):
+        assert tile.shape == (512, 512, 3)
+        seen.append(tile)
+        return tile[:, :, 0].astype(np.float32) / 255, "cuda"
+
+    probability, device = model_lineart._predict_tiles(pixels, predict)
+    assert probability.shape == (height, width)
+    assert device == "cuda"
+    np.testing.assert_allclose(probability, pixels[:, :, 0] / 255, atol=2e-7)
+    if height < 512:
+        np.testing.assert_array_equal(seen[0][height:, 0], np.tile(pixels[-1, 0], (512 - height, 1)))
+    if max(shape) > 512:
+        assert len(seen) > 1
+    else:
+        assert len(seen) == 1

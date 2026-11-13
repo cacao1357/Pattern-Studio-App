@@ -1,8 +1,8 @@
 {
-  "architecture": "unetpp-resnet34",
-  "family": "unetpp",
-  "decoder_class": "UnetPlusPlus",
-  "encoder": "resnet34",
+  "architecture": "gts-hrnet18",
+  "family": "gts",
+  "decoder_class": "TextureGatedNet",
+  "encoder": "tu-hrnet_w18",
   "encoder_weights": "imagenet",
   "input_channels": 3,
   "output_channels": 1,
@@ -19,7 +19,14 @@
   ],
   "threshold": 0.5,
   "output": "white_background_black_lines",
-  "best_epoch": 19,
-  "selection_rule": "guarded_robust",
-  "evaluation_scope": "validation_is_synthetic_old_only; holdout_new200(40)_and_holdout_silk100(20)_are_external_tests"
+  "arch_kwargs": {
+    "gate_stride": 4,
+    "gate_channels": 32,
+    "gate_scale": 6.0
+  },
+  "best_epoch": 68,
+  "selection_rule": "best_robust",
+  "evaluation_scope": "validation_is_synthetic_old_only; holdout_new200(40)_and_holdout_silk100(20)_are_external_tests",
+  "gate_alpha": 1.0,
+  "aux_type": "texture_gate"
 }

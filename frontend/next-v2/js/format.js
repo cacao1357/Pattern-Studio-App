@@ -27,7 +27,7 @@ export const KIND_LABELS = {
   mask: "前景蒙版",
   transparent_png: "透明 PNG",
   foreground: "透明 PNG",
-  contour_line_art: "轮廓线稿",
+  contour_line_art: "外轮廓线稿",
   contour: "轮廓线稿",
   lineart: "线稿 PNG",
   svg: "矢量 SVG",
@@ -40,17 +40,28 @@ export const KIND_LABELS = {
   tile: "平铺预览",
   ai_layer: "云端候选层",
   generated_layer: "云端候选层",
+  generated_basemap: "云端底图",
+  placed_generated_layer: "候选层定位图",
   composed_candidate: "候选合成",
   repair_composite: "修复局部保护版",
   accepted_repair: "已接受修复",
   repair_candidate: "修复全图候选",
+  edit_candidate: "修复全图候选",
+  edit_mask: "修复区域蒙版",
+  blend_weight: "羽化权重",
+  difference_map: "差异图",
+  damage_mask: "损伤蒙版",
 };
 
 export function kindLabel(kind) {
   return KIND_LABELS[kind] || String(kind || "资产");
 }
 
-/** 资产大致属于哪一道工序，用于“在哪个阶段打开它”。 */
+/**
+ * 资产大致属于哪一道工序，用于“在哪个阶段打开它”。
+ * 顺序：01 来源、02 裁切、03 修复、04 候选、05 处理、06 蒙版、07 矢量化、08 平铺。
+ * 未接受的修复候选（edit_candidate 等）属于 03 的事实记录，但不会作为后续处理输入。
+ */
 export function stageForKind(kind) {
   switch (kind) {
     case "original":
@@ -63,6 +74,21 @@ export function stageForKind(kind) {
     case "working_copy":
     case "enhanced":
       return 2;
+    case "repair_composite":
+    case "accepted_repair":
+    case "repair_candidate":
+    case "edit_candidate":
+    case "edit_mask":
+    case "blend_weight":
+    case "difference_map":
+    case "damage_mask":
+      return 3;
+    case "ai_layer":
+    case "generated_layer":
+    case "generated_basemap":
+    case "placed_generated_layer":
+    case "composed_candidate":
+      return 4;
     case "foreground_mask":
     case "mask":
     case "transparent_png":
@@ -70,44 +96,42 @@ export function stageForKind(kind) {
     case "contour_line_art":
     case "contour":
     case "lineart":
+      return 5;
     case "svg":
     case "monochrome_svg":
     case "color_svg":
-      return 3;
+      return 7;
     case "tile_preview":
     case "tile":
-      return 7;
-    case "ai_layer":
-    case "generated_layer":
-    case "composed_candidate":
-      return 4;
-    case "repair_composite":
-    case "accepted_repair":
-    case "repair_candidate":
-      return 6;
+      return 8;
     default:
       return 1;
   }
 }
 
-/** 任务类型大致落在哪一道工序；一键处理从提取开始，算第 3 道。 */
+/** 任务类型大致落在哪一道工序；矢量化已从提取中分离，单列第 7 道。 */
 const JOB_STAGE = {
   crop: 2,
   "working-copy": 2,
   working_copy: 2,
   prepare: 2,
   enhance: 2,
-  extract: 3,
-  pipeline: 3,
-  lineart: 3,
-  vectorize: 3,
+  repair: 3,
+  "repair-candidate": 3,
+  "protect-region": 3,
   "ai-pipeline": 4,
+  "decompose-layers": 4,
+  "select_layers": 4,
   compose: 4,
   "compose-layers": 4,
-  "refine-mask": 5,
-  repair: 6,
-  "tile-preview": 7,
-  export: 7,
+  extract: 5,
+  pipeline: 5,
+  lineart: 5,
+  "cloud-lineart": 5,
+  "refine-mask": 6,
+  vectorize: 7,
+  "tile-preview": 8,
+  export: 8,
 };
 
 export function stageForJobKind(kind) {
@@ -216,11 +240,8 @@ export function jobStateLabel(state) {
 export function blockerLabel(code) {
   const map = {
     API_KEY_MISSING: "未填写 API Key",
-    PAID_CALLS_DISABLED: "付费开关未开启",
+    PAID_CALLS_DISABLED: "云端调用未开启",
     PRICING_NOT_CONFIRMED: "价格未确认",
-    BUDGET_NOT_CONFIGURED: "预算未设置",
-    RESERVATION_NOT_CONFIGURED: "单次预留未设置",
-    MAX_CALLS_NOT_CONFIGURED: "调用上限未设置",
   };
   return map[code] || code;
 }
@@ -234,9 +255,15 @@ export function jobKindLabel(kind) {
     enhance: "轻增强",
     extract: "前景提取",
     lineart: "线稿",
+    "cloud-lineart": "云端线稿",
     vectorize: "矢量化",
     pipeline: "一键处理",
     "refine-mask": "蒙版修正",
+    "repair-candidate": "修复候选",
+    "protect-region": "区域保护",
+    "decompose-layers": "云端候选拆分",
+    "compose-layers": "候选合成",
+    "select_layers": "选择候选层",
     "tile-preview": "平铺预览",
     export: "导出",
     repair: "局部修复",

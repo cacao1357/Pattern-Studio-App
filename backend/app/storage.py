@@ -137,9 +137,7 @@ class Store:
     def budget(self, budget_cents: int, max_calls: int) -> dict:
         with self.connection() as db:
             row = db.execute("SELECT count(*) AS count, coalesce(sum(coalesce(actual_cost_cents, reservation_cents)),0) AS used FROM provider_calls").fetchone()
-        return {"limit_cny": f"{budget_cents / 100:.2f}", "committed_cny": f'{row["used"] / 100:.2f}',
-                "remaining_cny": f'{(budget_cents - row["used"]) / 100:.2f}',
-                "call_count": row["count"], "max_calls": max_calls}
+        return {"committed_cny": f'{row["used"] / 100:.2f}', "call_count": row["count"]}
 
     def reserve(self, key: str, request: dict, input_hash: str, *, reservation: int, budget: int, max_calls: int) -> tuple[dict, bool]:
         request_json = canonical_json(request)
@@ -156,9 +154,6 @@ class Store:
                 raise ServiceError("PROVIDER_BUSY", "One provider validation is already running", 409)
             if db.execute("SELECT 1 FROM provider_calls WHERE input_hash=? AND operation=? AND state IN ('outcome_unknown','output_invalid')", (input_hash, request["operation"])).fetchone():
                 raise ServiceError("NEEDS_RECONCILIATION", "An earlier call for this input has unknown or unarchived output; reconcile it before generating again", 409)
-            row = db.execute("SELECT count(*) AS count, coalesce(sum(coalesce(actual_cost_cents,reservation_cents)),0) AS used FROM provider_calls").fetchone()
-            if row["count"] >= max_calls or row["used"] + reservation > budget:
-                raise ServiceError("PROVIDER_BUDGET_EXHAUSTED", "The configured call or CNY reservation limit is exhausted", 429)
             call_id, timestamp = str(uuid4()), now()
             db.execute("""INSERT INTO provider_calls
                 (id,idempotency_key,request_hash,input_asset_id,input_hash,operation,state,reservation_cents,

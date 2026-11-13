@@ -11,9 +11,14 @@ from typing import Mapping
 from dotenv import dotenv_values
 from pydantic import SecretStr
 
+from app.credential_store import CredentialProtectionError, unprotect_key
+
 
 ARK_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 DEFAULT_MODEL = "doubao-seedream-5-0-pro-260628"
+# Ark serves Seedream 5.0 pro/flash and 5.5 on the same image endpoint and size
+# presets. Accept only documented Model IDs or a user-created endpoint ID.
+MODEL_PATTERN = r"(?:doubao-seedream-5-(?:0-(?:pro|flash)|5)-\d{6}|ep-[a-zA-Z0-9-]{4,100})"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -70,8 +75,8 @@ class Settings:
         if base_url not in {ARK_BASE_URL, ARK_BASE_URL + "/images/generations"}:
             raise ConfigurationError("ARK_BASE_URL must be the official Beijing Ark /api/v3 base URL or /api/v3/images/generations endpoint")
         object.__setattr__(self, "base_url", ARK_BASE_URL)
-        if not re.fullmatch(r"(?:doubao-seedream-5-0-(?:pro|flash)-\d{6}|ep-[a-zA-Z0-9-]{4,100})", self.model):
-            raise ConfigurationError("SEEDREAM_MODEL must identify a Seedream 5.0 pro/flash model or an Ark endpoint")
+        if not re.fullmatch(MODEL_PATTERN, self.model):
+            raise ConfigurationError("SEEDREAM_MODEL must identify a documented Seedream 5.0 pro/flash or 5.5 model, or an Ark endpoint")
         if key and key in self.model or token and token in self.model:
             raise ConfigurationError("SEEDREAM_MODEL must not contain a credential")
         if not 1 <= self.max_calls <= 100 or min(self.budget_cents, self.reservation_cents) < 0:
@@ -85,8 +90,6 @@ class Settings:
             issues.append("PAID_CALLS_DISABLED")
         if not self.pricing_confirmed:
             issues.append("PRICING_NOT_CONFIRMED")
-        if not self.budget_cents or not self.reservation_cents:
-            issues.append("BUDGET_NOT_CONFIGURED")
         return issues
 
 
@@ -108,9 +111,10 @@ def load_settings(root: Path = PROJECT_ROOT, environ: Mapping[str, str] | None =
             if settings_file.stat().st_size > 16 * 1024:
                 raise ConfigurationError("Private settings exceed the configuration size limit")
             persisted = json.loads(settings_file.read_text(encoding="utf-8"))
-            allowed = {"revision", "api_key", "model", "base_url", "paid_calls_enabled",
+            allowed = {"revision", "api_key", "api_key_protected", "model", "base_url", "paid_calls_enabled",
                        "pricing_confirmed", "budget_cents", "reservation_cents", "max_calls"}
-            if not isinstance(persisted, dict) or set(persisted) - allowed:
+            if (not isinstance(persisted, dict) or set(persisted) - allowed or
+                    "api_key" in persisted and "api_key_protected" in persisted):
                 raise ConfigurationError("Private settings have an unsupported format")
             revision = persisted.get("revision", 1)
             if type(revision) is not int or revision < 1:
@@ -119,6 +123,13 @@ def load_settings(root: Path = PROJECT_ROOT, environ: Mapping[str, str] | None =
                 if not isinstance(persisted["api_key"], str):
                     raise ConfigurationError("Private API key setting is invalid")
                 values["ARK_API_KEY"] = persisted["api_key"]
+            elif "api_key_protected" in persisted:
+                if not isinstance(persisted["api_key_protected"], str):
+                    raise ConfigurationError("Private API key setting is invalid")
+                try:
+                    values["ARK_API_KEY"] = unprotect_key(persisted["api_key_protected"])
+                except CredentialProtectionError:
+                    raise ConfigurationError("Private API key could not be opened for this Windows user") from None
             mapping = {
                 "model": "SEEDREAM_MODEL",
                 "base_url": "ARK_BASE_URL",

@@ -203,7 +203,7 @@ class LocalWorkbench:
                     raise ServiceError("PAID_RETRY_REQUIRES_NEW_CONSENT", "Reconcile the previous repair call and explicitly reuse its archive; retry never generates another candidate", 409)
                 return helper.repair(RepairRequest.model_validate({"input_asset_id": old["input_asset_id"], **old["parameters"]}), key, retry_of=job_id)
             return helper.tile(TileRequest.model_validate({"unit_asset_id": old["input_asset_id"], **old["parameters"]}), key, retry_of=job_id)
-        if old["kind"] == "decompose-layers":
+        if old["kind"] in {"decompose-layers", "cloud-lineart"}:
             raise ServiceError("PAID_RETRY_REQUIRES_NEW_CONSENT", "Use a new AI workflow with explicit consents, or continue locally; a paid attempt is never retried automatically", 409)
         if old["kind"] in {"compose-layers", "refine-mask"}:
             from app.schemas.assisted import ComposeLayersRequest, RefineMaskRequest

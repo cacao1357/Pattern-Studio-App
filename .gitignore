@@ -15,6 +15,9 @@ frontend/dist/
 build/
 dist/
 
+# Local model delivery packages (weights and private evaluation samples)
+/model-package-2026-11-13/
+
 # Local environments, tool caches and machine-generated files
 .venv/
 venv/
