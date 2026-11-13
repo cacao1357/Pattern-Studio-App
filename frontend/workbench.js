@@ -659,8 +659,6 @@ const dom = {
 
 const state = {
   view: "home",
-  datasetAudit: null,
-  datasetAuditLoading: false,
   library: { items: [], cursor: null, loading: false, error: "", controller: null, searchTimer: null },
   health: null,
   healthError: "",
@@ -1876,79 +1874,6 @@ function renderSidebarContext() {
   const labels = VIEW_LABELS[state.view] || VIEW_LABELS.workspace;
   setText($("breadcrumb-root"), labels[0]);
   setText($("breadcrumb-current"), labels[1]);
-}
-
-function ensureDatasetAudit() {
-  if (state.datasetAudit || state.datasetAuditLoading) return;
-  state.datasetAuditLoading = true;
-  requestJson("/datasets/audit").then((result) => {
-    state.datasetAudit = result && result.data ? result.data : null;
-  }).catch(() => {
-    state.datasetAudit = null;
-  }).finally(() => {
-    state.datasetAuditLoading = false;
-    if (state.view === "dashboard") renderDashboardStats();
-  });
-}
-
-function renderDashboardStats() {
-  setText($("dashboard-version-count"), String(state.versionIds.length));
-  const asset = currentAsset() || (state.previewId ? state.assets.get(state.previewId) : null);
-  if (asset) {
-    setText($("dashboard-current"), assetDisplayName(asset));
-    const stage = document.documentElement.getAttribute("data-stage") || "1";
-    const dims = assetWidth(asset) && assetHeight(asset)
-      ? formatDimensions(assetWidth(asset), assetHeight(asset))
-      : "尺寸待读取";
-    setText($("dashboard-current-meta"), (STAGE_LABELS[stage] || "处理") + " · " + dims);
-  } else {
-    setText($("dashboard-current"), "未开始");
-    setText($("dashboard-current-meta"), "等待载入纹样");
-  }
-  setText($("dashboard-task-count"), String(state.history.items.length));
-  const audit = state.datasetAudit;
-  setText($("dashboard-dataset-count"), audit && Number.isFinite(Number(audit.total_images))
-    ? String(audit.total_images)
-    : "—");
-}
-
-function renderDashboardRecent() {
-  const container = $("dashboard-recent");
-  if (!container) return;
-  const ids = state.versionIds.filter((id) => state.assets.has(id)).slice(0, 4);
-  container.replaceChildren();
-  setHidden($("dashboard-empty"), ids.length > 0);
-  for (const id of ids) {
-    const asset = state.assets.get(id);
-    if (!asset) continue;
-    const item = element("button", "dashboard-item");
-    item.type = "button";
-    const thumb = element("span", "dashboard-thumb");
-    if (assetIsPreviewable(asset)) {
-      const image = element("img");
-      image.alt = "";
-      loadThumb(image, asset);
-      thumb.append(image);
-    } else {
-      thumb.append(icon("image"));
-    }
-    const copy = element("span", "dashboard-item-copy");
-    copy.append(element("strong", "", assetDisplayName(asset)));
-    const meta = [];
-    if (assetWidth(asset) && assetHeight(asset)) meta.push(formatDimensions(assetWidth(asset), assetHeight(asset)));
-    meta.push("#" + shortId(id));
-    copy.append(element("small", "", meta.join(" · ")));
-    item.append(thumb, copy, icon("arrow"));
-    item.addEventListener("click", () => openAssetPreview(asset, "最近版本"));
-    container.append(item);
-  }
-}
-
-function renderDashboard() {
-  renderDashboardStats();
-  renderDashboardRecent();
-  renderSidebarContext();
-  ensureDatasetAudit();
 }
 
 async function loadLibrary(reset) {
@@ -10490,7 +10415,7 @@ function updateActionState() {
   renderRecolorPanel();
   renderPreviewUi();
   renderUndoRedo();
-  if (state.historyOpen) dom.historyList.querySelectorAll("[data-history-action]").forEach(updateHistoryAction);
+  if (state.view === "history") dom.historyList.querySelectorAll("[data-history-action]").forEach(updateHistoryAction);
   renderGuide();
   renderBboxOverlay();
   renderBboxControls();

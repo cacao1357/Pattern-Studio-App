@@ -78,7 +78,9 @@ try {
   const click = (id) => evaluate(`document.getElementById(${JSON.stringify(id)}).click()`);
   const fill = (id, value, event = "input") => evaluate(`(() => {const e=document.getElementById(${JSON.stringify(id)});e.value=${JSON.stringify(value)};e.dispatchEvent(new Event(${JSON.stringify(event)},{bubbles:true}));})()`);
 
-  await call("Page.navigate", { url: info.url });
+  // Since 016197b the studio shell (frontend/next-v2) owns "/", and this legacy
+  // A-flow check drives the preserved workbench under "/legacy/".
+  await call("Page.navigate", { url: info.url + "/legacy/" });
   await waitFor("document.getElementById('health-label')?.textContent.includes('就绪') || document.getElementById('health-label')?.textContent.includes('正常') || document.getElementById('health-label')?.textContent.includes('可用')", "initial application");
   await click("open-settings");
   await waitFor("document.getElementById('settings-dialog').open && document.getElementById('settings-model').value.length > 0", "settings loaded");
