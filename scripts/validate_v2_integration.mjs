@@ -1,5 +1,6 @@
 // New workbench integration smoke: isolated data, real local worker, no cloud calls.
 // Run: node scripts/validate_v2_integration.mjs D:/CondaEnvs/pattern-studio/python.exe
+// --pages-only checks all pages plus layout; --layout-only checks responsive assets and drawer.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
@@ -15,7 +16,8 @@ const output = path.join(root, "storage", "validation", "v2-reliability");
 const checks = [];
 const archiveOnly = process.argv.includes("--archive-only");
 const sessionOnly = process.argv.includes("--session-only");
-const pagesOnly = process.argv.includes("--pages-only");
+const layoutOnly = process.argv.includes("--layout-only");
+const pagesOnly = layoutOnly || process.argv.includes("--pages-only");
 let fixture, browser, socket;
 
 function firstLine(child, stream, matcher) {
@@ -218,17 +220,25 @@ try {
   await writeFile(path.join(output,"workbench-narrow.png"),Buffer.from((await call("Page.captureScreenshot", {format:"png"})).data,"base64"));
   }
   if (pagesOnly) {
+    let pageCase=0;
+    const navigatePage=async (url)=>{
+      const freshUrl=new URL(url);
+      freshUrl.searchParams.set("validationPage",String(++pageCase));
+      await evaluate('window.__previousTestDocument=true');
+      await call('Page.navigate',{url:freshUrl.href});
+      await waitFor('window.__previousTestDocument!==true && document.readyState==="complete"','new test document loaded');
+    };
     const stageKeys=['source','crop','repair','candidate','process','mask','vector','tile'];
-    for (const width of [1440,390]) {
+    if (!layoutOnly) for (const width of [1440,390]) {
       await call('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===390});
       for (const [route,selector] of [['home','.home'],['settings','.st-page'],['notes','.notes']]) {
-        await call('Page.navigate',{url:info.url+'/#/'+route});
+        await navigatePage(info.url+'/#/'+route);
         await waitFor(`Boolean(document.querySelector(${JSON.stringify(selector)}))`,route+' rendered');
         const overflow=await evaluate('document.documentElement.scrollWidth>innerWidth+1');
         assert.equal(overflow,false,route+' overflow at '+width);
       }
       for (let stage=1;stage<=8;stage++) {
-        await call('Page.navigate',{url:info.url+'/#/workbench?asset='+info.input_asset_id+'&stage='+stage+'&v=2'});
+        await navigatePage(info.url+'/#/workbench?asset='+info.input_asset_id+'&stage='+stage+'&v=2');
         await waitFor(`document.querySelector('.wb')?.dataset.stage===${JSON.stringify(stageKeys[stage-1])}`, 'stage '+stage);
         assert.equal(await evaluate('document.documentElement.scrollWidth>innerWidth+1'),false,'stage '+stage+' overflow at '+width);
         if(stage===3) {
@@ -244,6 +254,54 @@ try {
         }
       }
       check('home/settings/notes and eight stages render without horizontal overflow at '+width+'px');
+    }
+    for (const [width,height] of [[1920,1080],[1440,900],[1280,720],[1080,720],[821,640],[820,900],[390,844]]) {
+      await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<=820});
+      await navigatePage(info.url+'/#/workbench?asset='+info.input_asset_id+'&stage=1&v=2');
+      await waitFor("document.querySelector('.wb-assets .wb-thumb[aria-current=true]') && document.querySelector('.wb-media__img')",'independent assets loaded');
+      const layout=await evaluate(`(() => {
+        const box=(selector)=>{const r=document.querySelector(selector).getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,height:r.height,width:r.width}};
+        return {rail:box('.wb-rail'),assets:box('.wb-assets'),main:box('.wb-main'),steps:box('.wb-steps'),lastStep:box('.wb-steps li:last-child'),foot:box('.wb-rail__foot'),wb:box('.wb'),independent:document.querySelector('.wb-assets').parentElement.classList.contains('wb'),overflow:document.documentElement.scrollWidth>innerWidth+1};
+      })()`);
+      assert.equal(layout.independent,true,'assets must be a separate column');
+      assert.equal(layout.overflow,false,'layout overflow at '+width+'x'+height);
+      if(width>820) {
+        assert.ok(layout.rail.right<=layout.assets.left+1 && layout.assets.right<=layout.main.left+1,'desktop columns must not overlap');
+        assert.ok(layout.assets.height>=layout.wb.height-2,'asset list has full workbench height');
+        assert.ok(layout.main.width>=300,'canvas retains usable width');
+        if(height>=900) assert.ok(layout.foot.top-layout.lastStep.bottom<=28,'steps use available vertical space');
+      }
+      if(width>820 && width<=1300) {
+        for(const expanded of [true,false]) {
+          await evaluate(`(() => {const toggle=document.querySelector('[data-act=panel-toggle]');if((toggle.getAttribute('aria-expanded')==='true')!==${expanded}) toggle.click()})()`);
+          await waitFor(`document.querySelector('[data-act=panel-toggle]')?.getAttribute('aria-expanded')===${JSON.stringify(String(expanded))}`,'parameter drawer toggle');
+          const drawer=await evaluate(`(() => {const p=document.querySelector('.wb-panel').getBoundingClientRect(),a=document.querySelector('.wb-assets').getBoundingClientRect();return {left:p.left,assetsRight:a.right,bottom:p.bottom}})()`);
+          assert.ok(drawer.left>=drawer.assetsRight-1,'drawer must not cover asset column');
+        }
+      }
+      if(width>820 && height<=720) {
+        const reachable=await evaluate(`(() => {const rail=document.querySelector('.wb-rail');rail.scrollTop=rail.scrollHeight;const button=rail.querySelector('[data-act=go-export]').getBoundingClientRect(),r=rail.getBoundingClientRect();return button.top>=r.top && button.bottom<=r.bottom+1})()`);
+        assert.equal(reachable,true,'export remains reachable in a short window');
+      }
+      if(width===1920) {
+        const scrollable=await evaluate(`(() => {
+          const scroller=document.querySelector('.wb-groups'),grid=scroller.querySelector('.wb-group__grid'),first=grid.firstElementChild;
+          const clones=Array.from({length:30},()=>first.cloneNode(true));grid.append(...clones);
+          scroller.scrollTop=scroller.scrollHeight;const moved=scroller.scrollTop>0;
+          clones.forEach(node=>node.remove());scroller.scrollTop=0;return moved;
+        })()`);
+        assert.equal(scrollable,true,'many assets scroll inside the independent column');
+      }
+      await evaluate(`(() => {
+        const thumb=document.querySelector('.wb-assets .wb-thumb:not([aria-current=true])');
+        window.__layoutSelected=thumb.dataset.id;thumb.click();
+      })()`);
+      await waitFor("document.querySelector('.wb-assets .wb-thumb[aria-current=true]')?.dataset.id===window.__layoutSelected",'asset selection updates from new column');
+      if(width>820 && width<=1300) {
+        assert.equal(await evaluate("window.dispatchEvent(new Event('resize'));document.querySelector('[data-act=panel-toggle]').getAttribute('aria-expanded')"),'false','closed drawer stays closed after selection and resize');
+      }
+      if(width===1920 || width===1440 || width===390) await writeFile(path.join(output,'asset-column-'+width+'.png'),Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
+      check('independent asset column, selection and responsive layout at '+width+'x'+height);
     }
   }
   const budget=await evaluate("fetch('/api/v1/seedream/status').then(r=>r.json()).then(s=>s.budget.call_count)");

@@ -1124,13 +1124,11 @@ function railHtml(state) {
   const asset = currentAsset();
   const statuses = stageStatuses();
   const doneCount = STAGES.filter((stage) => statuses[stage.key]).length;
-  const assets = store.session.assets || [];
-  const assetGroups = groupAssets(assets);
   const grade = gradeOf();
   const stampClass = grade && "ABCU".includes(grade) ? `stamp--${grade.toLowerCase()}` : "stamp--u";
 
   return `
-  <aside class="wb-rail" aria-label="文档、工序与资产">
+  <aside class="wb-rail" aria-label="文档与工序">
     <div class="wb-doc">
       <div class="wb-doc__top">
         <span class="label">文档</span>
@@ -1158,7 +1156,7 @@ function railHtml(state) {
       </dl>
     </div>
 
-    <section class="wb-rail__sec">
+    <section class="wb-rail__sec wb-rail__sec--steps">
       <header class="wb-rail__head">
         <span class="label">工序</span>
         <span class="mono">${STAGES.length} 步 · ${doneCount} 步有产物</span>
@@ -1184,27 +1182,33 @@ function railHtml(state) {
       </ol>
     </section>
 
-    <section class="wb-rail__sec wb-rail__sec--film">
-      <header class="wb-rail__head">
-        <span class="label">资产</span>
-        <span class="mono">${assets.length} 项 · ${assetGroups.length} 组</span>
-      </header>
-      ${
-        assets.length
-          ? `<div class="wb-groups">${assetGroups.map((group) => assetGroupMarkup(group)).join("")}</div>`
-          : `<div class="wb-assets-empty">
-               <p>这个会话还没有资产。上传一张原图，或从纹样库挑一件。</p>
-               <button class="btn btn--ghost btn--sm btn--block" type="button" data-act="upload">${icon("upload")}上传纹样</button>
-               <button class="btn btn--quiet btn--sm btn--block" type="button" data-act="library">去纹样库挑一件</button>
-             </div>`
-      }
-    </section>
-
     <div class="wb-rail__foot">
       <button class="btn btn--ghost btn--sm btn--block" type="button" data-act="go-export">
         ${icon("download")}平铺与导出
       </button>
     </div>
+  </aside>`;
+}
+
+/** 资产单独一列：整列高度都归缩略图，不再被工序轨压到左栏底部。 */
+function assetsHtml() {
+  const assets = store.session.assets || [];
+  const assetGroups = groupAssets(assets);
+  return `
+  <aside class="wb-assets" aria-label="图片资产">
+    <header class="wb-rail__head">
+      <span class="label">资产</span>
+      <span class="mono">${assets.length} 项 · ${assetGroups.length} 组</span>
+    </header>
+    ${
+      assets.length
+        ? `<div class="wb-groups">${assetGroups.map((group) => assetGroupMarkup(group)).join("")}</div>`
+        : `<div class="wb-assets-empty">
+             <p>这个会话还没有资产。上传一张原图，或从纹样库挑一件。</p>
+             <button class="btn btn--ghost btn--sm btn--block" type="button" data-act="upload">${icon("upload")}上传纹样</button>
+             <button class="btn btn--quiet btn--sm btn--block" type="button" data-act="library">去纹样库挑一件</button>
+           </div>`
+    }
   </aside>`;
 }
 
@@ -2661,8 +2665,9 @@ function panelHtml(stage, state) {
 /* ------------------------------------------------------------------ 局部更新 / 记忆 */
 
 function panelCollapsed() {
-  const twoCol = window.matchMedia("(min-width: 821px) and (max-width: 1080px)").matches;
-  if (!twoCol) return false;
+  // 与 workbench.css 的抽屉断点保持同一区间：≤1300 时参数区下移，默认收起。
+  const drawer = window.matchMedia("(min-width: 821px) and (max-width: 1300px)").matches;
+  if (!drawer) return false;
   return panelPref !== "open";
 }
 
@@ -4914,6 +4919,7 @@ export default {
     return `
     <div class="wb" data-stage="${stage.key}">
       ${railHtml(state)}
+      ${assetsHtml()}
       ${mainHtml(stage, state)}
       ${panelHtml(stage, state)}
     </div>`;
@@ -5025,12 +5031,14 @@ export {
   flowCanCompose,
   flowDecisionAction,
   groupAssets,
+  panelCollapsed,
   pickCandidateFlow,
   restoreCandidateFlow,
   restoreRepairState,
   runCandidate,
   runCloudLineart,
   startJob,
+  syncPanel,
   taskOutcomeCopy,
   toggleCandidateLayer,
 };

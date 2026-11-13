@@ -867,6 +867,183 @@ test("八道工序都能渲染，处理工序明确提供本地/云端线稿，�
   }
 });
 
+test("资产独立成列：缩略图排在文档/工序栏与画布之间，工序栏里不再有资产", () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    matchMedia: () => ({ matches: false }),
+    clearTimeout() {},
+    setTimeout() {
+      return 0;
+    },
+  };
+  try {
+    const asset = (id, kind, width = 800, height = 800) => ({ asset_id: id, kind, width, height });
+    store.session = {
+      imageId: "image-column",
+      image: {
+        image_id: "image-column",
+        meta: { source_name: "列布局样例" },
+        normalized: asset("norm-column", "normalized_input"),
+        original: asset("orig-column", "original"),
+      },
+      assets: [asset("orig-column", "original"), asset("norm-column", "normalized_input")],
+      currentAssetId: "norm-column",
+      jobs: [],
+      busy: false,
+      activeJob: null,
+      error: "",
+    };
+    store.seedream = { enabled: false, blockers: [] };
+    const state = { stage: 1, tile: "2x2", zoom: "fit", brush: 24, compare: false };
+    const html = workbench.default.render(state, { state: {} }, new URLSearchParams());
+
+    const railAt = html.indexOf('class="wb-rail"');
+    const assetsAt = html.indexOf('class="wb-assets"');
+    const mainAt = html.indexOf('class="wb-main"');
+    assert.ok(railAt >= 0, "文档与工序栏应保留");
+    assert.ok(assetsAt > railAt, "资产列应接在文档/工序栏之后");
+    assert.ok(mainAt > assetsAt, "资产列必须在画布之前，画布因此右移一列");
+
+    // 缩略图只出现在资产列里；工序栏只留文档与八道工序。
+    const thumbs = [...html.matchAll(/class="wb-thumb"/g)].map((match) => match.index);
+    assert.equal(thumbs.length, 2);
+    assert.ok(thumbs.every((index) => index > assetsAt && index < mainAt));
+    assert.doesNotMatch(html.slice(railAt, assetsAt), /wb-group|wb-thumb/);
+    assert.match(html.slice(assetsAt, mainAt), /aria-label="图片资产"/);
+    assert.match(html.slice(assetsAt, mainAt), /class="wb-groups"/);
+
+    // 空会话仍是同一条资产列，只换成空态，不回到工序栏底部。
+    store.session.assets = [];
+    const empty = workbench.default.render(state, { state: {} }, new URLSearchParams());
+    const emptyAssetsAt = empty.indexOf('class="wb-assets"');
+    const emptyMainAt = empty.indexOf('class="wb-main"');
+    assert.ok(emptyAssetsAt >= 0 && emptyAssetsAt < emptyMainAt);
+    assert.match(empty.slice(emptyAssetsAt, emptyMainAt), /wb-assets-empty/);
+    assert.doesNotMatch(empty.slice(0, emptyAssetsAt), /wb-assets-empty/);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+/* 参数区在窄窗口下是底部抽屉：状态由 JS 判断，必须和 CSS 用同一段宽度区间。 */
+
+/** 用一个最小 matchMedia 替身按视口宽度回答真实查询文本，不写死断点字符串。 */
+function withViewport(width, run) {
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    matchMedia(query) {
+      const min = /min-width:\s*(\d+)px/.exec(query);
+      const max = /max-width:\s*(\d+)px/.exec(query);
+      const matches = (!min || width >= Number(min[1])) && (!max || width <= Number(max[1]));
+      return { matches, media: query };
+    },
+    clearTimeout() {},
+    setTimeout() {
+      return 0;
+    },
+  };
+  try {
+    return run();
+  } finally {
+    globalThis.window = originalWindow;
+  }
+}
+
+/** 用最小替身跑一次 syncPanel（resize / 重绘后调用），返回面板的实际状态。 */
+function syncPanelAt(width) {
+  return withViewport(width, () => {
+    const classes = new Set(["wb-panel", "is-collapsed"]);
+    let expanded = "false";
+    let label = "展开参数";
+    const panel = {
+      classList: {
+        toggle(name, on) {
+          if (on) classes.add(name);
+          else classes.delete(name);
+          return Boolean(on);
+        },
+      },
+      querySelector(selector) {
+        if (selector === "[data-act='panel-toggle']") {
+          return { setAttribute: (name, value) => name === "aria-expanded" && (expanded = value) };
+        }
+        if (selector === "[data-live='panel-toggle-label']") {
+          return { set textContent(value) { label = value; } };
+        }
+        return null;
+      },
+    };
+    const root = { querySelector: (selector) => (selector === "[data-panel]" ? panel : null) };
+    workbench.syncPanel(root);
+    return { collapsed: classes.has("is-collapsed"), expanded, label };
+  });
+}
+
+test("参数面板折叠态跟随抽屉断点：1280 收起、1301 展开、≤820 堆叠不收起", () => {
+  // 边界两侧各取一点：1300 是抽屉最后一行，1301 已回到四栏桌面。
+  const cases = [
+    [1440, false],
+    [1301, false],
+    [1300, true],
+    [1280, true],
+    [1024, true],
+    [900, true],
+    [821, true],
+    [820, false],
+    [390, false],
+  ];
+  for (const [width, collapsed] of cases) {
+    assert.equal(
+      withViewport(width, () => workbench.panelCollapsed()),
+      collapsed,
+      `${width}px 下参数面板折叠态`
+    );
+  }
+});
+
+test("1280 窗口 resize / 重绘不会把已收起的参数抽屉又展开", () => {
+  // resize 走 syncPanel：默认（未手动展开过）应保持收起，标签仍是「展开参数」。
+  assert.deepEqual(syncPanelAt(1280), { collapsed: true, expanded: "false", label: "展开参数" });
+  // 重绘走 render：开头就带 is-collapsed，头部按钮同步 aria-expanded=false。
+  const originalWindow = globalThis.window;
+  try {
+    store.session = {
+      imageId: "",
+      image: null,
+      assets: [],
+      currentAssetId: "",
+      jobs: [],
+      busy: false,
+      activeJob: null,
+      error: "",
+    };
+    store.seedream = { enabled: false, blockers: [] };
+    const state = { stage: 1, tile: "2x2", zoom: "fit", brush: 24, compare: false };
+    const renderAt = (width) =>
+      withViewport(width, () =>
+        workbench.default.render(state, { state: {} }, new URLSearchParams())
+      );
+
+    const drawer = renderAt(1280);
+    assert.match(drawer, /class="wb-panel is-collapsed"/);
+    assert.match(drawer, /aria-expanded="false"/);
+    assert.match(drawer, /展开参数/);
+
+    // 桌面四栏：参数常驻右侧，同样的重绘不会带上收起态。
+    const desktop = renderAt(1301);
+    assert.match(desktop, /class="wb-panel"/);
+    assert.doesNotMatch(desktop, /class="wb-panel is-collapsed"/);
+    assert.match(desktop, /aria-expanded="true"/);
+    assert.deepEqual(syncPanelAt(1301), { collapsed: false, expanded: "true", label: "收起" });
+
+    // 单栏堆叠（≤820）：面板在页面流里，不套用抽屉收起态。
+    assert.equal(withViewport(820, () => workbench.panelCollapsed()), false);
+    assert.deepEqual(syncPanelAt(820), { collapsed: false, expanded: "true", label: "收起" });
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
 test("URL 目标决策：纯 stage/compare/tile 变化不得重新 openAsset", () => {
   const target = (query) => appModule.loadTarget(new URLSearchParams(query));
   const current = target("image=image-1&asset=asset-1");
