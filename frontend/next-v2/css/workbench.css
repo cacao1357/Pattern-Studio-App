@@ -1,5 +1,5 @@
 /* =============================================================================
-   workbench.css — 工作台：三栏（文档/工序/资产 · 纸本画布 · 参数；264 · 1fr · 368）
+   workbench.css — 工作台：四栏（文档/工序 · 图片资产 · 纸本画布 · 参数；232 · 268 · 1fr · 368）
    主题：墨房。界面是墨与细线，纹样只出现在暖纸图版上。
    排版：正文 14px、标注不小于 12px；动画克制，prefers-reduced-motion 下全部静止。
    只使用 tokens.css 的变量与 base.css / shell.css 的组件类，不自造第二套按钮/表单。
@@ -27,7 +27,7 @@
   --wb-scale: 1;
   position: relative;
   display: grid;
-  grid-template-columns: 264px minmax(0, 1fr) 368px;
+  grid-template-columns: 232px 268px minmax(0, 1fr) 368px;
   min-height: 0;
   background: var(--bg-1);
   border-top: 1px solid var(--line-1);
@@ -112,6 +112,14 @@
   padding: 11px 8px 6px;
   border-bottom: 1px solid var(--line-1);
 }
+/* 工序轨独占资产列让出的高度：八步按可用高度等分，矮窗口时整栏滚动而不是把步骤压扁 */
+.wb-rail__sec--steps {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  min-height: 0;
+  padding: 12px 8px 8px;
+}
 .wb-rail__head {
   display: flex;
   align-items: baseline;
@@ -131,8 +139,17 @@
 .wb-steps {
   position: relative;
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
-  gap: 1px;
+  justify-content: space-between;
+  gap: 4px;
+  min-height: 0;
+}
+.wb-steps li {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 38px;
+  max-height: 64px;
 }
 .wb-steps::before {
   content: "";
@@ -150,8 +167,8 @@
   align-items: center;
   gap: 9px;
   width: 100%;
-  min-height: 30px;
-  padding: 5px 8px;
+  min-height: 38px;
+  padding: 7px 9px;
   border-radius: var(--r-sm);
   text-align: left;
   color: var(--text-3);
@@ -168,13 +185,13 @@
 }
 .wb-step__n {
   font-family: var(--font-mono);
-  font-size: var(--text-min);
+  font-size: var(--text-label);
   letter-spacing: 0.06em;
   color: var(--text-3);
   transition: color var(--dur-2);
 }
 .wb-step__name {
-  font-size: var(--text-sm);
+  font-size: var(--text-body);
   line-height: 1.45;
   white-space: nowrap;
   overflow: hidden;
@@ -216,14 +233,19 @@
   background: var(--cinnabar);
 }
 
-/* 资产分组：按工序 + 类型分堆，组内按版本编号，同类结果跑多次也不会混成一列 */
-.wb-rail__sec--film {
-  flex: 1 1 auto;
+/* 资产列：文档/工序之后的独立一列，整列高度归缩略图，滚动只发生在这里 */
+.wb-assets {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
-  padding-bottom: 2px;
-  border-bottom: 0;
+  overflow: hidden;
+  background: var(--bg-1);
+  border-right: 1px solid var(--line-1);
+}
+.wb-assets > .wb-rail__head {
+  flex: none;
+  padding: 13px 12px 9px;
 }
 .wb-groups {
   display: flex;
@@ -231,7 +253,7 @@
   flex-direction: column;
   gap: 10px;
   min-height: 0;
-  padding: 0 8px 4px;
+  padding: 0 10px 10px;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -376,11 +398,11 @@
   color: var(--cinnabar-hi);
 }
 
-/* 打包 */
+/* 打包：分隔线由工序轨的下边框给出，这里只留间距 */
 .wb-rail__foot {
   flex: none;
+  margin-top: auto;
   padding: 9px 12px 11px;
-  border-top: 1px solid var(--line-1);
 }
 
 /* ================================================================ 中栏 */
@@ -1357,29 +1379,33 @@
 
 /* ================================================================ 响应式 */
 
-/* 两栏：参数区下移，可折叠；展开时作为底部抽屉覆盖画布，避免把画布压扁 */
-@media (max-width: 1080px) {
+/* 三栏：资产列仍在画布左侧，参数区下移、可折叠；展开时作为底部抽屉覆盖画布，避免把画布压扁 */
+@media (max-width: 1300px) {
   .wb {
-    grid-template-columns: 236px minmax(0, 1fr);
+    grid-template-columns: 220px 244px minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) auto;
   }
   .wb-rail {
     grid-column: 1;
     grid-row: 1 / span 2;
   }
-  .wb-main {
+  .wb-assets {
     grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+  .wb-main {
+    grid-column: 3;
     grid-row: 1;
   }
   .wb-panel {
-    grid-column: 2;
+    grid-column: 3;
     grid-row: 2;
     border-left: 0;
     border-top: 1px solid var(--line-2);
   }
   .wb-panel:not(.is-collapsed) {
     position: absolute;
-    left: 236px;
+    left: 464px;
     right: 0;
     bottom: 0;
     z-index: 5;
@@ -1412,6 +1438,16 @@
   }
 }
 
+/* 窄平板：左两列收窄，把宽度留给画布（此区间仍是锁定视口高度的三栏） */
+@media (min-width: 821px) and (max-width: 1000px) {
+  .wb {
+    grid-template-columns: 204px 224px minmax(0, 1fr);
+  }
+  .wb-panel:not(.is-collapsed) {
+    left: 428px;
+  }
+}
+
 /* 单栏：堆叠，页面自己滚（此宽度下外壳导航会换成第二行，留出高度） */
 @media (max-width: 820px) {
   .view--flush {
@@ -1433,6 +1469,16 @@
     overflow: visible;
     border-right: 0;
     border-bottom: 1px solid var(--line-2);
+  }
+  .wb-assets {
+    display: block;
+    overflow: visible;
+    border-right: 0;
+    border-top: 1px solid var(--line-1);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .wb-assets > .wb-rail__head {
+    padding: 12px 16px 8px;
   }
   .wb-doc {
     display: grid;
@@ -1462,11 +1508,17 @@
   .wb-rail__sec {
     padding: 12px 10px 9px;
   }
-  .wb-rail__sec--film {
+  .wb-rail__sec--steps {
     display: block;
+    flex: none;
+  }
+  .wb-rail__foot {
+    margin-top: 0;
   }
   .wb-steps {
+    flex: none;
     flex-direction: row;
+    justify-content: flex-start;
     gap: 6px;
     overflow-x: auto;
     padding-bottom: 4px;
@@ -1475,7 +1527,10 @@
     display: none;
   }
   .wb-steps li {
+    display: block;
     flex: none;
+    min-height: 0;
+    max-height: none;
   }
   .wb-step {
     grid-template-columns: auto auto;
@@ -1508,9 +1563,12 @@
   }
   .wb-groups {
     flex: none;
-    padding: 0 0 4px;
+    padding: 0 16px 6px;
     overflow: visible;
     gap: 8px;
+  }
+  .wb-assets-empty {
+    padding-inline: 12px;
   }
   .wb-group__grid {
     grid-auto-flow: column;
@@ -2188,7 +2246,7 @@
 .wb-main__caption .wb-caption__text {
   font-size: var(--text-sm);
 }
-@media (max-width: 1080px) {
+@media (max-width: 1300px) {
   .wb-export-list {
     max-height: 180px;
   }

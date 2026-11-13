@@ -199,6 +199,20 @@ node scripts/validate_v2_integration.mjs D:/CondaEnvs/pattern-studio/python.exe
 
 前端由 DSH `wb/deepseek-v4.1-flash` 实现，Codex 独立检查和浏览器验收。会话 `session-a6a1171f-778c-473a-af15-53e330e3d49e`；运行 `86ffffe2-569b-4875-9c88-d1b089e80b16`，同任务补充 `372e94ce-41b3-461b-b3f9-d11c9d71f268`、`d19ba85e-7f6b-4a02-abff-3c3aa405c9ad`、`c13d67ac-e0b7-4942-a095-82aa68e3b026` 均已成功。密钥实现由原生 `settings_encryption` 辅助，集成和真实调用由 Codex 负责。DSH 沙箱不能启动浏览器子进程，浏览器通过结果均由 Codex 外层取得。
 
-未做：固定素材集全面质量验收、Safari/Firefox、屏幕阅读器；`review/` 旧截图未重拍。既有脏工作区保留，本批未提交或推送。当前本机服务已加载新后端，静态页面刷新生效。
+未做：固定素材集全面质量验收、Safari/Firefox、屏幕阅读器；`review/` 旧截图未重拍。实现阶段保留既有工作区；后续已按用户授权通过 PR #4 合入远程 main（e28d164）。当前本机服务已加载新后端，静态页面刷新生效。
 
 清理限制：SVG 视觉复核使用的 `storage/validation/cloud-lineart-20261113/render-profile/` 临时浏览器配置清理被自动安全审核以 `blocked by policy` 拦截；目录保留于 Git 忽略的验证目录，不影响运行。
+
+
+## 14. 2026-11-13 独立资产列与工序高度
+
+上一批后端和流程修复已通过 [PR #4](https://github.com/cacao1357/Pattern-Studio-App/pull/4) 合入 main，提交 `e28d164`。本节为其后的独立布局调整；已按用户授权纳入提交、推送及合入 main 的交付范围，具体状态以对应 PR / Git 记录为准。
+
+- 桌面由「文档/工序/资产、画布、参数」三栏改为「文档/工序、图片资产、画布、参数」四栏，资产在画布左侧单独占一列，保留分组、折叠、当前资产和选图功能。
+- 八步按可用高度分配行高与上下间距（38–64px），名称 14px；导出按钮上方不再留出原资产区的大段空白。矮窗口允许工序栏滚动，导出仍可到达。
+- ≥1301：232 / 268 / 自适应 / 368px；1001–1300：220 / 244 / 自适应，821–1000：204 / 224 / 自适应，参数为画布底部抽屉。≤820：单栏页面滚动，工序和每组缩略图横向滑动。参数行为断点须与 CSS 一致为 1300px。
+- 验证脚本 `node scripts/validate_v2_integration.mjs D:/CondaEnvs/pattern-studio/python.exe --pages-only` 检查首页、设置、说明和八步；`--layout-only` 单查七组布局：1920×1080、1440×900、1280×720、1080×720、821×640、820×900、390×844。覆盖独立列高度、真实资产点击、长列表独立滚动、矮窗口导出可达、抽屉开关及切图/resize保持，无新增云端调用。每个页面用不同查询参数强制新文档，避免 hash 导航保留上一个测试的修复跳过状态。
+- 前端测试为新版 43 项、旧设置 8 项和旧工作台 22 项，共 73 项通过；`git diff --check` 通过。七尺寸定向浏览器验证通过，页面异常 0，新增云端生成请求 0。后端未修改，沿用上一批已通过的检查。
+- 截图 `storage/validation/v2-reliability/asset-column-{1920,1440,390}.png` 由隔离真实 API 的合成图片生成，主 Codex 已目视复核；不含用户私有纹样。未做 Firefox/Safari 或屏幕阅读器验证。
+
+布局由 DSH `wb/deepseek-v4.1-flash` 实施，Codex 独立审查与浏览器验收。会话 `session-9339ed17-496d-4fe7-82a5-38c6709d9cf8`，初始运行 `6599002c-71d3-495b-aeff-b956b0f0c050`，同任务补充运行 `88dc4457-136d-4023-8e6a-d1033cc22b4d`。文档、浏览器验证脚本由 Codex 维护。
