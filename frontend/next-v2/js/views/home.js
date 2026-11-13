@@ -790,10 +790,17 @@ async function openJobs(api) {
       </div>`
     )
     .join("");
-  api.drawer({
+  const el = api.drawer({
     title: "最近任务",
     meta: `${jobs.length} 条 · 本机任务队列与历史`,
     body: `<div class="job-list">${rows || "<p class='drawer-lead'>还没有任务记录。</p>"}</div>
-      <p class="drawer-foot">失败或取消的任务保留错误信息。</p>`,
+      <div class="drawer-actions">
+        <button class="btn btn--ghost btn--sm" type="button" data-all-tasks>${icon("history")}查看全部任务</button>
+      </div>
+      <p class="drawer-foot">列表只读；失败与取消的任务记录保留在本机历史里。</p>`,
+  });
+  el?.querySelector("[data-all-tasks]")?.addEventListener("click", () => {
+    api.closeDrawer();
+    api.go("tasks");
   });
 }

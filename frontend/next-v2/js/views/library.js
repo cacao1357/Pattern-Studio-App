@@ -816,7 +816,8 @@ async function openDeepLinkedAsset(page, api, params) {
     openAssetDrawer(asset, null, api);
   } catch (error) {
     if (ctx && ctx.page === page) {
-      api.toast(error?.status === 404 ? "没有找到这个资产" : error?.message || "无法打开这个资产", "warn");
+      const missing = error?.status === 404 || error?.status === 422;
+      api.toast(missing ? "没有找到这个资产（编号无效或已删除）" : error?.message || "无法打开这个资产", "warn");
     }
   } finally {
     stripOpenParam();

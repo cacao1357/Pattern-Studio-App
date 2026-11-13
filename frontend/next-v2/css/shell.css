@@ -135,6 +135,9 @@
   transform: translateX(-50%) scaleX(1);
 }
 
+/* 桌面端“使用说明”在顶栏右侧；窄屏顶栏只留上传按钮，这里补一个导航入口。 */
+.topnav__link--notes { display: none; }
+
 .topbar__right {
   margin-left: auto;
   display: flex;
@@ -525,6 +528,9 @@
   }
   .topnav__link::after {
     bottom: 0;
+  }
+  .topnav__link--notes {
+    display: inline-flex;
   }
   .topbar__right [data-action="notes"] {
     display: none;

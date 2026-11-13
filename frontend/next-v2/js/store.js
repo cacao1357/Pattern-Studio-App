@@ -287,7 +287,9 @@ export const store = {
   async uploadToSession(file, options = {}) {
     const token = sessionEpoch;
     const pendingLoad = loadSeq;
-    const result = await api.uploadImage(file, {}, options);
+    // 来源名默认用文件名，让工作台标题和纹样库能区分不同纹样；调用方可覆盖。
+    const provenance = { source_name: String(file?.name || "").slice(0, 200), ...(options.provenance || {}) };
+    const result = await api.uploadImage(file, provenance, options);
     // 上传期间有任何新的加载开始（打开别的纹样/资产）或会话已切换，
     // 都说明这份上传结果是晚到的，不能再发布。
     if (!this.isSessionCurrent(token) || loadSeq !== pendingLoad) {

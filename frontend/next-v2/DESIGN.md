@@ -98,8 +98,9 @@ export default {
 - 异步数据由视图在 `mount` 里订阅 `store`；加载方法本身会 emit，**必须加守卫**（Loaded 标记/时间戳，或只对非本次加载的 reason 刷新），否则会 mount→加载→refresh→mount 循环。
 
 路由：`#/home`、`#/workbench?image=<id>&asset=<id>&stage=1…8&v=2&compare=1&tile=2x2|3x3`、
-`#/library?open=<assetId>`、`#/settings`、`#/notes`。
-快捷键：`1`–`7` 切工序、`[` / `]` 在会话资产间切换、`C` 对比、`Ctrl/⌘K` 命令面板、`Esc` 关闭。
+`#/tasks?job=<id>`、`#/library?open=<assetId>`、`#/settings`、`#/notes`。
+快捷键：`1`–`8` 切工序、`[` / `]` 在会话资产间切换、`C` 对比、`Ctrl/⌘K` 命令面板、`Esc` 关闭。
+工作台里换工序、换资产、开关对比或平铺规格会同步回地址栏（`replaceState`，不新增历史记录）；刷新仍停在当前目标。
 
 ## 5. 页面规格（实现现状）
 
@@ -120,6 +121,7 @@ export default {
   （宽 ≤820 时改为每组一行横向滑动）。同一步里同一类型跑过多次时，按生成时间编号 `v1…vN`，最新在前并与同类型相邻；
   `title` 写明类型、尺寸、生成时刻、参数与资产 id。当前资产用琥珀描边 +「当前」标出，切图后自动滚进视野。
 - 缩略图来自 `/assets/{id}/preview`，点击切换当前资产；切工序用局部重绘，不播整页动画。
+- 上传完成后若后端返回近似版本，先开“发现近似版本”抽屉：可改用已有版本的规范输入，或保留新上传继续；新上传不自动删除。
 - 画布只显示真实资产；对比只在有同图原件/规范输入时可用；裁切框、蒙版笔触坐标按真实像素换算。
 - 右侧参数按工序切换：来源=上传/库入口；裁切=坐标+比例；修复=可跳过的云端局部修复；候选=云端同意与选层；提取=本地/云端/OpenCV/颜色；蒙版=笔刷；矢量=PNG 转 SVG 参数；平铺=规格/接缝/导出。
 - 蒙版笔迹按真实像素记录：一笔是**一条圆头描边路径**（半透明宽带 + 一条细中线），不是逐点圆圈；
@@ -139,6 +141,7 @@ export default {
 - 云端调用：付费开关、价格确认与 blockers；不再设置预算、单次预留或调用上限。
 - 本机处理：`/health` 的 worker、版本与 limits（只读），提示数据在 `storage/api`。
 - 底部粘性保存条：有字段改动或已配置密钥需要从旧存储迁移时启用；迁移只提交 `revision + api_key_action=keep`，无需重输密钥。PUT 带 `revision`，409 提示重新读取；保存后刷新 settings 与云端状态。
+- 有未保存修改时，站内链接离开会先确认，刷新/关闭标签页交给浏览器确认。
 
 ### 5.4 首页（`js/views/home.js`）
 
@@ -153,7 +156,13 @@ export default {
 - 「云端」：先出结果、按需调用；不调用云端也可完成提取、矢量化、蒙版与平铺，云端生成按次确认；CTA 只去设置。
 - 动效：章节线画出、卡片交错淡入、导览切换；全部受 `prefers-reduced-motion` 控制。
 
-### 5.5 使用说明（`js/views/notes.js`）
+### 5.5 任务（`js/views/tasks.js`）
+
+- 任务索引按 `/api/v1/jobs` 分页，支持状态筛选与关键词（类型、编号、错误）；详情显示状态、时间、尝试次数、输入资产、错误与产物缩略图。
+- 失败任务可重试（由服务端判定是否允许；云端调用需重新确认），运行中任务可取消；打开工作台按任务产物/输入资产与工序定位。
+- 有运行中任务时每 3 秒刷新；页面隐藏时暂停，切回后补一次。
+
+### 5.6 使用说明（`js/views/notes.js`）
 
 - 工序说明表、快捷键、数据与安全边界、故障排查、已知限制、`/legacy/` 旧版入口。
 
@@ -171,14 +180,14 @@ export default {
 ```
 frontend/next-v2/
 ├─ index.html
-├─ css/  tokens.css base.css shell.css home.css workbench.css library.css settings.css notes.css
+├─ css/  tokens.css base.css shell.css home.css workbench.css library.css tasks.css settings.css notes.css
 ├─ js/   app.js api.js store.js format.js motion.js icons.js motifs.js data.js samples.js
-│        views/ home.js workbench.js library.js settings.js notes.js
+│        views/ home.js workbench.js tasks.js library.js settings.js notes.js
 ├─ assets/  favicon.svg 与 assets/demo 的工序样例图（页面成果仍用真实资产）
 ├─ review/  评审期截图（可整目录删除）
 ├─ README.md
 └─ DESIGN.md
 ```
 
-同级 `frontend/next-v2-backup-20261110/` 与 `frontend/next/` 是仅保留在本机的旧版草稿，
+同级 `frontend/next-v2-backup-20261110/` 与 `frontend/next/` 是仅保留在本机的旧版草稿（如存在），
 已写入 `.gitignore`；本目录的最终版以 Git 中的提交为准。

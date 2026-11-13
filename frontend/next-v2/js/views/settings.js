@@ -51,6 +51,8 @@ let timers = [];
 let scrollHandler = null;
 let scrollFrame = 0;
 let storeUnsubscribe = null;
+let beforeUnloadHandler = null;
+let navClickHandler = null;
 
 /* ---------- 小工具 ---------- */
 
@@ -452,6 +454,12 @@ function changedFields(page) {
   if (now.pricing !== baseline.pricing) keys.push("pricing_confirmed");
   if (now.keyValue || now.keyAction !== baseline.keyAction) keys.push("api_key");
   return { now, keys };
+}
+
+/** 设置页有未保存修改时为真；保存中不拦。 */
+function hasUnsavedChanges(page) {
+  if (!page || !ctx || ctx.page !== page || saving) return false;
+  return changedFields(page).keys.length > 0;
 }
 
 function showError(page, message) {
@@ -905,6 +913,25 @@ export default {
     paintKeyState(page);
     paintSaveState(page);
 
+    // 有未保存修改时，刷新/关闭标签页与站内链接离开都要先确认。
+    beforeUnloadHandler = (event) => {
+      if (!hasUnsavedChanges(page)) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", beforeUnloadHandler);
+    navClickHandler = (event) => {
+      if (!hasUnsavedChanges(page)) return;
+      const link = event.target.closest('a[href^="#/"]');
+      if (!link) return;
+      const href = link.getAttribute("href") || "";
+      if (!href || href === location.hash) return;
+      if (window.confirm("设置还有未保存的修改，离开会丢失这些修改。确定离开？")) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    document.addEventListener("click", navClickHandler, true);
+
     if (!store.health) {
       store.loadHealth().then(() => {
         if (ctx && ctx.page === page) {
@@ -974,6 +1001,10 @@ export default {
   },
 
   unmount() {
+    if (beforeUnloadHandler) window.removeEventListener("beforeunload", beforeUnloadHandler);
+    beforeUnloadHandler = null;
+    if (navClickHandler) document.removeEventListener("click", navClickHandler, true);
+    navClickHandler = null;
     if (scrollHandler) {
       window.removeEventListener("scroll", scrollHandler);
       scrollHandler = null;

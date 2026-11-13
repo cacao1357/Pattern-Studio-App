@@ -51,6 +51,10 @@ const CODE_MESSAGES = {
   PROVIDER_INPUT_DIMENSIONS: "输入的像素或长宽比不在云端允许范围内。",
   NORMALIZED_TOO_LARGE: "云端输入文件超过 20 MB；请先创建工作副本或压缩后再上传。",
   NEEDS_RECONCILIATION: "上一次云端调用的结果尚未确认；请先在任务记录中核对，不会自动重发。",
+  RETRY_NOT_ALLOWED: "只有失败的本机任务可以重试；云端调用需要重新发起并确认。",
+  PAID_RETRY_REQUIRES_NEW_CONSENT: "云端调用不能自动重试；请在工作台重新发起并确认费用。",
+  CANCEL_REQUIRES_RECONCILIATION: "这条任务可能有外部调用在进行，需要先核对云端状态，暂时不能取消。",
+  JOB_NOT_FOUND: "找不到这条任务。",
   DECOMPOSITION_NOT_READY: "云端拆分尚未成功完成，暂时没有可选的候选层。",
   DECOMPOSITION_INPUT_MISMATCH: "这份云端拆分不是用当前规范输入生成的，请重新生成候选。",
   DECOMPOSITION_ARCHIVE_INVALID: "云端候选归档不完整，无法安全合成；请重新生成候选。",
@@ -93,7 +97,7 @@ export function idempotencyKey() {
   return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function request(path, { method = "GET", json, form, headers, signal, raw = false } = {}) {
+async function request(path, { method = "GET", json, form, headers, signal, raw = false, timeout } = {}) {
   const head = new Headers(headers || {});
   head.set("Accept", raw ? "*/*" : "application/json");
   let body;
@@ -105,19 +109,42 @@ async function request(path, { method = "GET", json, form, headers, signal, raw 
   }
   if (!["GET", "HEAD"].includes(method)) head.set("X-Pattern-Studio", "local");
 
+  // 本机服务也可能卡住：默认上限避免页面永远停在加载态。
+  const budget = timeout === undefined ? (form ? 120000 : 30000) : Number(timeout);
+  const controller = new AbortController();
+  let timedOut = false;
+  let timer = null;
+  if (budget > 0) {
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, budget);
+  }
+  const forwardAbort = () => controller.abort();
+  if (signal) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener("abort", forwardAbort, { once: true });
+  }
+
   let response;
   try {
     response = await fetch(BASE + path, {
       method,
       headers: head,
       body,
-      signal,
+      signal: controller.signal,
       credentials: "same-origin",
       cache: "no-store",
     });
   } catch (error) {
-    if (error && error.name === "AbortError") throw new ApiError("请求已取消。", { network: true });
+    if (timedOut) throw new ApiError("本机服务响应超时，请稍后重试。", { network: true });
+    if ((signal && signal.aborted) || (error && error.name === "AbortError")) {
+      throw new ApiError("请求已取消。", { network: true });
+    }
     throw new ApiError("无法连接本机服务，请确认工作台服务正在运行。", { network: true });
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (signal) signal.removeEventListener("abort", forwardAbort);
   }
 
   if (!response.ok) {

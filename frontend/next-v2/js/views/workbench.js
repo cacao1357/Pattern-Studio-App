@@ -45,6 +45,8 @@ const MIN_SCALE = 0.2;
 const MAX_SCALE = 3;
 const CROP_MIN_PX = 4;
 const MASK_MAX_POINTS = 2048;
+/** 单次打包导出的资产上限；界面勾选与提交使用同一上限。 */
+const EXPORT_LIMIT = 24;
 
 /** 平铺单元允许的资产类型（与后端 TILE_UNIT_KINDS 一致） */
 const TILE_UNIT_KINDS = new Set(["cropped", "transparent_png", "lineart", "accepted_repair"]);
@@ -343,6 +345,7 @@ let sessionTimer = null;
 let resizeHandler = null;
 let canvasObserver = null;
 let unsubscribe = null;
+let compareKeyHandler = null;
 let scrollMemo = null;
 let focusMemo = null;
 
@@ -561,7 +564,7 @@ function defaultExportIds() {
     }
     if (ids.length >= 4) break;
   }
-  return ids.slice(0, 24);
+  return ids.slice(0, EXPORT_LIMIT);
 }
 
 function exportSelection() {
@@ -1390,21 +1393,26 @@ function tilePlate(state, stage) {
   </div>`;
 }
 
+function sessionErrorPlate() {
+  return `<div class="wb-plate plate wb-plate--empty"><div class="wb-empty-state">
+    <span class="wb-empty-state__icon">${icon("alert")}</span>
+    <h3>没有读到这张纹样</h3>
+    <p>${esc(ui.sessionError)}</p>
+    <div class="wb-empty-state__actions">
+      <button class="btn btn--primary btn--sm" type="button" data-act="retry-session">${icon("history")}重试读取</button>
+      <button class="btn btn--ghost btn--sm" type="button" data-act="upload">重新上传</button>
+    </div></div></div>`;
+}
+
 function plateContent(stage, state, params) {
-  const loading = Boolean(expectedImage && store.session.imageId !== expectedImage && !ui.sessionError);
+  // 目标纹样与当前会话不是同一张：即使旧会话里还有资产，也不能拿旧图画新目标。
+  const missingTarget = Boolean(expectedImage && store.session.imageId !== expectedImage);
+  const loading = missingTarget && !ui.sessionError;
   if (loading) return loadingPlate();
+  if (missingTarget && ui.sessionError) return sessionErrorPlate();
   const asset = currentAsset();
   if (!asset) {
-    if (ui.sessionError) {
-      return `<div class="wb-plate plate wb-plate--empty"><div class="wb-empty-state">
-        <span class="wb-empty-state__icon">${icon("alert")}</span>
-        <h3>没有读到这张纹样</h3>
-        <p>${esc(ui.sessionError)}</p>
-        <div class="wb-empty-state__actions">
-          <button class="btn btn--primary btn--sm" type="button" data-act="retry-session">${icon("history")}重试读取</button>
-          <button class="btn btn--ghost btn--sm" type="button" data-act="upload">重新上传</button>
-        </div></div></div>`;
-    }
+    if (ui.sessionError) return sessionErrorPlate();
     return emptyPlate();
   }
   if (stage.key === "tile") {
@@ -1445,7 +1453,9 @@ function plateContent(stage, state, params) {
 function captionFor(stage, state) {
   const asset = currentAsset();
   const image = sessionImage();
-  if (expectedImage && store.session.imageId !== expectedImage && !ui.sessionError) return "正在读取本机纹样…";
+  if (expectedImage && store.session.imageId !== expectedImage) {
+    return ui.sessionError || "正在读取本机纹样…";
+  }
   if (!asset) return ui.sessionError || "上传一张纹样开始";
   if (state.compare) {
     const info = compareInfo(stage);
@@ -2407,7 +2417,7 @@ function exportsSection(state) {
       <button class="btn btn--primary btn--sm" type="button" data-act="run-export"${
         selection.length && draft.licenseAck && !ui.running ? "" : " disabled"
       }>${icon("download")}导出 ZIP</button>
-      <span class="mono wb-inline__note">${selection.length} / 24</span>
+      <span class="mono wb-inline__note">${selection.length} / ${EXPORT_LIMIT}</span>
     </div>
     ${
       zip
@@ -3430,6 +3440,7 @@ function stageClick(root, api, el) {
 function switchAsset(api, root, assetId) {
   if (!assetId || store.session.currentAssetId === assetId) return;
   store.setCurrentAsset(assetId);
+  api.syncUrl?.();
 }
 
 function cycleAsset(root, api, delta) {
@@ -3439,6 +3450,7 @@ function cycleAsset(root, api, delta) {
   const next = assets[(index + delta + assets.length) % assets.length];
   if (!next || next.asset_id === store.session.currentAssetId) return;
   store.setCurrentAsset(next.asset_id);
+  api.syncUrl?.();
   api.toast(`${delta < 0 ? "上一个" : "下一个"}资产：${kindLabel(next.kind)} ${shortId(next.asset_id)}`, "info");
 }
 
@@ -4542,12 +4554,13 @@ async function runExport(api) {
     return;
   }
   ui.lastExport = null;
-  const payload = { asset_ids: selection.slice(0, 24), license_acknowledged: true };
+  const ids = selection.slice(0, EXPORT_LIMIT);
+  const payload = { asset_ids: ids, license_acknowledged: true };
   await startJob(api, () => http.exportAssets(payload), (final) => {
     const zip = (final.result?.assets || []).find((entry) => entry.kind === "zip") || null;
     if (zip) {
       ui.lastExport = zip;
-      ui.notice = `导出完成：${selection.length} 个资产，ZIP ${formatBytes(zip.bytes)}。`;
+      ui.notice = `导出完成：${ids.length} 个资产，ZIP ${formatBytes(zip.bytes)}。`;
       api.toast("导出完成，可下载 ZIP。", "done");
     } else {
       ui.notice = "导出任务完成，但没有返回 ZIP 资产。";
@@ -4737,11 +4750,14 @@ function handleClick(root, state, api, event) {
           .ensureSession(expectedImage)
           .then((session) => {
             // 被更新的加载取代时 ensureSession 返回 null：不重绘、不报错。
-            if (session) repaintIfHere(api);
+            if (!session) return;
+            state.targetError = null;
+            repaintIfHere(api);
           })
           .catch((error) => {
             if (!store.isSessionCurrent(token)) return;
             ui.sessionError = error?.message || "读取纹样失败。";
+            state.targetError = { image: expectedImage, asset: "", message: ui.sessionError };
             repaintIfHere(api);
           });
       }
@@ -4844,8 +4860,16 @@ function handleChange(root, state, api, event) {
   if (input.matches("[data-export]")) {
     const id = input.dataset.export;
     const selection = new Set(exportSelection());
-    if (input.checked) selection.add(id);
-    else selection.delete(id);
+    if (input.checked) {
+      if (selection.size >= EXPORT_LIMIT) {
+        input.checked = false;
+        api.toast(`一次最多打包导出 ${EXPORT_LIMIT} 个资产，请先取消其中一项。`, "warn");
+        return;
+      }
+      selection.add(id);
+    } else {
+      selection.delete(id);
+    }
     draft.exportIds = [...selection];
     draft.exportInit = true;
     repaint(root, api);
@@ -4914,6 +4938,16 @@ export default {
   render(state, api, params) {
     viewState = state;
     expectedImage = params?.get?.("image") || "";
+    const targetError = state.targetError;
+    // 深链目标的接口已经报错时立即显示，不必再等 mount 里的超时兜底。
+    if (
+      targetError &&
+      expectedImage &&
+      targetError.image === expectedImage &&
+      store.session.imageId !== expectedImage
+    ) {
+      ui.sessionError = targetError.message;
+    }
     syncDrafts(state);
     const stage = currentStage(state);
     return `
@@ -4942,8 +4976,28 @@ export default {
     bindMask(wb, state, api);
     revealCurrentThumb(wb);
 
+    // 键盘 C 与点击“对比”走同一套可用性检查（app.js 只派发事件）。
+    compareKeyHandler = () => {
+      const stage = currentStage(state);
+      const info = compareInfo(stage);
+      if (!info.ok) {
+        api.toast(info.reason, "warn");
+        return;
+      }
+      const next = !state.compare;
+      patchStage(api, wb, { compare: next });
+      api.toast(next ? "对比已开：左原件 / 右当前资产" : "对比已关", "info");
+    };
+    document.addEventListener("ps:toggle-compare", compareKeyHandler);
+
     const want = params?.get?.("image") || "";
-    if (want && store.session.imageId !== want) {
+    const targetError = state.targetError;
+    if (targetError && want && targetError.image === want && store.session.imageId !== want) {
+      // 深链目标已在 applyParams 阶段失败：立即显示原因，不再等 8 秒超时。
+      ui.sessionError = targetError.message;
+      if (sessionTimer) window.clearTimeout(sessionTimer);
+      sessionTimer = null;
+    } else if (want && store.session.imageId !== want) {
       ui.sessionError = "";
       if (sessionTimer) window.clearTimeout(sessionTimer);
       sessionTimer = window.setTimeout(() => {
@@ -4951,7 +5005,7 @@ export default {
           ui.sessionError = "读取纹样超时。请重试，或重新上传一张。";
           repaintIfHere(api);
         }
-      }, 8000);
+      }, 6000);
     }
     // app.applyParams loads deep-link assets once when the URL changes.
     // Repainting must preserve the user's selection and newly adopted results.
@@ -4968,6 +5022,8 @@ export default {
       }
       if (!["session", "job-start", "job-end", "settings", "seedream"].includes(reason)) return;
       repaintIfHere(api);
+      // 任务产物或候选可能改变当前资产：把地址栏一起带上，刷新后仍回到同一资产。
+      if (reason === "session") api.syncUrl?.();
     });
 
     syncPanel(wb);
@@ -5002,6 +5058,8 @@ export default {
   unmount() {
     if (unsubscribe) unsubscribe();
     unsubscribe = null;
+    if (compareKeyHandler) document.removeEventListener("ps:toggle-compare", compareKeyHandler);
+    compareKeyHandler = null;
     if (resizeHandler) window.removeEventListener("resize", resizeHandler);
     resizeHandler = null;
     if (canvasObserver) canvasObserver.disconnect();

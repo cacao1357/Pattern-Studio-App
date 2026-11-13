@@ -987,6 +987,88 @@
   color: var(--text-4);
 }
 
+/* 上传后的近似版本选择 */
+.dup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dup-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+}
+
+.dup-thumb {
+  width: 52px;
+  height: 52px;
+  flex: none;
+  object-fit: cover;
+  border-radius: 3px;
+  background: var(--paper-1);
+}
+
+.dup-thumb--file {
+  display: grid;
+  place-items: center;
+  color: var(--text-4);
+}
+
+.dup-thumb--file .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.dup-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.dup-copy strong {
+  overflow: hidden;
+  color: var(--text-1);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dup-copy small {
+  color: var(--text-3);
+  font-size: var(--text-meta);
+}
+
+.dup-row .btn {
+  flex: none;
+}
+
+@media (max-width: 480px) {
+  .dup-row {
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr);
+    align-items: center;
+  }
+  .dup-thumb {
+    grid-row: span 2;
+  }
+  .dup-row .btn {
+    grid-column: 2;
+    justify-self: start;
+    margin-top: 4px;
+  }
+}
+
 /* ------------------------------------------------------------------ 响应式 */
 
 @media (max-width: 1080px) {
