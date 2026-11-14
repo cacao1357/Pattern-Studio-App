@@ -1,5 +1,21 @@
 # A 实施与交接记录
 
+## 2026-11-14 批量工作台改进
+
+已本地整合批量导入、按原图分组、多分类、批量导出浮窗、可保存预设与持久批次。用户最终选择仅提高本地线稿和已验证 Otsu 上限，不增加 SVG 试验档；原图与工作副本来源保留。接口、测试和 DSH 追溯见[前端接入第 15 节](frontend-integration.md#15-2026-11-14-批量纹样导出与处理浮窗)与[上限实测](local-processing-limits.md)。本批已拆成后端 `2f9ab95`、前端 `f0a4dbb` 和文档提交，推送到 `origin/zgx`，未合并 `main`；未发起付费调用。
+
+复跑命令（仓库根目录，`D:\CondaEnvs\pattern-studio\python.exe` 与 Node 26）：
+
+```powershell
+$env:PYTHONPATH = "backend"
+python -B -m pytest -q -p no:cacheprovider backend/tests tests
+node --test --test-isolation=none frontend/tests/<file>.test.mjs   # 逐个文件执行
+node scripts/validate_v2_integration.mjs D:/CondaEnvs/pattern-studio/python.exe --batch-only
+```
+
+- 后端 `backend/tests` 78 项及 2 个子测试、`tests` 85 项通过；前端 7 个测试文件共 128 项通过。`--test-isolation=none` 下同进程连续跑多个文件会互相干扰，需逐个执行；`--batch-only` 浏览器验收结果见前端接入第 15 节，非本次复跑。
+- DSH 沙箱会把 `0o700` 临时目录变成自身也无法访问的对象，`pytest` 的 `tmp_path` 因此报 `PermissionError`。本机复跑把 `TMP`/`TEMP` 指到普通目录，并用一次性 shim 放宽 `tempfile.mkdtemp` 与 `os.mkdir` 的权限（沙箱内另加 `-p tmpfix`，shim 目录加入 `PYTHONPATH`）；shim 留在被忽略的 `storage/validation/`，不入库，也不作为正式测试设施。
+
 ## 2026-11-13 远程合入记录
 
 - 模型分流、修复前置、Windows DPAPI 密钥保存及此前 Seedream 5.5 / TGS 模型交付，已通过 [PR #4](https://github.com/cacao1357/Pattern-Studio-App/pull/4) 合入远程 `main`，合并提交 `e28d1644fdcf762d4fe8f8c1f6eb078fcb3130b2`。
