@@ -1,0 +1,85 @@
+{
+  "model": "LeftRefill reference-guided inpainting, textile prompt adaptation",
+  "upstream": {
+    "repository": "https://github.com/ewrfcas/LeftRefill",
+    "commit": "893c3220ffefba7158c1b5c688d344a8a0e3ff80",
+    "code_license": "Apache-2.0"
+  },
+  "prompt": {
+    "file": "prompt.safetensors",
+    "sha256": "6dd4e923c4dc440ec1325ebf9170abf78af6b9d7c7fcc4ac2d44d9496194559d",
+    "tensor_key": "cond_stage_model.special_embeddings.weight",
+    "shape": [
+      50,
+      1024
+    ],
+    "dtype": "float32",
+    "parameters": 51200,
+    "global_step": 1108,
+    "source_checkpoint_sha256": "f504ca1961ba373f015cfdc220c9a4ece4fee5fb37e5d0122d32c6232baa79a1",
+    "conversion": "Exact tensor copy from epoch-03.ckpt, verified with torch.equal"
+  },
+  "base_model": {
+    "family": "Stable Diffusion 2 inpainting",
+    "distribution": "External offline Diffusers conversion used during training",
+    "text_encoder_layers": 23,
+    "files": {
+      "scheduler/scheduler_config.json": "7a8564e9760e67ab1bea23709a1f24f4008c88535f149d0ef637e3d51556189d",
+      "text_encoder/config.json": "defee35258ea6821568d9dffbc63edb3eb7c194d83f147b087f733897547f024",
+      "text_encoder/model.fp16.safetensors": "681c555376658c81dc273f2d737a2aeb23ddb6d1d8e5b3a7064636d359a22668",
+      "unet/config.json": "ec80d707d3b97c57457682dbc40f42e1fe5834c18e3f58bc207b76c5e2799560",
+      "unet/diffusion_pytorch_model.fp16.safetensors": "29a698f37775d5904a958c9cebed98184483dfb441729a8e5f98dd5b65df70c8",
+      "vae/config.json": "754a44e01ee811076bc6c0edfeb2afdd59fb5bcb64d3c8a6b0923e29d0fd304b",
+      "vae/diffusion_pytorch_model.fp16.safetensors": "3e4c08995484ee61270175e9e7a072b66a6e4eeb5f0c266667fe1f45b90daf9a"
+    }
+  },
+  "inference": {
+    "target_size": [
+      512,
+      512
+    ],
+    "canvas_size": [
+      1024,
+      512
+    ],
+    "reference_side": "left",
+    "reference_resize": "bicubic to 512x512",
+    "mask_white": "missing",
+    "mask_black": "preserved",
+    "scheduler": "DDIM",
+    "steps": 20,
+    "guidance_scale": 2.5,
+    "eta": 1.0,
+    "default_seed": 23407,
+    "precision": "float32 text encoder; float16 conditioning, UNet and VAE",
+    "preserve_unmasked_pixels": true,
+    "initial_vae_draw": "Retained to align validation random-number sequence"
+  },
+  "selection": {
+    "metric": "mean per-image missing-region PSNR on the fixed 63-image validation set",
+    "evaluation_file": "evaluation.json",
+    "scope": "Comparable no-large-tear validation runs available on 2026-11-14",
+    "caveat": "Gain over step 700 is small; paired 95% interval includes zero. Step 700 has lower overall missing-region MAE."
+  },
+  "training": {
+    "continued_from_step": 700,
+    "additional_updates": 408,
+    "epochs": 3,
+    "train_images": 542,
+    "validation_images": 63,
+    "learning_rate": 3e-05,
+    "batch_size": 1,
+    "gradient_accumulation": 4,
+    "seed": 198731,
+    "mask_categories": [
+      "holes",
+      "tears",
+      "dunhuang"
+    ],
+    "excluded_category": "loss (large-area tears)",
+    "mask_translation_max_content_fraction": 0.15,
+    "training_pairs": 1626,
+    "trainable": "50 prompt tokens only; SD2 base frozen",
+    "reference": "highest-variance intact square crop up to 128px inside content, resized to 512x512"
+  }
+}

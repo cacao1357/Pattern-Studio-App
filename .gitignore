@@ -9,6 +9,16 @@ storage/
 /model/*
 !/model/inference.json
 !/model/model.pt
+!/model/leftrefill/
+/model/leftrefill/*
+!/model/leftrefill/inference.py
+!/model/leftrefill/inference.json
+!/model/leftrefill/evaluation.json
+!/model/leftrefill/prompt.safetensors
+!/model/leftrefill/README.md
+!/model/leftrefill/requirements.txt
+!/model/leftrefill/LICENSE
+!/model/leftrefill/NOTICE
 _qa/
 node_modules/
 frontend/dist/
@@ -20,6 +30,7 @@ dist/
 
 # Local environments, tool caches and machine-generated files
 .venv/
+.venv-leftrefill/
 venv/
 .ruff_cache/
 .coverage
