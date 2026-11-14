@@ -42,6 +42,7 @@ let query = "";
 let status = "all";
 let seq = 0;
 let pollTimer = null;
+let polling = false;
 let searchTimer = null;
 let hasLoaded = false;
 
@@ -99,7 +100,8 @@ function visibleJobs() {
 }
 
 function selectedJob() {
-  return items.find((job) => job.job_id === selectedId) || null;
+  // 详情只显示当前筛选结果里的任务：筛选掉的任务不能继续占据右侧详情。
+  return visibleJobs().find((job) => job.job_id === selectedId) || null;
 }
 
 function ensureSelection() {
@@ -123,7 +125,7 @@ function schedulePoll() {
   if (!toolIsCurrent() || !items.some((job) => ACTIVE.has(job.state))) return;
   pollTimer = setTimeout(() => {
     pollTimer = null;
-    if (toolIsCurrent() && !document.hidden) void loadTasks(true);
+    if (toolIsCurrent() && !document.hidden) void pollActiveJobs();
   }, POLL_MS);
 }
 
@@ -162,6 +164,42 @@ async function loadTasks(reset) {
     paintDetail();
     schedulePoll();
   }
+}
+
+/**
+ * 自动轮询只刷新已知进行中的任务，不重新读取第一页：
+ * - 保留 items 与 cursor，用户已“加载更多”的后续分页不会被自动刷新丢掉；
+ * - 单条任务刷新失败时保留上一次快照，不再清空整个列表；
+ * - 与手动刷新/加载更多共用 seq：较旧的自动轮询不会覆盖更新的列表。
+ */
+export async function pollActiveJobs() {
+  if (!toolIsCurrent() || loading || polling) return;
+  const activeJobs = items.filter((job) => ACTIVE.has(job.state));
+  if (!activeJobs.length) return;
+  const sequence = ++seq;
+  polling = true;
+  let results = [];
+  try {
+    results = await Promise.all(activeJobs.map((job) => http.job(job.job_id).catch(() => null)));
+  } finally {
+    polling = false;
+  }
+  if (sequence !== seq) return;
+  const updates = new Map();
+  for (const job of results) {
+    if (job?.job_id) updates.set(job.job_id, job);
+  }
+  if (!updates.size) {
+    error = "任务状态刷新失败，显示的是上次结果。";
+  } else {
+    items = items.map((job) => updates.get(job.job_id) || job);
+    if (updates.size === activeJobs.length) error = "";
+  }
+  ensureSelection();
+  paintSummary();
+  paintList();
+  paintDetail();
+  schedulePoll();
 }
 
 /* ------------------------------------------------------------------ 渲染片段 */
@@ -551,10 +589,12 @@ export default {
     ctx = null;
     seq += 1;
     loading = false;
+    polling = false;
   },
 };
 
 function onVisibility() {
   if (!toolIsCurrent() || document.hidden) return;
-  if (items.some((job) => ACTIVE.has(job.state))) void loadTasks(true);
+  // 回到页面只补进行中任务的状态，不重置分页；否则已加载的后续页面会消失。
+  if (items.some((job) => ACTIVE.has(job.state))) void pollActiveJobs();
 }

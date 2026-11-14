@@ -26,3 +26,9 @@ include = ["app*"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+leftrefill = [
+  "diffusers==0.35.2",
+  "transformers==4.49.0",
+  "safetensors>=0.5.3,<1",
+  "accelerate==1.4.0",
+]

@@ -43,18 +43,18 @@ function blankSession() {
   };
 }
 
-/** 模型线稿能力未知时的占位；不能把“未知”当成“不可用”。 */
-function blankLineartModel() {
+/** 本地能力未知时的占位；不能把“未知”当成“不可用”。 */
+function blankCapability() {
   return { available: null, reason: "", checked: "" };
 }
 
 /**
- * 解析 health.capabilities.lineart_model。旧后端、缺字段、非法值一律视为
+ * 解析 health.capabilities.* 能力。旧后端、缺字段、非法值一律视为
  * “未知”（available: null），只有后端明确给出布尔值才下结论。
  */
-function parseLineartModel(health) {
-  const raw = health?.capabilities?.lineart_model;
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return blankLineartModel();
+function parseCapability(health, name) {
+  const raw = health?.capabilities?.[name];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return blankCapability();
   return {
     available: typeof raw.available === "boolean" ? raw.available : null,
     reason: typeof raw.reason === "string" ? raw.reason : "",
@@ -77,7 +77,9 @@ export const store = {
   health: null,
   healthError: "",
   /* 模型线稿前置检查结果：available 为布尔才是已知；null 表示未知。 */
-  lineartModel: blankLineartModel(),
+  lineartModel: blankCapability(),
+  /* 本地 LeftRefill 前置检查结果；语义同上。 */
+  leftrefillModel: blankCapability(),
   settings: null,
   settingsError: "",
   seedream: null,
@@ -146,7 +148,8 @@ export const store = {
       const health = await api.health();
       this.health = health;
       this.healthError = "";
-      this.lineartModel = parseLineartModel(health);
+      this.lineartModel = parseCapability(health, "lineart_model");
+      this.leftrefillModel = parseCapability(health, "leftrefill_model");
     } catch (error) {
       // health 读取失败（含整体 503）时保留上一次已知能力：不能据此断言
       // 缺少依赖或模型文件；真实推理失败仍由任务错误展示。

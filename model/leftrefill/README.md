@@ -31,6 +31,8 @@ leftrefill-sd2/
 
 ## 安装
 
+以下独立环境用于原始 CLI 交付。接入工作台时使用主项目 README 的 `[leftrefill]` 可选依赖及基础模型路径配置，不要在主服务环境安装本目录固定 NumPy/Pillow 版本。
+
 在项目根目录创建独立 Python 3.11 环境。
 
 ```powershell

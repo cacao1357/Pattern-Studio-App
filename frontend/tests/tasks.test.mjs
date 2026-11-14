@@ -89,3 +89,185 @@ test("taskMatches filters by status, kind, id and error", () => {
     true
   );
 });
+
+/* ------------------------------------------------------------------ DOM 替身行为回归 */
+
+function jsonResponse(payload, status = 200) {
+  return new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } });
+}
+
+async function waitFor(predicate, timeout = 2000) {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt > timeout) throw new Error("waitFor timeout");
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+}
+
+function fakeElement() {
+  return {
+    innerHTML: "",
+    textContent: "",
+    value: "",
+    hidden: false,
+    disabled: false,
+    handlers: {},
+    addEventListener(type, handler) {
+      (this.handlers[type] ||= []).push(handler);
+    },
+    querySelector() {
+      return null;
+    },
+    querySelectorAll() {
+      return [];
+    },
+  };
+}
+
+/** 只实现任务视图实际用到的 DOM 部分；返回操作后可在测试里读取的节点。 */
+function mountTasksView() {
+  const elements = {
+    "[data-tk-list]": fakeElement(),
+    "[data-tk-more]": fakeElement(),
+    "[data-tk-refresh]": fakeElement(),
+    "[data-tk-count]": fakeElement(),
+    "[data-tk-detail]": fakeElement(),
+    "[data-tk-q]": fakeElement(),
+  };
+  const page = {
+    isConnected: true,
+    handlers: {},
+    addEventListener(type, handler) {
+      (this.handlers[type] ||= []).push(handler);
+    },
+    querySelector(selector) {
+      return elements[selector] || null;
+    },
+    querySelectorAll() {
+      return [];
+    },
+  };
+  const root = { querySelector: (selector) => (selector === ".tk-page" ? page : null) };
+  const originalDocument = globalThis.document;
+  globalThis.document = { hidden: false, addEventListener() {}, removeEventListener() {} };
+  tasks.default.mount(root, {}, { toast() {}, closeDrawer() {}, go() {} }, new URLSearchParams());
+  return {
+    list: elements["[data-tk-list]"],
+    detail: elements["[data-tk-detail]"],
+    more: elements["[data-tk-more]"],
+    loadMore() {
+      (this.more.handlers.click || []).forEach((handler) => handler({}));
+    },
+    clickStatus(status) {
+      const chip = { dataset: { tkStatus: status } };
+      const event = {
+        target: {
+          closest(selector) {
+            return selector === "[data-tk-status]" ? chip : null;
+          },
+        },
+      };
+      (page.handlers.click || []).forEach((handler) => handler(event));
+    },
+    restore() {
+      tasks.default.unmount();
+      globalThis.document = originalDocument;
+    },
+  };
+}
+
+test("自动轮询只刷新进行中任务，不丢已加载的后续分页", async () => {
+  const originalFetch = globalThis.fetch;
+  let firstPageCalls = 0;
+  const jobOne = {
+    job_id: "job-1",
+    kind: "crop",
+    state: "running",
+    input_asset_id: "input-1",
+    created_at: "2026-11-14T10:00:00+08:00",
+    updated_at: "2026-11-14T10:00:01+08:00",
+  };
+  const jobTwo = {
+    job_id: "job-2",
+    kind: "crop",
+    state: "succeeded",
+    input_asset_id: "input-1",
+    created_at: "2026-11-14T09:00:00+08:00",
+    updated_at: "2026-11-14T09:30:00+08:00",
+  };
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input), "http://local");
+    if (url.pathname === "/api/v1/jobs/job-1") {
+      return jsonResponse({ ...jobOne, state: "succeeded", updated_at: "2026-11-14T10:00:09+08:00" });
+    }
+    if (url.pathname === "/api/v1/jobs") {
+      const cursor = url.searchParams.get("cursor") || "";
+      if (!cursor) {
+        firstPageCalls += 1;
+        return jsonResponse({ items: [jobOne], next_cursor: "page-2" });
+      }
+      return jsonResponse({ items: [jobTwo], next_cursor: null });
+    }
+    throw new Error(`unexpected fetch: ${init.method || "GET"} ${url.pathname}`);
+  };
+  const view = mountTasksView();
+  try {
+    await waitFor(() => view.list.innerHTML.includes('data-tk-job="job-1"'));
+    assert.equal(view.more.hidden, false);
+    view.loadMore();
+    await waitFor(() => view.list.innerHTML.includes('data-tk-job="job-2"'));
+    assert.equal(firstPageCalls, 1);
+
+    await tasks.pollActiveJobs();
+
+    // 轮询后第一页与“加载更多”的第二页都还在，且没有重新拉第一页。
+    assert.match(view.list.innerHTML, /data-tk-job="job-1"/);
+    assert.match(view.list.innerHTML, /data-tk-job="job-2"/);
+    assert.equal(firstPageCalls, 1);
+    assert.match(view.list.innerHTML, /已完成/);
+  } finally {
+    view.restore();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("筛选排除当前任务时，详情跟随可见任务或清空", async () => {
+  const originalFetch = globalThis.fetch;
+  const jobOk = {
+    job_id: "job-ok",
+    kind: "crop",
+    state: "succeeded",
+    input_asset_id: "input-1",
+    created_at: "2026-11-14T10:00:00+08:00",
+  };
+  const jobBad = {
+    job_id: "job-bad",
+    kind: "crop",
+    state: "failed",
+    input_asset_id: "input-1",
+    created_at: "2026-11-14T09:00:00+08:00",
+    error: { code: "WORKER_TIMEOUT", message: "worker timeout" },
+  };
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input), "http://local");
+    if (url.pathname === "/api/v1/jobs") {
+      return jsonResponse({ items: [jobOk, jobBad], next_cursor: null });
+    }
+    throw new Error(`unexpected fetch: ${url.pathname}`);
+  };
+  const view = mountTasksView();
+  try {
+    await waitFor(() => view.detail.innerHTML.includes("job-ok"));
+    view.clickStatus("failed");
+    assert.match(view.detail.innerHTML, /job-bad/);
+    assert.doesNotMatch(view.detail.innerHTML, /job-ok/);
+
+    // 没有任何“进行中”任务时，不能继续显示被筛掉的失败任务。
+    view.clickStatus("active");
+    assert.doesNotMatch(view.detail.innerHTML, /job-bad/);
+    assert.doesNotMatch(view.detail.innerHTML, /job-ok/);
+  } finally {
+    view.restore();
+    globalThis.fetch = originalFetch;
+  }
+});

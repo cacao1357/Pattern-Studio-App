@@ -44,6 +44,13 @@ class FinishingWorkbench:
     def repair(self, payload, key, *, retry_of=None):
         validate_key(key)
         values = payload.model_dump(mode="json")
+        if values["method"] == "leftrefill":
+            from app.services.local_repair import MODEL_VERSION
+            values["model_version"] = MODEL_VERSION
+        else:
+            # Preserve the persisted request shape and idempotency hashes of old cloud clients.
+            for field in ("method", "reference_asset_id", "seed"):
+                values.pop(field)
         self.local.safe_text(key + canonical_json(values))
         input_id = values.pop("input_asset_id")
         request_hash = digest(canonical_json({"input": input_id, "parameters": values, "retry_of": retry_of}).encode())
@@ -57,6 +64,23 @@ class FinishingWorkbench:
         if source["width"] * source["height"] > MAX_REPAIR_PIXELS:
             raise ServiceError("REPAIR_SIZE_LIMIT", "Repair currently supports at most 1024x1024 pixels in total; explicitly prepare a smaller normalized input", 413)
         _, damage_image, damage_source = self._damage(values.get("damage_mask_asset_id"), source)
+        if values.get("method") == "leftrefill":
+            if (source["width"], source["height"]) != (512, 512):
+                raise ServiceError("LEFTREFILL_INPUT_SIZE", "Create an explicit 512x512 crop before local repair", 422)
+            reference, _ = self.store.get_asset(values["reference_asset_id"])
+            if (reference["kind"] not in PROVIDER_INPUT_KINDS or
+                    reference["width"] * reference["height"] > MAX_REPAIR_PIXELS):
+                raise ServiceError("LEFTREFILL_REFERENCE_INVALID", "Choose a saved raster reference within 1 MP", 422)
+            if damage_image is not None:
+                editing = np.asarray(rectangle_mask((512, 512), payload.bbox)) > 0
+                damage = np.asarray(damage_image) > 0
+                if not damage.any():
+                    raise ServiceError("LEFTREFILL_EMPTY_MASK", "Choose a nonempty damaged region", 422)
+                if np.any(damage & ~editing):
+                    raise ServiceError("DAMAGE_OUTSIDE_EDIT", "The local damage mask must be contained by the edit rectangle", 422)
+            from app.services.local_repair import require_model
+            require_model()
+            return self.store.submit("repair", input_id, values, key, retry_of=retry_of)
         if damage_source == "synthetic":
             editing = np.asarray(rectangle_mask((source["width"], source["height"]), payload.bbox)) > 0
             if np.any((np.asarray(damage_image) > 0) & ~editing):
@@ -121,7 +145,9 @@ class FinishingWorkbench:
             selected = next((a for a in allowed if a["asset_id"] == selected_id), None)
             if selected is None:
                 raise ServiceError("INVALID_REPAIR_SELECTION", "Choose the local composite or full candidate belonging to this repair", 422)
-            full = selected["kind"] == "edit_candidate"
+            # Local candidates are already masked against the original; cloud
+            # candidates can change the entire image and still require extra consent.
+            full = selected["kind"] == "edit_candidate" and repair["parameters"].get("method") != "leftrefill"
             if full and not values["accept_full_image_changes"]:
                 raise ServiceError("FULL_IMAGE_CONSENT_REQUIRED", "Explicitly acknowledge that the full AI candidate may change the entire image", 422)
             source, _ = self.store.get_asset(repair["input_asset_id"])
@@ -162,6 +188,9 @@ class FinishingWorkbench:
 
 
 def execute_repair(store, job, token, settings=None, *, transport=None):
+    if job["parameters"].get("method") == "leftrefill":
+        from app.services.local_repair import execute_repair as execute_local_repair
+        return execute_local_repair(store, job, token)
     params, job_id = job["parameters"], job["job_id"]
     source, image = _read_image(store, job["input_asset_id"])
     service = FinishingWorkbench(store)

@@ -154,8 +154,11 @@ try {
     assert.equal(recovery.visible, true, `local recovery hidden after ${failure}`);
     assert.equal(recovery.enabled, true, `local recovery disabled after ${failure}`);
     check(`failed workflow retains local recovery: ${failure}`);
+    // Reload acknowledgement can precede navigation: the old document still has
+    // a healthy chip. Wait for a fresh document before clicking its controls.
+    await evaluate("window.__aReloadPending=true");
     await call("Page.reload");
-    await waitFor("document.getElementById('health-chip')?.classList.contains('is-ok')", "application reloaded");
+    await waitFor("window.__aReloadPending!==true && document.getElementById('health-chip')?.classList.contains('is-ok')", "application reloaded");
   }
 
   // Load the fixture workflow via the application's ordinary history action.

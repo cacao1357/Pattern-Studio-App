@@ -304,6 +304,37 @@ try {
       check('independent asset column, selection and responsive layout at '+width+'x'+height);
     }
   }
+  // Newly merged repair entry must reflect actual local prerequisites and must
+  // never submit a paid fallback merely because local weights are absent.
+  await call("Page.navigate", {url:info.url+'/#/workbench?asset='+info.input_asset_id+'&stage=3&v=2'});
+  await waitFor("document.querySelector('.wb')?.dataset.stage==='repair' && document.querySelector('[data-seg=repairMethod][data-val=leftrefill]')", "repair route ready");
+  await waitFor(`import('/js/store.js').then(m=>m.store.session.currentAssetId===${JSON.stringify(info.input_asset_id)} && m.store.leftrefillModel.available!==null)`, "repair capability and input loaded");
+  const repairCapability = await evaluate(`import('/js/store.js').then(m=>({available:m.store.leftrefillModel.available,disabled:document.querySelector('[data-seg=repairMethod][data-val=leftrefill]').disabled,text:document.querySelector('.wb').textContent}))`);
+  assert.equal(repairCapability.disabled, repairCapability.available === false);
+  if (repairCapability.available === false) assert.match(repairCapability.text,/基础模型|基础网络|依赖|配置|检查失败|模型文件/);
+  check("local repair entry reflects prerequisites without generating or calling cloud");
+
+  // Revisit the same asset, clear it, then use the identical link again. A stale
+  // lastAppliedTarget previously left this route with an empty session.
+  const reopenHash = await evaluate("location.hash");
+  await evaluate("location.hash='#/home'");
+  await waitFor("!document.querySelector('.wb')", "leave repair workbench");
+  await evaluate(`location.hash=${JSON.stringify(reopenHash)}`);
+  await waitFor("document.querySelector('[data-act=clear-session]')?.disabled===false", "workbench clear ready");
+  await evaluate("window.confirm=()=>true;document.querySelector('[data-act=clear-session]').click()");
+  await waitFor("import('/js/store.js').then(m=>m.store.session.assets.length===0)", "clear workbench");
+  await evaluate(`location.hash=${JSON.stringify(reopenHash)}`);
+  await waitFor(`import('/js/store.js').then(m=>m.store.session.currentAssetId===${JSON.stringify(info.input_asset_id)} && m.store.session.assets.length>0)`, "reopen identical asset link after clear");
+  check("clearing workbench does not prevent reopening the identical asset link");
+
+  await evaluate("location.hash='#/tasks'");
+  await waitFor("document.querySelector('[data-tk-list] .tk-row') && !document.querySelector('[data-tk-refresh]').disabled", "task center reads real local history");
+  await evaluate("document.querySelector('[data-tk-status=failed]').click()");
+  const filteredTasks = await evaluate("({states:[...document.querySelectorAll('.tk-row__state')].map(e=>e.textContent),detail:document.querySelector('[data-tk-detail]').textContent})");
+  assert.ok(filteredTasks.states.every(state=>state==='失败'));
+  if (!filteredTasks.states.length) assert.match(filteredTasks.detail,/选一条任务/);
+  check("task center loads history and clears details when filtering removes all rows");
+
   const budget=await evaluate("fetch('/api/v1/seedream/status').then(r=>r.json()).then(s=>s.budget.call_count)");
   // The fixture begins with one synthetic archived call; this test must add none.
   assert.equal(budget,1);

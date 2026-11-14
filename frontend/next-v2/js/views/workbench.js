@@ -91,11 +91,23 @@ const VECTOR_INPUT_KINDS = new Set(["lineart", "transparent_png", "accepted_repa
 const NO_PREVIEW_KINDS = new Set(["zip", "export", "archive"]);
 /** 后端局部修复的输入上限（与 finishing_workbench.MAX_REPAIR_PIXELS 一致）。 */
 const REPAIR_MAX_PIXELS = 1_048_576;
+/** 本地 LeftRefill 的固定目标尺寸；前端不做隐式缩放。 */
+const LEFTREFILL_SIZE = 512;
+/** 参考图上限（与接口合同的 1,048,576 像素一致）；推理侧再显式缩放到 512×512。 */
+const LEFTREFILL_REFERENCE_MAX_PIXELS = 1_048_576;
+/**
+ * 本地 LeftRefill 可处理的光栅资产：与后端修复白名单一致，使用规范输入或派生结果。
+ * 未接受的修复候选、蒙版与非图片产物不在其中。
+ */
+const LEFTREFILL_RASTER_KINDS = new Set(CLOUD_INPUT_KINDS);
+const LEFTREFILL_INPUT_KINDS = LEFTREFILL_RASTER_KINDS;
+/** 参考图同样必须是已保存的光栅资产；像素上限另行校验。 */
+const LEFTREFILL_REFERENCE_KINDS = LEFTREFILL_RASTER_KINDS;
 
 const STAGE_COPY = {
   source: { title: "放入纹样", note: "原件与规范输入各留一份", desc: "原件只用于对照与重新导出，后续工序产出的是新资产。" },
   crop: { title: "框定纹样", note: "坐标使用当前资产真实像素", desc: "在纸面上拖框，或直接填写像素坐标。right / bottom 是开区间终点。" },
-  repair: { title: "局部修复", note: "可跳过；完整纹样直接下一步", desc: "框出问题区域，云端返回修复候选；接受或拒绝都在右侧完成。纹样完整时可明确跳过。" },
+  repair: { title: "局部修复", note: "可跳过；完整纹样直接下一步", desc: "框出问题区域，用云端或本地 LeftRefill 生成修复候选；接受或拒绝都在右侧完成。纹样完整时可明确跳过。" },
   candidate: { title: "选候选层", note: "按提示词拆分（可选）", desc: "云端按层拆分，勾选后合成一张候选；这一步不生成线稿。" },
   process: { title: "生成线稿", note: "本地模型 / 云端模型", desc: "明确选择本地模型或云端模型；也可以改用 OpenCV 或颜色提取。这里只出 PNG，矢量化在 07。" },
   mask: { title: "修正前景", note: "只改透明 PNG", desc: "在源图上补前景或擦除杂点；修正完成后再到 07 矢量化。" },
@@ -238,6 +250,13 @@ const ERROR_TEXT = {
   PAID_RETRY_REQUIRES_NEW_CONSENT: "云端调用需要重新确认后才能重试。",
   LINEART_MODEL_UNAVAILABLE: "模型线稿不可用：模型权重/配置缺失、校验未通过，或运行依赖不可用（torch、图像分割与骨干模型库）；可改用 OpenCV 路线，或按 README 检查模型环境。",
   LINEART_MODEL_GPU_OOM: "显存不足，释放竞争 GPU 任务后重试。",
+  LEFTREFILL_MODEL_UNAVAILABLE: "本地修复模型不可用：缺少基础网络、模型文件或运行依赖；不会自动改用云端。请按 README 检查本地模型环境。",
+  LEFTREFILL_GPU_REQUIRED: "本地修复需要可用的 NVIDIA 显卡（CUDA）；当前没有可用的 GPU。不会自动改用云端。",
+  LEFTREFILL_GPU_OOM: "本地修复显存不足，请关闭其他占用显卡的程序后重试。",
+  LEFTREFILL_INFERENCE_FAILED: "本地修复推理失败，没有生成候选；不会自动改用云端。请检查模型文件或稍后重试。",
+  LEFTREFILL_INPUT_SIZE: "本地修复目标必须是 512 × 512；请先在 02 裁切出 512 × 512 图块，不会自动缩放。",
+  LEFTREFILL_REFERENCE_INVALID: "参考图不可用：需要一张不超过 1,048,576 像素的已保存光栅图，请重新选择。",
+  LEFTREFILL_EMPTY_MASK: "修复框内没有可修复的内容（损伤蒙版为空）；请调整修复区域后重试。",
   LOCAL_REQUEST_HEADER_REQUIRED: "请求缺少本机写标记，请刷新页面后重试。",
   NOT_FOUND: "没有找到对应的资产或任务。",
   INVALID_REQUEST: "参数没有通过接口校验，请检查填写内容。",
@@ -271,6 +290,8 @@ function defaultDraft() {
     consentCharge: false,
     maskMode: "add",
     repair: null,
+    repairMethod: "cloud",
+    repairReferenceId: "",
     repairIntent: "restore_small_gap",
     repairFeather: 0,
     repairSize: "1K",
@@ -425,8 +446,127 @@ function lineartCapabilityText() {
 }
 
 function healthCapabilitySignature() {
-  const model = store.lineartModel || {};
-  return JSON.stringify([model.available ?? null, model.reason || "", model.checked || ""]);
+  const lineart = store.lineartModel || {};
+  const leftrefill = store.leftrefillModel || {};
+  return JSON.stringify([
+    lineart.available ?? null,
+    lineart.reason || "",
+    lineart.checked || "",
+    leftrefill.available ?? null,
+    leftrefill.reason || "",
+    leftrefill.checked || "",
+  ]);
+}
+
+/* ------------------------------------------------------- 本地 LeftRefill 能力 */
+
+/** health.capabilities.leftrefill_model.reason 的中文说明（只描述前置检查）。 */
+const LEFTREFILL_REASON_TEXT = {
+  base_model_missing: "缺少基础模型权重（生成图像所依赖的基础网络）。请按 README 准备后再试。",
+  model_files_missing: "缺少本地修复模型文件（提示向量或配置文件）。",
+  dependencies_missing: "缺少本地推理依赖（如 torch 与显卡运行库，详见 README）。",
+  model_config_invalid: "本地修复模型的配置不匹配，请检查模型目录。",
+  model_check_failed: "本地修复模型检查失败，暂时无法判断是否可用。",
+};
+
+/** 只读 health 能力；available 为 null 表示未知，绝不能当成“不可用”。 */
+function leftrefillCapability() {
+  const raw = store.leftrefillModel || {};
+  return {
+    available: raw.available === true ? true : raw.available === false ? false : null,
+    reason: String(raw.reason || ""),
+    checked: String(raw.checked || ""),
+  };
+}
+
+function leftrefillReasonText(reason) {
+  return LEFTREFILL_REASON_TEXT[String(reason || "")] || "前置检查未通过。";
+}
+
+/** 能力文案：只在后端明确 available=false 时才断言不可用。 */
+function leftrefillCapabilityText() {
+  const cap = leftrefillCapability();
+  if (cap.available === true) {
+    return "本地修复模型已就绪：基础网络、模型文件与运行依赖都能找到；这只说明可以尝试运行，不保证这次修复一定成功。";
+  }
+  if (cap.available === false) {
+    return `暂不可用：${leftrefillReasonText(cap.reason)} 云端修复不受影响，也不会自动改用云端。`;
+  }
+  return "暂时无法确认本地修复模型是否可用（本机服务没有返回检查结果，或检查暂时失败）；不会自动改用云端。";
+}
+
+/** 修复方式：旧会话/旧记录没有选择时保持云端语义。 */
+function repairMethod() {
+  return draft.repairMethod === "leftrefill" ? "leftrefill" : "cloud";
+}
+
+/** 从 /repairs/{id} 记录判断来源；旧记录没有 method 时按 cloud 处理。 */
+export function repairMethodOf(info) {
+  return String(info?.parameters?.method || info?.method || "") === "leftrefill" ? "leftrefill" : "cloud";
+}
+
+/** 可作参考图的已保存光栅资产：有像素尺寸、类型可处理、总像素不超过上限。 */
+export function leftRefillReferenceAssets(assets) {
+  return (assets || []).filter((asset) => {
+    if (!asset?.asset_id || !LEFTREFILL_REFERENCE_KINDS.has(asset.kind)) return false;
+    const width = Number(asset.width || 0);
+    const height = Number(asset.height || 0);
+    if (!width || !height) return false;
+    return width * height <= LEFTREFILL_REFERENCE_MAX_PIXELS;
+  });
+}
+
+/** 用户明确选中的参考图；未选择、已移除或超出上限都返回 null，不自动挑一张。 */
+function selectedLeftRefillReference() {
+  const id = String(draft.repairReferenceId || "");
+  if (!id) return null;
+  return leftRefillReferenceAssets(store.session.assets).find((asset) => asset.asset_id === id) || null;
+}
+
+/**
+ * 本地 LeftRefill 输入：必须是 512×512 的可处理光栅资产。
+ * 不做隐式缩放；尺寸不符时返回 error="size" 和实际尺寸，由界面提示先裁切。
+ */
+export function leftRefillInput(assets, current) {
+  const candidates = (assets || []).filter(
+    (asset) =>
+      asset?.asset_id &&
+      LEFTREFILL_INPUT_KINDS.has(asset.kind) &&
+      Number(asset.width) === LEFTREFILL_SIZE &&
+      Number(asset.height) === LEFTREFILL_SIZE
+  );
+  if (!current) return { asset: null, error: "missing", candidates, pixels: 0, width: 0, height: 0 };
+  const width = Number(current.width || 0);
+  const height = Number(current.height || 0);
+  if (!LEFTREFILL_INPUT_KINDS.has(current.kind)) {
+    return { asset: null, error: "unsupported", candidates, pixels: 0, width, height };
+  }
+  if (!width || !height) return { asset: null, error: "missing", candidates, pixels: 0, width, height };
+  const pixels = width * height;
+  if (width !== LEFTREFILL_SIZE || height !== LEFTREFILL_SIZE) {
+    return { asset: null, error: "size", candidates, pixels, width, height };
+  }
+  return { asset: current, error: "", candidates, pixels, width, height };
+}
+
+/** 本地路线是否可提交；返回空字符串表示可以，否则是给用户的真实原因。 */
+export function leftRefillBlockReason({ capability, input, referenceId, box } = {}) {
+  const cap = capability || {};
+  if (cap.available === false) {
+    return `本地 LeftRefill 前置检查未通过：${leftrefillReasonText(cap.reason)} 不会自动改用云端。`;
+  }
+  if (!input?.asset) {
+    if (input?.error === "size") {
+      return `本地 LeftRefill 目标必须是 512 × 512；当前输入 ${Number(input.width)} × ${Number(
+        input.height
+      )}。请先在 02 裁切，不会自动缩放。`;
+    }
+    if (input?.error === "missing") return "先打开一张纹样，或从纹样库打开一个资产。";
+    return "当前资产不能作为本地 LeftRefill 输入；请先准备 512 × 512 的光栅资产（如裁切图）。";
+  }
+  if (!referenceId) return "请选择一张已保存的参考图；本地 LeftRefill 不会自动改用当前资产。";
+  if (!box || Number(box.width) <= 0 || Number(box.height) <= 0) return "请设置修复区域。";
+  return "";
 }
 
 function currentDims(asset = currentAsset()) {
@@ -631,6 +771,7 @@ function syncDrafts(state) {
     resetRepairConsent();
     resetCloudConsent();
     draft.repairSkipped = false;
+    draft.repairReferenceId = "";
     lastRestoredRepairKey = "";
     if (sessionTimer) {
       window.clearTimeout(sessionTimer);
@@ -660,6 +801,7 @@ function syncDrafts(state) {
     resetRepairConsent();
     resetCloudConsent();
     draft.repairSkipped = false;
+    draft.repairReferenceId = "";
     lastRestoredRepairKey = "";
     repairState.info = null;
     repairState.error = "";
@@ -737,12 +879,12 @@ const rangeField = (key, label, min, max, step, value, hint = "") => {
 const segField = (key, label, options, current) => `
   <div class="seg wb-seg" role="group" aria-label="${esc(label)}">
     ${options
-      .map(
-        ([value, text]) =>
-          `<button class="seg__btn" type="button" data-seg="${key}" data-val="${value}" aria-pressed="${
-            String(current) === String(value)
-          }">${esc(text)}</button>`
-      )
+      .map(([value, text, disabled = false]) => {
+        const active = String(current) === String(value);
+        return `<button class="seg__btn" type="button" data-seg="${key}" data-val="${value}" aria-pressed="${active}"${
+          disabled ? ' disabled aria-disabled="true"' : ""
+        }>${esc(text)}</button>`;
+      })
       .join("")}
   </div>`;
 
@@ -1499,6 +1641,20 @@ function captionFor(stage, state) {
     }
     case "repair": {
       if (draft.repairSkipped) return "已跳过修复 · 纹样完整，不调用云端";
+      if (repairMethod() === "leftrefill") {
+        const cap = leftrefillCapability();
+        const capText =
+          cap.available === true ? "前置检查通过" : cap.available === false ? "前置检查未通过" : "能力未知";
+        const input = leftRefillInput(store.session.assets, asset);
+        const reference = selectedLeftRefillReference();
+        if (!input.asset) return `本地 LeftRefill · ${capText} · 需要 512 × 512 输入`;
+        const box = draft.repair;
+        return `本地 LeftRefill · ${capText} · 输入 ${kindLabel(input.asset.kind)} ${dimsOf(
+          input.asset
+        )} · 参考 ${reference ? dimsOf(reference) : "未选"}${
+          box ? ` · 修复框 ${Math.round(box.width)} × ${Math.round(box.height)}` : ""
+        }`;
+      }
       if (!store.seedream?.enabled) return "云端未配置：修复可跳过，也可到设置里启用";
       const input = cloudRepairInput();
       if (!input.asset) return "先选择修复输入：裁切图、工作副本或已接受修复";
@@ -1578,10 +1734,21 @@ function statusFor(stage, state) {
             draft.crop.left
           )}, ${Math.round(draft.crop.top)})`
         : "未设置选区";
-    case "repair":
+    case "repair": {
       if (draft.repairSkipped) return "已跳过修复 · 不会调用云端，也不产生新资产";
+      if (done) return "修复任务完成 · 在右侧接受或拒绝候选";
+      if (repairMethod() === "leftrefill") {
+        const cap = leftrefillCapability();
+        const input = leftRefillInput(store.session.assets, asset);
+        const reference = selectedLeftRefillReference();
+        if (cap.available === false) return "本地 LeftRefill 前置检查未通过；可显式改用云端修复或跳过";
+        if (!input.asset) return input.error === "size" ? "本地 LeftRefill 需要 512 × 512 输入；请先裁切" : "先选择 512 × 512 修复输入";
+        if (!reference) return "先选择一张已保存的参考图";
+        return "LeftRefill 候选未生成";
+      }
       if (!store.seedream?.enabled) return "云端未配置，修复不可用；完整纹样可直接跳过";
-      return done ? "修复任务完成 · 在右侧接受或拒绝候选" : "修复候选未生成";
+      return "修复候选未生成";
+    }
     case "candidate":
       return store.seedream?.enabled ? `${cand.selected.length} 层已选 · 未合成` : "候选层可跳过：云端未配置";
     case "process": {
@@ -1645,7 +1812,11 @@ function statusShort(stage, state) {
       return done ? "裁切完成" : "裁切未提交";
     case "repair":
       if (draft.repairSkipped) return "已跳过修复";
-      return done ? "修复任务完成" : store.seedream?.enabled ? "候选未生成" : "云端未配置 · 可跳过";
+      if (done) return "修复任务完成";
+      if (repairMethod() === "leftrefill") {
+        return leftrefillCapability().available === false ? "LeftRefill 前置检查未通过" : "LeftRefill 未提交";
+      }
+      return store.seedream?.enabled ? "候选未生成" : "云端未配置 · 可跳过";
     case "candidate":
       return store.seedream?.enabled ? `${cand.selected.length} 层已选` : "云端未配置 · 可跳过";
     case "process":
@@ -2246,8 +2417,9 @@ function vectorPanel(state) {
   )}`;
 }
 
-function repairCandidateList(info) {
-  if (!info) return "";
+export function repairCandidateRows(info, method = repairMethodOf(info)) {
+  if (!info) return [];
+  const local = method === "leftrefill";
   const rows = [];
   if (info.composited_asset) {
     rows.push({
@@ -2259,10 +2431,16 @@ function repairCandidateList(info) {
   if (info.candidate_asset) {
     rows.push({
       asset: info.candidate_asset,
-      label: "全图 AI 候选",
-      full: true,
+      // 本地 LeftRefill 只改框内，框外像素受保护；不把它标成“全图”候选。
+      label: local ? "LeftRefill 候选" : "全图 AI 候选",
+      full: !local,
     });
   }
+  return rows;
+}
+
+export function repairCandidateList(info, method = repairMethodOf(info)) {
+  const rows = repairCandidateRows(info, method);
   if (!rows.length) return `<p class="field__hint">这次修复没有返回候选资产。</p>`;
   const decided = Boolean(info.decision);
   return `
@@ -2291,38 +2469,92 @@ function repairCandidateList(info) {
   ${decided ? "" : `<button class="btn btn--quiet btn--sm btn--block" type="button" data-act="reject-repair">拒绝这次修复</button>`}`;
 }
 
-function repairPanel(state) {
+function repairPanel(state, methodOverride = repairMethod()) {
   const stage = currentStage(state);
+  const method = methodOverride === "leftrefill" ? "leftrefill" : "cloud";
   const cloudEnabled = Boolean(store.seedream?.enabled);
+  const cap = leftrefillCapability();
   const info = repairState.info;
+  const infoMethod = info ? repairMethodOf(info) : method;
   const skipped = Boolean(draft.repairSkipped);
   const asset = currentAsset();
-  const input = cloudRepairInput();
+  const cloudInput = cloudRepairInput();
+  const localInput = leftRefillInput(store.session.assets, asset);
+  const input = method === "leftrefill" ? localInput : cloudInput;
   const recordedInput = info
     ? (store.session.assets || []).find((entry) => entry.asset_id === info.input_asset_id) || null
     : null;
   const recordText = info ? repairRecordText(info, recordedInput) : "";
   const box = draft.repair;
   const dims = input.asset ? currentDims(input.asset) : null;
-  const inputProblem = !input.asset
-    ? input.error === "pixels"
-      ? `当前输入 ${Number(input.pixels).toLocaleString("zh-CN")} 像素，不在局部修复允许的 262,144–1,048,576 像素内；请先裁切或创建工作副本。`
-      : input.error === "aspect"
+  const cloudProblem = !cloudInput.asset
+    ? cloudInput.error === "pixels"
+      ? `当前输入 ${Number(cloudInput.pixels).toLocaleString("zh-CN")} 像素，不在局部修复允许的 262,144–1,048,576 像素内；请先裁切或创建工作副本。`
+      : cloudInput.error === "aspect"
       ? "当前输入的长宽比不在云端允许的 1/16–16 之间；请先裁切或创建工作副本。"
-      : input.error === "missing"
+      : cloudInput.error === "missing"
       ? "先打开一张纹样，或从纹样库打开一个资产。"
       : `当前资产是「${kindLabel(asset?.kind || "资产")}」，不能作为修复输入。请从下面明确选择一个支持的输入；未接受的修复候选不能继续使用。`
     : "";
+  const localProblem = !localInput.asset
+    ? localInput.error === "size"
+      ? `本地 LeftRefill 固定 512 × 512；当前资产是 ${localInput.width} × ${localInput.height}，不会自动缩放。请先在 02 裁切出 512 × 512 的图块。`
+      : localInput.error === "missing"
+      ? "先打开一张纹样，或从纹样库打开一个资产。"
+      : `当前资产是「${kindLabel(asset?.kind || "资产")}」，不能作为本地 LeftRefill 输入。请先准备 512 × 512 的光栅资产（如裁切图）。`
+    : "";
+  const references = leftRefillReferenceAssets(store.session.assets);
+  const reference = selectedLeftRefillReference();
+  const referenceOptions = [
+    ["", "请选择已保存的参考图"],
+    ...references.map((entry) => [entry.asset_id, `${kindLabel(entry.kind)} · ${dimsOf(entry)} · #${shortId(entry.asset_id)}`]),
+  ];
+  const boxSection = (hint) =>
+    sec(
+      "修复区域",
+      input.asset ? esc(dimsOf(input.asset)) : "",
+      `${
+        dims
+          ? `<div class="wb-grid2">
+              ${numField("repairLeft", "左", box.left, 0, dims.width - 1)}
+              ${numField("repairTop", "上", box.top, 0, dims.height - 1)}
+              ${numField("repairWidth", "宽", box.width, 1, dims.width)}
+              ${numField("repairHeight", "高", box.height, 1, dims.height)}
+            </div>`
+          : ""
+      }
+      <p class="field__hint">${hint}</p>`
+    );
   return `
   ${jobBox(stage)}
   ${errorBox()}
   ${noticeBox()}
+  ${sec(
+    "修复方式",
+    method === "leftrefill" ? "本地 · 不上传" : "云端 · 需逐次确认",
+    `${segField(
+      "repairMethod",
+      "修复方式",
+      [
+        ["cloud", "云端修复"],
+        ["leftrefill", "本地 LeftRefill", cap.available === false],
+      ],
+      method
+    )}
+    ${noteBox(esc(leftrefillCapabilityText()), cap.available === false ? "error" : "info")}
+    ${
+      cap.available === false
+        ? `<p class="field__hint">本地修复模型不是一张可以直接修复图片的独立模型：上传的小模型只是学习到的提示向量，必须配合匹配的 SD2 基础网络才能生成图像。基础网络缺失时，这一路线不可用。</p>`
+        : ""
+    }
+    <p class="field__hint">这里只显示本机启动时对本地修复模型的检查结果：确认基础网络、模型文件与运行依赖是否存在，不加载模型，也不保证推理一定成功。</p>`
+  )}
   ${
     skipped
       ? noteBox("已跳过修复：纹样按完整处理，不生成修复候选，也不会调用云端。", "info")
-      : cloudEnabled
-      ? ""
-      : noteBox("云端新生成已关闭；这次修复的候选仍可接受或拒绝，不会新增云端调用。纹样完整也可以直接跳过。", "info")
+      : method === "cloud" && !cloudEnabled
+      ? noteBox("云端新生成已关闭；这次修复的候选仍可接受或拒绝，不会新增云端调用。纹样完整也可以直接跳过。", "info")
+      : ""
   }
   ${sec(
     "修复可跳过",
@@ -2335,66 +2567,103 @@ function repairPanel(state) {
   ${
     skipped
       ? ""
-      : !cloudEnabled
-      ? cloudDisabled(null)
-      : `${input.asset
+      : method === "cloud"
+      ? !cloudEnabled
+        ? cloudDisabled(null)
+        : `${cloudInput.asset
+            ? sec(
+                "输入",
+                `${esc(kindLabel(cloudInput.asset.kind))} · ${esc(dimsOf(cloudInput.asset))}`,
+                `<p class="field__hint">修复使用当前资产；要换输入，直接在左栏资产轨切换，不会自动改用原图或规范输入。</p>`
+              )
+            : sec(
+                "可用输入",
+                "需要明确选择",
+                `${noteBox(esc(cloudProblem), "error")}${assetChoices(cloudInput.candidates, {
+                  currentId: store.session.currentAssetId,
+                })}`
+              )}
+          ${boxSection("区域使用当前输入的像素坐标；云端的全图候选可能改变整幅画面，接受前需额外确认。")}
+          ${sec(
+            "修复参数",
+            `262,144–1,048,576 px`,
+            `${segField("repairIntent", "意图", REPAIR_INTENTS, draft.repairIntent)}
+            ${rangeField("repairFeather", "羽化", 0, 64, 1, draft.repairFeather)}
+            ${selectField("repairSize", "生成尺寸", SIZE_OPTIONS.filter(([value]) => value !== "auto"), draft.repairSize)}`
+          )}
+          ${sec(
+            "显式同意",
+            "每次调用都要确认",
+            `${checkRow("repairConsentUpload", "同意把当前输入上传到云端服务商", draft.repairConsentUpload)}
+            ${checkRow("repairConsentCharge", "同意本次云端调用（可能产生费用）", draft.repairConsentCharge)}
+            <p class="field__hint">失败不自动重发；提交后自动清空，下一次需重新勾选。</p>`
+          )}`
+      : `${localInput.asset
           ? sec(
-              "输入",
-              `${esc(kindLabel(input.asset.kind))} · ${esc(dimsOf(input.asset))}`,
-              `${input.error ? noteBox(esc(inputProblem), "error") : ""}
-               <p class="field__hint">修复使用当前资产；要换输入，直接在左栏资产轨切换，不会自动改用原图或规范输入。</p>`
+              "目标输入",
+              `512 × 512 · ${esc(kindLabel(localInput.asset.kind))}`,
+              `<p class="field__hint">本地目标固定 512 × 512；不会缩放原图或当前资产。要换输入，直接在左栏资产轨切换。</p>`
             )
           : sec(
               "可用输入",
-              "需要明确选择",
-              `${noteBox(esc(inputProblem), "error")}${assetChoices(input.candidates, {
+              "需要 512 × 512",
+              `${noteBox(esc(localProblem), "error")}${assetChoices(localInput.candidates, {
                 currentId: store.session.currentAssetId,
               })}`
             )}
         ${sec(
-          "修复区域",
-          input.asset ? esc(dimsOf(input.asset)) : "",
+          "参考图",
+          reference ? esc(dimsOf(reference)) : `${references.length} 张可选`,
           `${
-            dims
-              ? `<div class="wb-grid2">
-                  ${numField("repairLeft", "左", box.left, 0, dims.width - 1)}
-                  ${numField("repairTop", "上", box.top, 0, dims.height - 1)}
-                  ${numField("repairWidth", "宽", box.width, 1, dims.width)}
-                  ${numField("repairHeight", "高", box.height, 1, dims.height)}
-                </div>`
+            references.length
+              ? selectField("repairReference", "参考图", referenceOptions, reference?.asset_id || "", `${references.length} 张`)
+              : noteBox("当前工作台没有可作参考图的已保存光栅资产（最多 1,048,576 像素）。请先处理或保存一张参考图。", "error")
+          }
+          ${
+            draft.repairReferenceId && !reference
+              ? noteBox("之前选择的参考图已不在当前工作台或超过像素上限，请重新选择。", "error")
               : ""
           }
-          <p class="field__hint">区域使用当前输入的像素坐标；云端的全图候选可能改变整幅画面，接受前需额外确认。</p>`
+          <p class="field__hint">必须明确选一张已保存参考图，不会自动使用当前资产。推理时参考图会显式缩放到 512 × 512 并记录该变换；它只引导生成，不构成保真保证，也不会上传或计费。</p>`
         )}
+        ${boxSection("框外原始像素保持不变；已有落在框内的同坐标二值损伤蒙版时后端优先使用，否则按此框处理。")}
         ${sec(
-          "修复参数",
-          `262,144–1,048,576 px`,
-          `${segField("repairIntent", "意图", REPAIR_INTENTS, draft.repairIntent)}
-          ${rangeField("repairFeather", "羽化", 0, 64, 1, draft.repairFeather)}
-          ${selectField("repairSize", "生成尺寸", SIZE_OPTIONS.filter(([value]) => value !== "auto"), draft.repairSize)}`
-        )}
-        ${sec(
-          "显式同意",
-          "每次调用都要确认",
-          `${checkRow("repairConsentUpload", "同意把当前输入上传到云端服务商", draft.repairConsentUpload)}
-          ${checkRow("repairConsentCharge", "同意本次云端调用（可能产生费用）", draft.repairConsentCharge)}
-          <p class="field__hint">失败不自动重发；提交后自动清空，下一次需重新勾选。</p>`
+          "本地参数",
+          "不上传 · 不计费",
+          `${rangeField("repairFeather", "羽化", 0, 64, 1, draft.repairFeather, "只影响框边过渡，不改变目标尺寸。")}
+          <p class="field__hint">本地执行，不调用云端、不产生费用；失败不会自动改用云端。需要云端修复时请显式切换修复方式。</p>`
         )}`
   }
   ${sec(
     "修复候选",
-    info ? esc(jobStateLabel(info.state === "waiting_user" ? "running" : info.state === "accepted" ? "succeeded" : info.state === "rejected" ? "cancelled" : info.state)) : "",
+    info
+      ? `${infoMethod === "leftrefill" ? "本地 LeftRefill" : "云端修复"} · ${esc(
+          jobStateLabel(
+            info.state === "waiting_user"
+              ? "running"
+              : info.state === "accepted"
+              ? "succeeded"
+              : info.state === "rejected"
+              ? "cancelled"
+              : info.state
+          )
+        )}`
+      : "",
     `${
       repairState.loading
         ? loadingBox()
         : repairState.error
         ? noteBox(esc(repairState.error), "error")
         : info
-        ? `${repairCandidateList(info)}
+        ? `${repairCandidateList(info, infoMethod)}
            ${recordText ? `<p class="field__hint">${esc(recordText)}</p>` : ""}
            ${info.decision ? `<p class="field__hint">已${info.decision.action === "accept" ? "接受" : "拒绝"}这次修复。</p>` : ""}
-           ${checkRow("acceptFull", "接受全图 AI 候选前，我确认它可能改变整个画面", draft.acceptFull)}`
-        : `<p class="field__hint">提交后这里会显示全图候选与本地局部合成；刷新后会按这张图的修复任务恢复，不重新提交。</p>`
+           ${
+             infoMethod === "leftrefill"
+               ? `<p class="field__hint">本地候选只改修复框内；接受后仍走原有接受/拒绝与历史恢复流程，不会提交云端调用。</p>`
+               : checkRow("acceptFull", "接受全图 AI 候选前，我确认它可能改变整个画面", draft.acceptFull)
+           }`
+        : `<p class="field__hint">提交后这里会显示修复候选与本地局部合成；刷新后会按这张图的修复任务恢复，不重新提交。</p>`
     }`
   )}`;
 }
@@ -2554,7 +2823,7 @@ function stageActions(stage, state) {
         ${primaryButton("apply-crop", "应用裁切", "crop", disabled(!isImageLike(asset) || Boolean(cropError())))}`;
     case "repair": {
       const skipped = Boolean(draft.repairSkipped);
-      const input = cloudRepairInput();
+      const method = repairMethod();
       const cloudEnabled = Boolean(store.seedream?.enabled);
       const skipButton = `<button class="btn btn--ghost btn--sm" type="button" data-act="skip-repair"${
         busy ? " disabled" : ""
@@ -2563,10 +2832,29 @@ function stageActions(stage, state) {
         return `${skipButton}
           <button class="btn btn--primary btn--sm" type="button" data-act="go-process">${icon("arrow")}去 05 生成线稿</button>`;
       }
+      if (method === "leftrefill") {
+        const input = leftRefillInput(store.session.assets, asset);
+        const reference = selectedLeftRefillReference();
+        const reason = leftRefillBlockReason({
+          capability: leftrefillCapability(),
+          input,
+          referenceId: reference?.asset_id || "",
+          box: draft.repair,
+        });
+        const label = !input.asset
+          ? "先选 512 × 512 输入"
+          : !reference
+          ? "先选参考图"
+          : leftrefillCapability().available === false
+          ? "LeftRefill 不可用"
+          : "生成 LeftRefill 候选";
+        return `${skipButton}${primaryButton("run-repair", label, "flask", disabled(Boolean(reason)))}`;
+      }
       if (!cloudEnabled) {
         return `${skipButton}
           <button class="btn btn--ghost btn--sm" type="button" data-act="settings">${icon("gear")}去设置</button>`;
       }
+      const input = cloudRepairInput();
       return `${skipButton}
         ${primaryButton(
           "run-repair",
@@ -3266,6 +3554,12 @@ async function restoreRepairState(api) {
     if (!info || !info.repair_job_id) return;
     repairState.info = info;
     repairState.error = "";
+    // 让界面默认方式与恢复的记录一致：本地记录不会因为界面还停在云端而误发付费请求。
+    draft.repairMethod = repairMethodOf(info);
+    if (draft.repairMethod === "leftrefill") {
+      const referenceId = String(info.parameters?.reference_asset_id || "");
+      draft.repairReferenceId = referenceId && store.assetById(referenceId) ? referenceId : "";
+    }
     let inputAsset = (store.session.assets || []).find((asset) => asset.asset_id === info.input_asset_id) || null;
     if (!inputAsset && info.input_asset_id) {
       try {
@@ -3411,7 +3705,10 @@ function cloudCandidateInput() {
 }
 
 function repairInputAsset() {
-  return cloudRepairInput().asset;
+  // 本地路线使用 512×512 的本地输入；云端路线保持原来的可处理类型和像素范围。
+  return repairMethod() === "leftrefill"
+    ? leftRefillInput(store.session.assets, currentAsset()).asset
+    : cloudRepairInput().asset;
 }
 
 function grabcutBbox() {
@@ -3495,6 +3792,7 @@ function removeSessionAsset(api, assetId) {
     draft.tileUnitId = "";
     draft.tileUnitTouched = false;
   }
+  if (draft.repairReferenceId === assetId) draft.repairReferenceId = "";
   api.toast(`已从工作台移除${kindLabel(removed.kind)}；可随时从纹样库重新打开。`, "info");
 }
 
@@ -3510,6 +3808,8 @@ function clearWorkbench(api) {
   }
   if (!window.confirm("清空当前工作台？纹样库与任务记录会保留。")) return;
   store.resetSession();
+  // 会话已清空，URL 目标不再“已载入”；否则再次打开同一资产链接会直接跳过加载。
+  api.resetTarget?.();
   api.set({ targetError: null, stage: 1, compare: false, tile: "2x2" });
   api.go("workbench");
   api.toast("工作台已清空。", "info");
@@ -3543,6 +3843,11 @@ function handleSeg(root, state, api, button) {
       break;
     case "repairIntent":
       draft.repairIntent = value;
+      break;
+    case "repairMethod":
+      // 只切换界面路线；不会自动回退云端，也不清空已恢复的修复候选。
+      if (value === "leftrefill" && leftrefillCapability().available === false) break;
+      draft.repairMethod = value === "leftrefill" ? "leftrefill" : "cloud";
       break;
     case "tileSeam":
       draft.seam = value;
@@ -4027,7 +4332,7 @@ function toggleCandidateLayer(layerId) {
   return cand.selected;
 }
 
-/** 局部修复请求体：把界面框裁剪到规范输入像素范围，保留每次显式同意。 */
+/** 云端局部修复请求体：把界面框裁剪到规范输入像素范围，保留每次显式同意。 */
 function buildRepairPayload(inputAssetId, box, dims, draftLike = {}) {
   const local = draftLike || {};
   const left = Math.round(Number(box.left) || 0);
@@ -4042,6 +4347,25 @@ function buildRepairPayload(inputAssetId, box, dims, draftLike = {}) {
     size: local.repairSize || "1K",
     consent_to_upload: true,
     consent_to_charge: true,
+  };
+}
+
+/**
+ * 本地 LeftRefill 请求体：显式 method + 已保存参考图，不携带云端同意或
+ * provider_call_id，因此后端不可能把它当云端调用，也不会产生费用。
+ */
+export function buildLeftRefillPayload(inputAssetId, box, dims, draftLike = {}) {
+  const local = draftLike || {};
+  const left = Math.round(Number(box.left) || 0);
+  const top = Math.round(Number(box.top) || 0);
+  const right = Math.min(dims.width, Math.round((Number(box.left) || 0) + (Number(box.width) || 0)));
+  const bottom = Math.min(dims.height, Math.round((Number(box.top) || 0) + (Number(box.height) || 0)));
+  return {
+    method: "leftrefill",
+    input_asset_id: inputAssetId,
+    bbox: { left, top, right, bottom },
+    reference_asset_id: String(local.repairReferenceId || ""),
+    feather_px: Math.round(Number(local.repairFeather) || 0),
   };
 }
 
@@ -4399,6 +4723,10 @@ async function runMask(api) {
 }
 
 async function runRepair(api) {
+  if (repairMethod() === "leftrefill") {
+    await runLeftRefillRepair(api);
+    return;
+  }
   if (!store.seedream?.enabled) {
     api.toast("云端新生成已关闭；已有修复候选仍可接受或拒绝，纹样完整也可以直接跳过。", "warn");
     return;
@@ -4459,6 +4787,52 @@ async function runRepair(api) {
   });
 }
 
+/**
+ * 本地 LeftRefill：只提交 method=leftrefill、512×512 输入、显式参考图与框；
+ * 不携带云端同意或 provider_call_id，失败也不会自动改用云端。
+ */
+async function runLeftRefillRepair(api) {
+  const capability = leftrefillCapability();
+  const input = leftRefillInput(store.session.assets, currentAsset());
+  const reference = selectedLeftRefillReference();
+  const reason = leftRefillBlockReason({
+    capability,
+    input,
+    referenceId: reference?.asset_id || "",
+    box: draft.repair,
+  });
+  if (reason) {
+    api.toast(reason, "warn");
+    return;
+  }
+  if (capability.available === null) {
+    api.toast("LeftRefill 能力未知（健康检查未返回）；这次按本地执行，失败不会自动改用云端。", "warn");
+  }
+  const dims = { width: LEFTREFILL_SIZE, height: LEFTREFILL_SIZE };
+  const payload = buildLeftRefillPayload(input.asset.asset_id, draft.repair, dims, {
+    ...draft,
+    repairReferenceId: reference.asset_id,
+  });
+  const { left, top, right, bottom } = payload.bbox;
+  if (right <= left || bottom <= top) {
+    api.toast("修复区域必须是正面积。", "warn");
+    return;
+  }
+  draft.repairSkipped = false;
+  await startJob(api, () => http.repair(payload), async (final) => {
+    repairState.info = null;
+    repairState.error = "";
+    const info = await fetchRepair(api, final.job_id);
+    if (info) {
+      ui.notice = "本地 LeftRefill 候选已生成，请选择接受或拒绝；没有调用云端。";
+      api.toast("LeftRefill 候选已生成。", "done");
+    } else {
+      ui.notice = "LeftRefill 任务完成，但候选信息读取失败；请重新读取或到纹样库查看。";
+      api.toast("修复候选信息读取失败。", "warn");
+    }
+  });
+}
+
 /** 采纳已接受的修复资产：只有读取并写入会话成功才提示“可用于平铺/导出”。 */
 async function adoptRepairAsset(api, info, token) {
   const result = await store.adoptAcceptedRepair(info, token);
@@ -4478,6 +4852,19 @@ async function adoptRepairAsset(api, info, token) {
   return result;
 }
 
+/**
+ * 修复接受/拒绝请求体：本地 LeftRefill 候选不是全图候选，调用方传 full=false，
+ * 因此即使界面残留了全图确认，也不会把 accept_full_image_changes 带成 true。
+ */
+export function buildRepairDecisionPayload(info, action, assetId = "", full = false, acceptFull = false) {
+  const payload = { revision: info?.revision, action };
+  if (action === "accept") {
+    payload.selected_asset_id = assetId;
+    payload.accept_full_image_changes = Boolean(full && acceptFull);
+  }
+  return payload;
+}
+
 async function decideRepair(api, action, assetId = "", full = false) {
   const info = repairState.info;
   if (!info) return;
@@ -4488,11 +4875,7 @@ async function decideRepair(api, action, assetId = "", full = false) {
   // 修复决定属于当前会话；网络返回前会话切换了就不再写任何界面状态。
   const token = store.sessionToken();
   const jobId = info.repair_job_id || info.job_id || cand.jobId || "";
-  const payload = {
-    revision: info.revision,
-    action,
-    ...(action === "accept" ? { selected_asset_id: assetId, accept_full_image_changes: Boolean(full && draft.acceptFull) } : {}),
-  };
+  const payload = buildRepairDecisionPayload(info, action, assetId, full, draft.acceptFull);
   let next = null;
   try {
     next = await http.repairDecision(jobId, payload);
@@ -4634,6 +5017,7 @@ async function runExport(api) {
 function handleClick(root, state, api, event) {
   const segBtn = event.target.closest("[data-seg]");
   if (segBtn && root.contains(segBtn)) {
+    if (segBtn.disabled) return;
     handleSeg(root, state, api, segBtn);
     return;
   }
@@ -4956,6 +5340,10 @@ function handleChange(root, state, api, event) {
     case "repairSize":
       draft.repairSize = value;
       break;
+    case "repairReference":
+      // 必须显式选择；空值保持“未选”，不会自动挑一张参考图。
+      draft.repairReferenceId = value;
+      break;
     case "tileUnit":
       draft.tileUnitId = value;
       draft.tileUnitTouched = true;
@@ -5151,6 +5539,7 @@ export {
   buildRepairPayload,
   buildRerunComposePayload,
   candidateSelectionForFlow,
+  clearWorkbench,
   composeLayers,
   flowActiveJobId,
   flowCanCompose,
@@ -5158,6 +5547,7 @@ export {
   groupAssets,
   panelCollapsed,
   pickCandidateFlow,
+  repairPanel,
   restoreCandidateFlow,
   restoreRepairState,
   runCandidate,

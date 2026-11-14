@@ -15,6 +15,13 @@ from app.storage import ServiceError
 _MEMORY_HANDLE = None
 LOCAL_MEMORY_MIB = 6144
 LINEART_MODEL_MEMORY_MIB = 6144
+LEFTREFILL_MEMORY_MIB = 6144
+
+
+def calls_provider(job):
+    return job["kind"] in {"decompose-layers", "cloud-lineart"} or (
+        job["kind"] == "repair" and job["parameters"].get("method", "cloud") != "leftrefill"
+        and not job["parameters"].get("provider_call_id"))
 
 
 def bind_memory_limit(memory_mib=LOCAL_MEMORY_MIB):
@@ -100,7 +107,7 @@ def child_main(root, job_id, token, parent_pid, memory_mib=LOCAL_MEMORY_MIB):
     store = WorkbenchStore(Path(root))
     try:
         job = store.get_job(job_id)
-        if job["kind"] in {"decompose-layers", "cloud-lineart"} or job["kind"] == "repair" and not job["parameters"].get("provider_call_id"):
+        if calls_provider(job):
             from pydantic import SecretStr
             from app.config import Settings
             from app.services.assisted_workbench import execute_decomposition
@@ -155,6 +162,7 @@ class LocalWorker:
                 "active_job_id": self.active_job_id, "error": self.last_error,
                 "timeout_seconds": self.timeout_seconds, "provider_timeout_seconds": max(180, self.timeout_seconds),
                 "memory_limit_mib": LOCAL_MEMORY_MIB, "lineart_model_memory_limit_mib": LINEART_MODEL_MEMORY_MIB,
+                "leftrefill_memory_limit_mib": LEFTREFILL_MEMORY_MIB, "leftrefill_timeout_seconds": max(180, self.timeout_seconds),
                 "concurrency": 1}
 
     def _loop(self):
@@ -182,11 +190,14 @@ class LocalWorker:
         backend = Path(__file__).resolve().parents[1]
         env = {k: os.environ[k] for k in ("SYSTEMROOT", "WINDIR", "PATH", "TEMP", "TMP") if k in os.environ}
         env.update(PYTHONPATH=str(backend), PYTHONDONTWRITEBYTECODE="1", PYTHONUTF8="1")
+        if "PATTERN_STUDIO_LEFTREFILL_BASE_MODEL" in os.environ:
+            env["PATTERN_STUDIO_LEFTREFILL_BASE_MODEL"] = os.environ["PATTERN_STUDIO_LEFTREFILL_BASE_MODEL"]
         model_lineart = (
             (job["kind"] == "lineart" and job["parameters"].get("method") == "model")
             or (job["kind"] == "pipeline" and job["parameters"].get("recipe") == "model_lineart")
         )
-        memory_mib = LINEART_MODEL_MEMORY_MIB if model_lineart else LOCAL_MEMORY_MIB
+        local_repair = job["kind"] == "repair" and job["parameters"].get("method") == "leftrefill"
+        memory_mib = LEFTREFILL_MEMORY_MIB if local_repair else LINEART_MODEL_MEMORY_MIB if model_lineart else LOCAL_MEMORY_MIB
         command = [sys.executable, "-B", "-m", "app.worker", str(self.store.root), job["job_id"], token,
                    str(os.getpid()), str(memory_mib)]
         child = None
@@ -194,8 +205,8 @@ class LocalWorker:
         reader = None
         error = None
         started = time.monotonic()
-        provider_task = job["kind"] in {"decompose-layers", "cloud-lineart"} or job["kind"] == "repair" and not job["parameters"].get("provider_call_id")
-        deadline_seconds = max(180, self.timeout_seconds) if provider_task else self.timeout_seconds
+        provider_task = calls_provider(job)
+        deadline_seconds = max(180, self.timeout_seconds) if provider_task or local_repair else self.timeout_seconds
         try:
             current_settings = self.provider_settings() if callable(self.provider_settings) else self.provider_settings
             if provider_task and (current_settings is None or current_settings.blockers()):

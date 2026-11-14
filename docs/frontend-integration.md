@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | `/` | `frontend/next-v2/index.html` | 正式界面；hash 路由（`#/home`、`#/workbench`…） |
 | `/css/*`、`/js/*`、`/assets/*` | `frontend/next-v2/` 下的静态资源 | 只允许预期后缀，禁止目录穿越 |
-| `/legacy/` | `frontend/index.html` 等旧前端文件 | 原文件未改动；用于对照与回退；新界面只在设置页与使用说明里提供入口 |
+| `/legacy/` | `frontend/index.html` 等旧前端文件 | 保留对照与回退入口；成员分支已将旧版概览改为历史任务页，新界面仍在设置页与使用说明里提供入口 |
 | `/api/v1/*` | 本机 FastAPI | 旧前端同样调用这套接口 |
 
 - 挂载代码：`backend/app/api/frontend.py`；`backend/app/api/workbench.py` 不再负责页面文件。

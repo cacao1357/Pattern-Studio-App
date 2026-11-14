@@ -199,6 +199,9 @@ class LocalWorkbench:
             from app.services.finishing_workbench import FinishingWorkbench
             helper = FinishingWorkbench(self.store, local=self)
             if old["kind"] == "repair":
+                if old["parameters"].get("method") == "leftrefill":
+                    values = {k: v for k, v in old["parameters"].items() if k != "model_version"}
+                    return helper.repair(RepairRequest.model_validate({"input_asset_id": old["input_asset_id"], **values}), key, retry_of=job_id)
                 if not old["parameters"].get("provider_call_id"):
                     raise ServiceError("PAID_RETRY_REQUIRES_NEW_CONSENT", "Reconcile the previous repair call and explicitly reuse its archive; retry never generates another candidate", 409)
                 return helper.repair(RepairRequest.model_validate({"input_asset_id": old["input_asset_id"], **old["parameters"]}), key, retry_of=job_id)

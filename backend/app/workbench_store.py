@@ -577,7 +577,7 @@ class WorkbenchStore(Store):
                 return self._job(row)
             parameters = json.loads(row["parameters"])
             can_call_provider = row["kind"] in EXTERNAL_CALL_JOBS or (
-                row["kind"] == "repair" and not parameters.get("provider_call_id")
+                row["kind"] == "repair" and parameters.get("method", "cloud") != "leftrefill" and not parameters.get("provider_call_id")
             )
             if can_call_provider:
                 raise ServiceError("CANCEL_REQUIRES_RECONCILIATION",

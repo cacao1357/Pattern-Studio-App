@@ -11,6 +11,9 @@ from app.schemas.workbench import StrictModel
 
 class RepairRequest(StrictModel):
     input_asset_id: UUID
+    method: Literal["cloud", "leftrefill"] = "cloud"
+    reference_asset_id: UUID | None = None
+    seed: int = Field(default=23407, ge=0, le=2147483647, strict=True)
     bbox: BoundingBox
     intent: Literal["restore_small_gap", "reconnect_lines"] = "restore_small_gap"
     feather_px: int = Field(default=0, ge=0, le=64, strict=True)
@@ -22,6 +25,14 @@ class RepairRequest(StrictModel):
 
     @model_validator(mode="after")
     def explicit_consents(self):
+        if self.method == "leftrefill":
+            if self.reference_asset_id is None:
+                raise ValueError("Local LeftRefill repair requires an explicit reference asset")
+            if self.provider_call_id is not None or self.consent_to_upload or self.consent_to_charge:
+                raise ValueError("Local repair cannot carry a provider call or cloud consents")
+            return self
+        if self.reference_asset_id is not None or self.seed != 23407:
+            raise ValueError("Reference and seed apply only to local LeftRefill repair")
         if self.provider_call_id is None and not (self.consent_to_upload and self.consent_to_charge):
             raise ValueError("A new repair candidate requires both per-request consents")
         return self

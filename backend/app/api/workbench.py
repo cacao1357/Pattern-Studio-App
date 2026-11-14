@@ -14,6 +14,7 @@ from app.schemas.workbench import (CropRequest, PrepareRequest, WorkingCopyReque
     LineartRequest, VectorRequest, PipelineRequest, ExportRequest, FeedbackRequest)
 from app.storage import ServiceError
 from app.services.model_lineart import model_capability
+from app.services.local_repair import model_capability as repair_model_capability
 
 
 def mount_workbench(app, current_store, current_service, current_worker):
@@ -37,7 +38,7 @@ def mount_workbench(app, current_store, current_service, current_worker):
         ready = database and storage and worker["alive"] and not worker["error"]
         return JSONResponse({"status": "ok" if ready else "degraded", "scope": "s1_local_workbench",
             "database": database, "storage": storage, "worker": worker, "versions": versions.snapshot(),
-            "capabilities": {"lineart_model": model_capability()},
+            "capabilities": {"lineart_model": model_capability(), "leftrefill_model": repair_model_capability()},
             "limits": {"upload_bytes": DEFAULT_LIMITS.max_upload_bytes, "decode_pixels": DEFAULT_LIMITS.max_decode_pixels,
                        "working_pixels": DEFAULT_LIMITS.max_vector_pixels, "color_vector_pixels": DEFAULT_LIMITS.max_color_vector_pixels,
                        "tile_pixels": DEFAULT_LIMITS.max_tile_pixels,

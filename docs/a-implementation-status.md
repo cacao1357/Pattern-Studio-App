@@ -274,4 +274,23 @@ Edge 结果：`storage/validation/a/browser-checks.json`；同目录保存桌面
 - `contour_line_art` 中文名改为「外轮廓线稿」，处理页说明同步；界面不再把它当作完整线稿。
 - 实测：云端 5.5 提取的 1182×887 纹样 → 1154×866 工作副本 → 本地 TGS 线稿 PNG（`0744181f`）+ SVG（`9f198df9`），内部螺旋与颜色边界完整。对比图 `storage/validation/takeover/lineart-20261113/cloud-lineart-compare.png`。
 - 验证：`node --check` 两个改动模块通过；Chrome 在 8765 工作台选中「候选合成 v7」后点击「生成完整线稿」，任务成功并提示「模型一键线稿完成」，控制台无报错；`next-v2-integration` 25 项通过。
+
+## 2026-11-14 成员分支整合与本地修复适配
+
+- 在 `zgx` 上先合入 `origin/hmy`（`e8807ca`），再合入 C 的 `32d82ec`，合并点 `27a8d55`，保留全部历史、无 Git 冲突。下面为同批适配记录，最终提交与合入状态以 Git 历史为准。
+- A 负责后端适配、资源边界、集成审查和验收；未重训或替换 C 的修复算法。LeftRefill 复用现有 repair 任务、不可变资产、候选确认及历史，没有另建存储体系。
+- 云端仍为兼容默认；新增本地路线明确要求 512×512 目标和已保存参考图。后端校验类型、尺寸及损伤坐标，保留蒙版外 RGBA 像素，记录参考变换、种子和模型版本，结果必须人工接受。本地取消与重试不进入云端逻辑，旧云端全图候选的确认要求保留。
+- 模型发现仅检查文件和依赖，不加载权重或初始化 CUDA；完整性校验和 GPU 推理留在单任务受限 worker，6 GiB 主机内存、至少 180 秒超时、顺序 CFG 降低显存峰值。不自动下载模型、安装依赖或回退云端。
+- 前端由 Harness Relay / DSH `wb/deepseek-v4.1-flash` 完成，runId `ff0d5ea7-f748-4ac0-a7cd-6d8ddbc4f79a`，sessionId `session-6f6b5e99-4416-4b5a-b251-8c8fe5f269db`。Codex 独立审查，统一了前后端输入白名单及本地候选接受语义。
+- 修复任务中心轮询丢分页、筛选后残留详情、响应正文读取缺少超时保护、清空后同链接不能重开四项问题；工作台只增加本地修复所需入口和说明。
+
+验证与复现：
+
+- `node --test frontend/tests/*.test.mjs`：94 passed（本机可正常使用隔离模式；DSH 沙箱使用 `--test-isolation=none`）。
+- 现有 `D:/CondaEnvs/pattern-studio/python.exe`、`PYTHONPATH=backend`：`backend/tests/test_local_repair.py`、`backend/tests/test_cloud_lineart.py`、`backend/tests/test_a_workflow.py`、`backend/tests/test_image_history.py`、`tests/test_lineart_capabilities.py` 的主回归 50 passed、2 subtests passed；随后新增两种候选接受/导出及旧云端确认保护后，相关 7 项与新增 1 项分别通过。模型原交付检查也已通过。
+- 本地修复集成以替代生成验证区域保护、显式接受、SVG 与 ZIP、来源和历史；另用真实受限子进程验证缺少基础模型时本地失败，未创建云端调用。
+- `node scripts/validate_v2_integration.mjs D:/CondaEnvs/pattern-studio/python.exe`：真实 CUDA 线稿、独立矢量化、切图隔离、候选继续与重合成，以及修复入口缺失状态、清空重开通过。追加任务中心检查后以 `--archive-only` 定向复测通过。报告在 `storage/validation/v2-reliability/browser-checks.json`，后一次运行会覆盖同路径前一次报告。
+- 旧版 `scripts/validate_a_browser.mjs` 使用现有 Chrome（`PATTERN_STUDIO_TEST_EDGE` 指定）全部通过。原先历史加载超时是 reload 后误读旧文档健康状态，现已等待新文档完成；Edge 的本机启动限制未改系统配置解决。
+
+剩余限制：本机没有匹配的 SD2 基础模型，且服务环境缺少 diffusers、transformers、accelerate；本轮未安装依赖或修改运行环境。`pyproject.toml` 提供不替换主项目 NumPy/Pillow 的 `[leftrefill]` 可选依赖，基础模型路径及使用方式见 README。真实 LeftRefill GPU 修复、该组合的运行兼容性与真实素材质量仍待基础模型到位后验收，模拟生成不得当作质量成功。本轮只使用隔离临时实例，未启动正式 8765 服务、未触发真实付费调用。
 - 本次仍只有 3 次云端调用，未自动重发；改动随本次整理提交入库。

@@ -45,6 +45,13 @@ const CODE_MESSAGES = {
   TILE_NOT_READY: "平铺结果尚未生成完成。",
   LINEART_MODEL_UNAVAILABLE: "模型线稿不可用：模型权重/配置缺失、校验未通过，或运行依赖不可用（torch、图像分割与骨干模型库）；可改用 OpenCV 路线，或按 README 检查模型环境。",
   LINEART_MODEL_GPU_OOM: "显存不足，释放竞争 GPU 任务后重试。",
+  LEFTREFILL_MODEL_UNAVAILABLE: "本地修复模型不可用：缺少基础网络、模型文件或运行依赖；不会自动改用云端。请按 README 检查本地模型环境。",
+  LEFTREFILL_GPU_REQUIRED: "本地修复需要可用的 NVIDIA 显卡（CUDA）；当前没有可用的 GPU。不会自动改用云端。",
+  LEFTREFILL_GPU_OOM: "本地修复显存不足，请关闭其他占用显卡的程序后重试。",
+  LEFTREFILL_INFERENCE_FAILED: "本地修复推理失败，没有生成候选；不会自动改用云端。请检查模型文件或稍后重试。",
+  LEFTREFILL_INPUT_SIZE: "本地修复目标必须是 512 × 512；请先在 02 裁切出 512 × 512 图块，不会自动缩放。",
+  LEFTREFILL_REFERENCE_INVALID: "参考图不可用：需要一张不超过 1,048,576 像素的已保存光栅图，请重新选择。",
+  LEFTREFILL_EMPTY_MASK: "修复框内没有可修复的内容（损伤蒙版为空）；请调整修复区域后重试。",
   PROVIDER_BUSY: "已有一个云端请求在运行，请等待它结束后再试。",
   PROVIDER_DISABLED: "云端尚未就绪，请先在设置里完成 API Key 与调用许可。",
   PROVIDER_INPUT_KIND: "当前资产不能作为这次云端请求的输入，请先切换到接口支持的输入类型。",
@@ -137,32 +144,47 @@ async function request(path, { method = "GET", json, form, headers, signal, raw 
       cache: "no-store",
     });
   } catch (error) {
+    if (timer) clearTimeout(timer);
+    if (signal) signal.removeEventListener("abort", forwardAbort);
     if (timedOut) throw new ApiError("本机服务响应超时，请稍后重试。", { network: true });
     if ((signal && signal.aborted) || (error && error.name === "AbortError")) {
       throw new ApiError("请求已取消。", { network: true });
     }
     throw new ApiError("无法连接本机服务，请确认工作台服务正在运行。", { network: true });
+  }
+
+  // 超时预算必须覆盖响应体：fetch 在收到响应头时就 resolve，若此时清掉计时器，
+  // 服务端卡在响应体时页面会一直等下去。计时器与中断转发都移到读完正文之后再清理。
+  try {
+    if (!response.ok) {
+      let data = null;
+      try {
+        data = await response.json();
+      } catch {
+        data = null;
+      }
+      if (timedOut) throw new ApiError("本机服务响应超时，请稍后重试。", { network: true });
+      throw new ApiError(errorMessage(data, response.status), {
+        status: response.status,
+        code: data?.error?.code || "",
+        detail: typeof data?.error?.message === "string" ? data.error.message.trim() : "",
+      });
+    }
+    if (raw) return response;
+    const text = await response.text();
+    if (timedOut) throw new ApiError("本机服务响应超时，请稍后重试。", { network: true });
+    return text ? JSON.parse(text) : null;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    if (timedOut) throw new ApiError("本机服务响应超时，请稍后重试。", { network: true });
+    if ((signal && signal.aborted) || (error && error.name === "AbortError")) {
+      throw new ApiError("请求已取消。", { network: true });
+    }
+    throw error;
   } finally {
     if (timer) clearTimeout(timer);
     if (signal) signal.removeEventListener("abort", forwardAbort);
   }
-
-  if (!response.ok) {
-    let data = null;
-    try {
-      data = await response.json();
-    } catch {
-      data = null;
-    }
-    throw new ApiError(errorMessage(data, response.status), {
-      status: response.status,
-      code: data?.error?.code || "",
-      detail: typeof data?.error?.message === "string" ? data.error.message.trim() : "",
-    });
-  }
-  if (raw) return response;
-  const text = await response.text();
-  return text ? JSON.parse(text) : null;
 }
 
 const enc = (value) => encodeURIComponent(String(value));

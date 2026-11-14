@@ -86,6 +86,12 @@ git lfs pull --include="model/model.pt" --exclude=""
 
 `model/leftrefill/` 提供纹样微调的 1108 步提示向量、命令行推理实现、SHA-256 校验清单和固定 63 张验证图的指标。基础 SD2-inpainting 模型从独立离线目录加载。安装、输入约定和权重选择依据见 [LeftRefill 使用说明](model/leftrefill/README.md)。
 
+工作台「局部修复」已提供本地 LeftRefill 路线，复用候选确认、历史及后续处理。目标须为显式 512×512 裁切，并选择已保存参考图；缺少模型时入口显示不可用，不会自动改用云端。
+
+应用服务使用现有 Python 3.11 环境和 CUDA PyTorch。需要时在该服务环境安装 `pip install -e ".[leftrefill]"` 补齐可选依赖；不要把独立 CLI 的 `requirements.txt` 安装到主环境，以免替换项目的 NumPy/Pillow。GPU 版 PyTorch 仍按本机硬件单独准备，不由此选项安装。此可选组合尚未完成 LeftRefill 真实推理验收。
+
+另行取得成员交付的匹配基础模型后，放在被忽略的 `model/leftrefill/base/`，或在启动服务的 PowerShell 设置 `$env:PATTERN_STUDIO_LEFTREFILL_BASE_MODEL='D:/models/leftrefill-sd2'` 后启动服务。基础权重不会自动下载；健康检查只确认前置条件，真实任务才校验完整性和 CUDA。当前资源限制为单任务、6 GiB 主机内存及至少 180 秒超时，显存不足会明确失败，不回退 CPU 或云端。
+
 ## 数据与限制
 
 - 上传及结果保存于自动创建的 storage/api/，包含 SQLite 历史；保留该目录即可保留本地数据。

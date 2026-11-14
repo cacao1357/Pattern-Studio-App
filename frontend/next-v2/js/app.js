@@ -61,6 +61,14 @@ const api = {
   set(partial) {
     Object.assign(state, partial);
   },
+  /**
+   * 清除“已处理的深链目标”。会话被清空后，同一个 URL 目标不再是已载入状态；
+   * 只清 targetError 不够，因为 shouldLoadTarget 会误以为上次已经打开过。
+   */
+  resetTarget() {
+    lastAppliedTarget = null;
+    lastHash = null;
+  },
   render() {
     renderView();
   },
@@ -132,8 +140,11 @@ export function loadTarget(params) {
  * - asset 仍是同一个就不重开；URL 只去掉 asset、image 未变也不重置。
  * - 没有 image/asset 的站内导航（纯 stage/compare/tile）不加载。
  */
-export function shouldLoadTarget(next, previous) {
+export function shouldLoadTarget(next, previous, session = null) {
   if (!next || (!next.asset && !next.image)) return false;
+  // 会话已被清空时，即使 URL 目标与上次相同也必须重新载入：lastAppliedTarget
+  // 只说明“上次处理过这个 URL”，不说明对应会话还在内存里。
+  if (session && !session.imageId && !(Array.isArray(session.assets) && session.assets.length)) return true;
   if (!previous) return true;
   if (next.asset) {
     if (next.asset !== previous.asset) return true;
@@ -165,7 +176,7 @@ function applyParams(params, route) {
     store.noteStage(stage);
   }
   const target = loadTarget(params);
-  if (shouldLoadTarget(target, lastAppliedTarget)) {
+  if (shouldLoadTarget(target, lastAppliedTarget, store.session)) {
     const previousTarget = lastAppliedTarget;
     lastAppliedTarget = target;
     state.targetError = null;

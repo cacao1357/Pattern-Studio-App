@@ -44,7 +44,7 @@
 - 资产返回完整元数据；任务保留失败/取消的部分产物及 `ai_pipeline_id`、分支父关系；流程返回既有 `get_ai_flow` 结构及恢复信息。
 - 归属按原图资产、复制的 `image_id`、登记的父子关系及旧 `source_asset_id` 来源链查询，不按内容哈希合并重复上传。缺少所有来源信息的孤立旧资产无法可靠归属，不猜测其原图。
 - 图片不存在返回 404；非法集合、数量或游标返回 422。此接口未新增秘密、私有配置或独立资产存储。
-- 新版前端消费、活动任务状态轮询、选层续接及局部重跑尚未在本批后端交付中完成；不得据接口存在宣称页面已恢复完整历史。
+- 新版前端已消费按图历史，支持相关任务状态轮询、归档选层续接和本地重合成；2026-11-14 另接入任务中心。已验证范围见 A 交接记录，链路通过不代表素材质量验收通过。
 
 ## 本机模型能力
 
@@ -79,6 +79,17 @@
 - 云端线稿、拆分与修复接受 `normalized_input`、`cropped`、`working_copy`、`prepared`、`enhanced`、`accepted_repair`、`composed_candidate`、`transparent_png`。不自动换回规范原图，不接受未接受的修复候选。新调用输入仍须满足 262,144..25,000,000 像素和 1/16..16 比例，修复另保留 1,048,576 像素上限；小图不会悄悄放大上传。
 - 新版工序按「来源 → 裁切 → 可选修复 → 可选候选拆分 → 提取（本地/云端/OpenCV/颜色）→ 必要蒙版修正 → 矢量化 → 平铺/导出」组织。完整纹样可跳过修复，不发起调用；接受修复后使用接受资产，蒙版修改后应重新矢量化。
 - 新增云端提示词完成模拟链路及单张现有祥云纹样的真实调用验证（用户授权合理调用测试）：局部修复一次、线稿一次，随后本地生成 SVG；无自动重试。验证记录在 `storage/validation/cloud-lineart-20261113/report.json`（私有、Git 忽略）。这不是固定样本集的全面保真验收；其他真实实验仍按当次授权执行。
+
+## 本地 LeftRefill 修复接入（2026-11-14）
+
+- 复用 `POST /api/v1/jobs/repair`、`GET /api/v1/repairs/{id}` 和原有接受/拒绝接口。新增 `method: "cloud" | "leftrefill"`，省略时保持云端语义，不改变旧请求。
+- `leftrefill` 请求携带 `input_asset_id`、`bbox`、`reference_asset_id`，可选 `damage_mask_asset_id`、`feather_px`、`seed`（默认 23407，0..2147483647）。无需上传或费用同意；拒绝夹带 `provider_call_id` 或云端同意，不能自动回退云端。
+- 本地目标必须是 512×512；不隐式缩放原图，其他尺寸明确提示先创建合适的裁切。参考图为已保存的可处理光栅资产（最多 1,048,576 像素），推理时显式双三次缩放为 512×512，元数据记录此变换。参考图用于引导生成，不构成保真保证。
+- 缺损蒙版优先使用与输入同坐标且落在 bbox 内的既有二值 damage_mask；否则使用用户框选矩形。保护框外原始 RGBA 像素，生成候选需人工接受后才能作为后续输入。
+- 本地候选已按精确缺损蒙版保护输入，可直接走既有接受/拒绝，不要求「接受全图变化」；旧云端全图候选仍要求此确认。羽化合成也保留精确蒙版外像素。
+- `/health` 新增 `capabilities.leftrefill_model`，字段为 `available`、`reason`、`checked: "prerequisites_only"`；不回传路径、不加载模型、不初始化 CUDA。原因含 `base_model_missing`、`model_files_missing`、`dependencies_missing`、`model_config_invalid`、`model_check_failed`。就绪仅表示先决条件可发现，不保证推理成功。
+- 基础模型目录通过进程环境 `PATTERN_STUDIO_LEFTREFILL_BASE_MODEL` 指定；未指定时使用 `model/leftrefill/base/`。不从网络自动下载、不自动安装依赖。GPU/依赖/完整性失败给出本地错误，不调用云端。
+- 本地修复任务仍为 `repair`，`parameters.method` 区分来源，保留候选、蒙版、合成结果及参考来源。失败重试走既有任务重试接口，仅重新执行本地步骤。旧记录没有 method 时按 cloud 处理。
 
 ## B/C 接入
 

@@ -607,6 +607,29 @@ test("LINEART_MODEL_GPU_OOM 显示显存不足与释放 GPU 任务提示", async
   });
 });
 
+test("本地修复错误码都有中文说明，不落到泛化请求失败文案", async () => {
+  const cases = {
+    LEFTREFILL_MODEL_UNAVAILABLE: /本地修复模型不可用/,
+    LEFTREFILL_GPU_REQUIRED: /NVIDIA/,
+    LEFTREFILL_GPU_OOM: /显存不足/,
+    LEFTREFILL_INFERENCE_FAILED: /推理失败/,
+    LEFTREFILL_INPUT_SIZE: /512 × 512/,
+    LEFTREFILL_REFERENCE_INVALID: /参考图/,
+    LEFTREFILL_EMPTY_MASK: /没有可修复/,
+  };
+  for (const [code, pattern] of Object.entries(cases)) {
+    setHandler(() =>
+      json({ error: { code, message: "internal error detail" } }, 422)
+    );
+    await assert.rejects(apiModule.api.repair({ method: "leftrefill" }), (error) => {
+      assert.equal(error.code, code);
+      assert.match(error.message, pattern);
+      assert.doesNotMatch(error.message, /请求未被接受|本机服务没有完成请求/);
+      return true;
+    });
+  }
+});
+
 /* ------------------------------------------------------------------ 8. health 能力 */
 
 test("health 能力：明确 false 才算不可用，缺失/非法/读取失败保持未知", async () => {
@@ -676,6 +699,72 @@ test("health 能力：明确 false 才算不可用，缺失/非法/读取失败�
   assert.equal(store.settings, settingsSnapshot);
   assert.deepEqual(store.settings, { revision: 9, model: "doubao-seedream-5-0-pro-260628" });
   assert.equal(store.lineartModel.available, true);
+});
+
+test("health 独立解析 leftrefill_model：明确 false 才禁用，缺失/失败保持未知", async () => {
+  setHandler(() =>
+    json({
+      status: "ok",
+      capabilities: {
+        leftrefill_model: { available: false, reason: "base_model_missing", checked: "prerequisites_only" },
+      },
+    })
+  );
+  await store.loadHealth();
+  assert.equal(store.leftrefillModel.available, false);
+  assert.equal(store.leftrefillModel.reason, "base_model_missing");
+  assert.equal(store.leftrefillModel.checked, "prerequisites_only");
+
+  setHandler(() => json({ status: "ok", capabilities: { lineart_model: { available: true } } }));
+  await store.loadHealth();
+  assert.equal(store.leftrefillModel.available, null);
+  assert.equal(store.leftrefillModel.reason, "");
+
+  setHandler(() =>
+    json({
+      status: "ok",
+      capabilities: {
+        leftrefill_model: { available: true, reason: null, checked: "prerequisites_only" },
+      },
+    })
+  );
+  await store.loadHealth();
+  assert.equal(store.leftrefillModel.available, true);
+  // health 整体失败时保留上一次已知能力，不据此断言缺少模型。
+  setHandler(() => textResponse("service unavailable", 503));
+  await store.loadHealth();
+  assert.equal(store.leftrefillModel.available, true);
+});
+
+test("request 超时覆盖响应体：收到响应头后卡住也要按超时结束", async () => {
+  const originalFetch = globalThis.fetch;
+  let aborted = false;
+  globalThis.fetch = (input, init = {}) => {
+    const signal = init.signal;
+    const stream = new ReadableStream({
+      start(controller) {
+        signal?.addEventListener(
+          "abort",
+          () => {
+            aborted = true;
+            controller.error(Object.assign(new Error("aborted"), { name: "AbortError" }));
+          },
+          { once: true }
+        );
+      },
+    });
+    return Promise.resolve(new Response(stream, { status: 200, headers: { "content-type": "application/json" } }));
+  };
+  try {
+    await assert.rejects(apiModule.api.request("/slow-body", { timeout: 20 }), (error) => {
+      assert.equal(error.name, "ApiError");
+      assert.match(error.message, /响应超时/);
+      return true;
+    });
+    assert.equal(aborted, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 /* ------------------------------------------------------------------ 8. 资产分组（同类多次处理） */
@@ -863,6 +952,59 @@ test("八道工序都能渲染，处理工序明确提供本地/云端线稿，�
       assert.doesNotThrow(() => workbench.default.render(state(stage), { state: {} }, params));
     }
   } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test("LeftRefill 不可用时禁用本地路线并给出通俗原因，未知不当成不可用", () => {
+  const originalWindow = globalThis.window;
+  const originalSession = store.session;
+  const originalSeedream = store.seedream;
+  const originalLeft = store.leftrefillModel;
+  globalThis.window = {
+    matchMedia: () => ({ matches: false }),
+    clearTimeout() {},
+    setTimeout() {
+      return 0;
+    },
+  };
+  try {
+    store.session = {
+      imageId: "image-leftrefill",
+      image: { image_id: "image-leftrefill", meta: { source_name: "本地修复样例" } },
+      assets: [
+        { asset_id: "crop-512", kind: "cropped", width: 512, height: 512 },
+        { asset_id: "ref-512", kind: "cropped", width: 512, height: 512 },
+      ],
+      currentAssetId: "crop-512",
+      jobs: [],
+      busy: false,
+      activeJob: null,
+      error: "",
+    };
+    store.seedream = { enabled: false, blockers: [] };
+    const state = { stage: 3, tile: "2x2", zoom: "fit", brush: 24, compare: false };
+    const render = () => workbench.default.render(state, { state: {} }, new URLSearchParams());
+    const localButton = (html) => html.match(/<button[^>]*data-val="leftrefill"[^>]*>/)[0];
+
+    store.leftrefillModel = { available: false, reason: "base_model_missing", checked: "prerequisites_only" };
+    const unavailable = render();
+    assert.match(localButton(unavailable), /disabled/);
+    assert.match(unavailable, /缺少基础模型权重/);
+    // 解释“上传的小模型只是提示向量，需要匹配的基础网络”，且不暴露内部接口/字段名。
+    assert.match(unavailable, /提示向量/);
+    assert.match(unavailable, /SD2/);
+    assert.doesNotMatch(unavailable, /\/health|capabilities\.leftrefill/);
+
+    store.leftrefillModel = { available: null, reason: "", checked: "" };
+    const unknown = render();
+    assert.doesNotMatch(localButton(unknown), /disabled/);
+    assert.match(unknown, /暂时无法确认本地修复模型/);
+    assert.match(unknown, /不会自动改用云端/);
+  } finally {
+    store.session = originalSession;
+    store.seedream = originalSeedream;
+    store.leftrefillModel = originalLeft;
     globalThis.window = originalWindow;
   }
 });
@@ -1069,6 +1211,45 @@ test("URL 目标决策：纯 stage/compare/tile 变化不得重新 openAsset", (
   // 首次带目标才加载；首次纯 stage 不加载。
   assert.equal(appModule.shouldLoadTarget(target("image=image-1&asset=asset-1"), null), true);
   assert.equal(appModule.shouldLoadTarget(target("stage=3"), null), false);
+});
+
+test("会话清空后同一个 URL 目标必须重新载入，清空工作台同时重置深链目标", () => {
+  const target = (query) => appModule.loadTarget(new URLSearchParams(query));
+  const same = target("image=image-1&asset=asset-1");
+  const blank = { imageId: "", assets: [], currentAssetId: "" };
+  const loaded = { imageId: "image-1", assets: [{ asset_id: "asset-1" }], currentAssetId: "asset-1" };
+
+  assert.equal(appModule.shouldLoadTarget(same, same, blank), true);
+  assert.equal(appModule.shouldLoadTarget(same, same, loaded), false);
+
+  const originalWindow = globalThis.window;
+  const originalSession = store.session;
+  globalThis.window = { confirm: () => true };
+  try {
+    store.session = {
+      ...blank,
+      imageId: "image-1",
+      assets: [{ asset_id: "asset-1", kind: "cropped", width: 10, height: 10 }],
+      currentAssetId: "asset-1",
+      jobs: [],
+      busy: false,
+      activeJob: null,
+      error: "",
+    };
+    const calls = [];
+    const api = {
+      resetTarget: () => calls.push("reset-target"),
+      set: () => calls.push("set"),
+      go: () => calls.push("go"),
+      toast: () => calls.push("toast"),
+    };
+    workbench.clearWorkbench(api);
+    assert.deepEqual(calls.slice(0, 3), ["reset-target", "set", "go"]);
+    assert.equal(store.session.imageId, "");
+  } finally {
+    store.session = originalSession;
+    globalThis.window = originalWindow;
+  }
 });
 
 test("云端输入不默默换回原图，未接受的修复候选不可作为后续输入", () => {
@@ -1419,6 +1600,189 @@ test("修复请求只含契约字段并把框裁到规范输入范围", () => {
   assert.equal(payload.feather_px, 6);
   assert.equal(payload.consent_to_upload, true);
   assert.equal(payload.consent_to_charge, true);
+});
+
+test("本地 LeftRefill 只接受 512×512 输入；参考图必须显式选择且不超过像素上限", () => {
+  const assets = [
+    { asset_id: "in-512", kind: "cropped", width: 512, height: 512 },
+    { asset_id: "in-1024", kind: "cropped", width: 1024, height: 1024 },
+    { asset_id: "mask-512", kind: "foreground_mask", width: 512, height: 512 },
+    { asset_id: "orig-512", kind: "original", width: 512, height: 512 },
+  ];
+  const ok = workbench.leftRefillInput(assets, assets[0]);
+  assert.equal(ok.asset.asset_id, "in-512");
+  assert.equal(ok.error, "");
+  assert.deepEqual(ok.candidates.map((asset) => asset.asset_id), ["in-512"]);
+
+  const wrongSize = workbench.leftRefillInput(assets, assets[1]);
+  assert.equal(wrongSize.asset, null);
+  assert.equal(wrongSize.error, "size");
+  assert.equal(wrongSize.width, 1024);
+  assert.deepEqual(wrongSize.candidates.map((asset) => asset.asset_id), ["in-512"]);
+
+  // 原件须先使用规范输入；前后端不能提供不同的可提交类型。
+  assert.equal(workbench.leftRefillInput(assets, assets[3]).error, "unsupported");
+  assert.equal(workbench.leftRefillInput(assets, assets[2]).error, "unsupported");
+  assert.equal(workbench.leftRefillInput([], null).error, "missing");
+
+  const references = workbench.leftRefillReferenceAssets([
+    { asset_id: "orig", kind: "original", width: 512, height: 512 },
+    { asset_id: "crop-limit", kind: "cropped", width: 1024, height: 1024 },
+    { asset_id: "too-big", kind: "cropped", width: 1025, height: 1024 },
+    { asset_id: "mask", kind: "foreground_mask", width: 512, height: 512 },
+    { asset_id: "svg", kind: "svg" },
+  ]);
+  assert.deepEqual(references.map((asset) => asset.asset_id), ["crop-limit"]);
+});
+
+test("本地 LeftRefill 请求体只含本地字段，且不会静默改为云端", () => {
+  const payload = workbench.buildLeftRefillPayload(
+    "in-512",
+    { left: 2.4, top: 3.6, width: 600, height: 600 },
+    { width: 512, height: 512 },
+    { repairReferenceId: "ref-1", repairFeather: 5.6, repairIntent: "reconnect_lines", repairSize: "2K" }
+  );
+  assert.deepEqual(Object.keys(payload).sort(), [
+    "bbox",
+    "feather_px",
+    "input_asset_id",
+    "method",
+    "reference_asset_id",
+  ]);
+  assert.equal(payload.method, "leftrefill");
+  assert.equal(payload.reference_asset_id, "ref-1");
+  assert.equal(payload.feather_px, 6);
+  assert.deepEqual(payload.bbox, { left: 2, top: 4, right: 512, bottom: 512 });
+  assert.equal("consent_to_upload" in payload, false);
+  assert.equal("consent_to_charge" in payload, false);
+  assert.equal("provider_call_id" in payload, false);
+
+  const input = { asset: { asset_id: "in-512" } };
+  const box = { width: 20, height: 20 };
+  assert.match(
+    workbench.leftRefillBlockReason({
+      capability: { available: false, reason: "base_model_missing" },
+      input,
+      referenceId: "ref-1",
+      box,
+    }),
+    /缺少基础模型权重[\s\S]*不会自动改用云端/
+  );
+  assert.match(
+    workbench.leftRefillBlockReason({
+      capability: { available: true },
+      input: { asset: null, error: "size", width: 1024, height: 1024 },
+      referenceId: "ref-1",
+      box,
+    }),
+    /512 × 512/
+  );
+  assert.match(
+    workbench.leftRefillBlockReason({ capability: { available: true }, input, referenceId: "", box }),
+    /参考图/
+  );
+  assert.equal(
+    workbench.leftRefillBlockReason({ capability: { available: true }, input, referenceId: "ref-1", box }),
+    ""
+  );
+});
+
+test("本地 LeftRefill 面板要求 512×512 目标和显式参考图，不出现云端同意项", () => {
+  const originalWindow = globalThis.window;
+  const originalSession = store.session;
+  const originalSeedream = store.seedream;
+  const originalLeft = store.leftrefillModel;
+  globalThis.window = {
+    matchMedia: () => ({ matches: false }),
+    clearTimeout() {},
+    setTimeout() {
+      return 0;
+    },
+  };
+  try {
+    store.session = {
+      imageId: "image-panel",
+      image: { image_id: "image-panel", meta: { source_name: "本地修复面板" } },
+      assets: [
+        { asset_id: "in-512", kind: "cropped", width: 512, height: 512 },
+        { asset_id: "ref-512", kind: "cropped", width: 512, height: 512 },
+        { asset_id: "in-1024", kind: "cropped", width: 1024, height: 1024 },
+      ],
+      currentAssetId: "in-512",
+      jobs: [],
+      busy: false,
+      activeJob: null,
+      error: "",
+    };
+    store.seedream = { enabled: false, blockers: [] };
+    store.leftrefillModel = { available: true, reason: null, checked: "prerequisites_only" };
+    const state = { stage: 3, tile: "2x2", zoom: "fit", brush: 24, compare: false };
+    // render 先跑 syncDrafts，给修复框补上当前资产的尺寸（真实页面顺序）。
+    workbench.default.render(state, { state: {} }, new URLSearchParams());
+    const html = workbench.repairPanel(state, "leftrefill");
+    assert.match(html, /目标输入/);
+    assert.match(html, /512 × 512/);
+    assert.match(html, /data-select="repairReference"/);
+    assert.match(html, /请选择已保存的参考图/);
+    assert.doesNotMatch(html, /同意把当前输入上传/);
+    assert.doesNotMatch(html, /同意本次云端调用/);
+    assert.match(html, /不上传 · 不计费/);
+    assert.match(html, /不会自动改用云端/);
+
+    store.session.currentAssetId = "in-1024";
+    workbench.default.render(state, { state: {} }, new URLSearchParams());
+    const wrongSize = workbench.repairPanel(state, "leftrefill");
+    assert.match(wrongSize, /不会自动缩放/);
+    assert.doesNotMatch(wrongSize, /目标输入/);
+  } finally {
+    store.session = originalSession;
+    store.seedream = originalSeedream;
+    store.leftrefillModel = originalLeft;
+    globalThis.window = originalWindow;
+  }
+});
+
+test("本地 LeftRefill 候选走原有接受/拒绝，不按全图候选处理", () => {
+  const info = {
+    revision: 3,
+    candidate_asset: { asset_id: "cand-1", kind: "repair_candidate", width: 512, height: 512 },
+    composited_asset: { asset_id: "composite-1", kind: "repair_composite", width: 512, height: 512 },
+  };
+  const localRows = workbench.repairCandidateRows(info, "leftrefill");
+  assert.deepEqual(localRows.map((row) => row.label), ["本地局部合成", "LeftRefill 候选"]);
+  assert.deepEqual(localRows.map((row) => row.full), [false, false]);
+
+  const localHtml = workbench.repairCandidateList(info, "leftrefill");
+  assert.match(localHtml, /LeftRefill 候选/);
+  assert.doesNotMatch(localHtml, /全图 AI 候选/);
+  assert.match(localHtml, /data-act="accept-repair"/);
+  assert.match(localHtml, /data-act="reject-repair"/);
+
+  const cloudRows = workbench.repairCandidateRows(info, "cloud");
+  assert.equal(cloudRows[1].label, "全图 AI 候选");
+  assert.equal(cloudRows[1].full, true);
+  assert.match(workbench.repairCandidateList(info, "cloud"), /全图 AI 候选/);
+
+  const decided = workbench.repairCandidateList(
+    { ...info, decision: { action: "accept", accepted_asset_id: "cand-1" } },
+    "leftrefill"
+  );
+  assert.doesNotMatch(decided, /data-act="accept-repair"/);
+  assert.doesNotMatch(decided, /data-act="reject-repair"/);
+
+  assert.deepEqual(workbench.buildRepairDecisionPayload(info, "accept", "cand-1", false, true), {
+    revision: 3,
+    action: "accept",
+    selected_asset_id: "cand-1",
+    accept_full_image_changes: false,
+  });
+  assert.deepEqual(workbench.buildRepairDecisionPayload(info, "accept", "cand-1", true, true), {
+    revision: 3,
+    action: "accept",
+    selected_asset_id: "cand-1",
+    accept_full_image_changes: true,
+  });
+  assert.deepEqual(workbench.buildRepairDecisionPayload(info, "reject"), { revision: 3, action: "reject" });
 });
 
 test("恢复时只选本会话规范输入的云端流程，并区分等待/已选层/未知结果", () => {
