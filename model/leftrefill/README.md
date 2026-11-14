@@ -14,10 +14,34 @@
 
 ## 基础模型
 
-推理另需训练时使用的离线 **SD2-inpainting Diffusers 转换目录**，约 2.4 GiB。交付机器上现成路径为 `G:\Patern_research\work\leftrefill-sd2`。其他机器可从该目录复制到自选的模型存储位置，再通过 `--base-model` 指定。运行时逐文件校验清单，全部读取本地文件。
+训练及推理实际使用的 **SD2-inpainting Diffusers 转换目录**已作为两个 ZIP 附件发布在 [完整基础权重 Release](https://github.com/cacao1357/Pattern-Studio-App/releases/tag/leftrefill-textile-step1108)。7 个必需文件合计约 2.4 GiB。微调提示向量 `prompt.safetensors` 随源码提供，运行时还需下载并解压两个基础权重 ZIP。
+
+| Release 附件 | 大小（字节） | 内容 |
+| --- | --- | --- |
+| `leftrefill-sd2-unet.zip` | 1731935096 | UNet 权重和配置 |
+| `leftrefill-sd2-components.zip` | 848188933 | 文本编码器、VAE、调度器、相应配置和模型许可 |
+| `SHA256SUMS` | 188 | 两个 ZIP 的 SHA-256 |
+
+在包含本 PR 提交的项目根目录运行以下 PowerShell 命令。需要 GitHub CLI，也可在 Release 页面手动下载两个 ZIP 和 `SHA256SUMS`，完成校验后解压。
+
+```powershell
+$downloadDir = Join-Path $PWD "leftrefill-downloads"
+New-Item -ItemType Directory -Path $downloadDir -ErrorAction Stop | Out-Null
+gh release download leftrefill-textile-step1108 --repo cacao1357/Pattern-Studio-App --pattern "leftrefill-sd2-*.zip" --pattern "SHA256SUMS" --dir $downloadDir
+if ($LASTEXITCODE -ne 0) { throw "基础模型下载失败" }
+Get-Content (Join-Path $downloadDir "SHA256SUMS") | ForEach-Object {
+    $expected, $filename = $_ -split '\s+', 2
+    $actual = (Get-FileHash -LiteralPath (Join-Path $downloadDir $filename) -Algorithm SHA256).Hash
+    if ($actual -ne $expected) { throw "基础模型 ZIP 校验失败 $filename" }
+}
+Expand-Archive -LiteralPath (Join-Path $downloadDir "leftrefill-sd2-components.zip") -DestinationPath model/leftrefill
+Expand-Archive -LiteralPath (Join-Path $downloadDir "leftrefill-sd2-unet.zip") -DestinationPath model/leftrefill
+```
+
+两个 ZIP 解压到同一个父目录后，目录结构如下。文件级 SHA-256 保存在 `inference.json`，推理加载前逐一校验。
 
 ```text
-leftrefill-sd2/
+model/leftrefill/leftrefill-sd2/
   scheduler/scheduler_config.json
   text_encoder/config.json
   text_encoder/model.fp16.safetensors
@@ -25,9 +49,16 @@ leftrefill-sd2/
   unet/diffusion_pytorch_model.fp16.safetensors
   vae/config.json
   vae/diffusion_pytorch_model.fp16.safetensors
+  BASE_MODEL_LICENSE
+  BASE_MODEL_NOTICE
+  SD2_MODEL_CARD.md
 ```
 
-文本编码器必须使用训练转换保留的 **23 层、1024 维、49408 词表**，UNet 输入为 9 通道。官方模型来源见 [SD2-inpainting 权重页](https://huggingface.co/stabilityai/stable-diffusion-2-inpainting/blob/main/512-inpainting-ema.ckpt)，其访问资格与模型许可沿用发布方条款。该原始 `.ckpt` 需要转换，不能直接替换本目录要求的离线文件。本次验证使用上面现有的转换目录，重新下载与转换的流程尚未验证。
+文本编码器使用训练转换保留的 **23 层、1024 维、49408 词表**，UNet 输入为 9 通道。基础模型源于原 `stabilityai/stable-diffusion-2-inpainting` 的 `512-inpainting-ema.ckpt`，转换为 Diffusers、FP16 权重及 safetensors，并保留 23 层文本编码器。逐文件修改和来源说明随包提供。
+
+基础模型及其派生模型适用 [CreativeML Open RAIL++-M License 全文](BASE_MODEL_LICENSE)，使用者和再分发者均须遵守第 5 条与 Attachment A 的用途限制，并按许可要求保留许可及修改说明。发布包包含本地训练和推理已经使用的转换文件，包内文件已逐一与训练清单核验。原模型说明的保留副本见包内 `SD2_MODEL_CARD.md`。
+
+已有同一份基础模型时，也可将 `--base-model` 指向其他位置的 `leftrefill-sd2/`。
 
 ## 安装
 
@@ -47,7 +78,7 @@ py -3.11 -m venv .venv-leftrefill
 
 ```powershell
 .\.venv-leftrefill\Scripts\python.exe model/leftrefill/inference.py `
-  --base-model G:/Patern_research/work/leftrefill-sd2 `
+  --base-model model/leftrefill/leftrefill-sd2 `
   --target D:/samples/target.png `
   --mask D:/samples/mask.png `
   --reference D:/samples/reference.png `
@@ -63,7 +94,7 @@ py -3.11 -m venv .venv-leftrefill
 from PIL import Image
 from model.leftrefill.inference import LeftRefill
 
-pipeline = LeftRefill(r"G:\Patern_research\work\leftrefill-sd2")
+pipeline = LeftRefill("model/leftrefill/leftrefill-sd2")
 with Image.open("target.png") as target, Image.open("mask.png") as mask, Image.open("reference.png") as reference:
     result = pipeline.restore(target, mask, reference, seed=23407)
 result.save("restored.png")

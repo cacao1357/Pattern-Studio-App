@@ -84,7 +84,7 @@ git lfs pull --include="model/model.pt" --exclude=""
 
 ### LeftRefill 参考图引导修复
 
-`model/leftrefill/` 提供纹样微调的 1108 步提示向量、命令行推理实现、SHA-256 校验清单和固定 63 张验证图的指标。基础 SD2-inpainting 模型从独立离线目录加载。安装、输入约定和权重选择依据见 [LeftRefill 使用说明](model/leftrefill/README.md)。
+`model/leftrefill/` 提供纹样微调的 1108 步提示向量、命令行推理实现、SHA-256 校验清单和固定 63 张验证图的指标。完整基础 SD2-inpainting 权重通过 [仓库 Release](https://github.com/cacao1357/Pattern-Studio-App/releases/tag/leftrefill-textile-step1108) 的两个 ZIP 提供，解压后从离线目录加载。安装、输入约定和权重选择依据见 [LeftRefill 使用说明](model/leftrefill/README.md)。
 
 ## 数据与限制
 
