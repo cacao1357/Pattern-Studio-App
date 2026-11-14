@@ -36,6 +36,10 @@ const CODE_MESSAGES = {
   CATEGORY_NOT_FOUND: "找不到这个题材分类，可能已被删除。",
   INVALID_CATEGORY_NAME: "分类名需要 1–60 个字符，且不能包含控制字符。",
   IMAGE_NOT_FOUND: "没有找到这张原图，可能已被移除。",
+  PATTERN_BUSY: "这张纹样还有排队或进行中的任务；完成或取消后再删除。",
+  PATTERN_IN_BATCH: "这张纹样正在批处理中；先取消该批次再删除。",
+  WORKBENCH_LIMIT: "工作台最多保留 500 张纹样，请先移出一些再添加。",
+  INVALID_WORKBENCH_SELECTION: "请选择 1–200 张纹样。",
   EXPORT_SIZE_LIMIT: "所选文件超过 128 MiB 导出上限，请少选几个。",
   EXPORT_LAYOUT_INVALID: "导出目录布局不受支持。",
   NESTED_EXPORT: "不能把已有的 ZIP 再打包一次，请只选图片或 SVG。",
@@ -273,6 +277,16 @@ export const api = {
     return request(`/patterns?${query}`, rest);
   },
   pattern: (imageId, options) => request(`/patterns/${enc(imageId)}`, options),
+  deletePattern: (imageId) => request(`/patterns/${enc(imageId)}`, { method: "DELETE" }),
+  workbenchItems: ({ limit = 20, cursor = "", ...rest } = {}) => {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (cursor) query.set("cursor", cursor);
+    return request(`/workbench/items?${query}`, rest);
+  },
+  addWorkbenchItems: (imageIds) =>
+    request("/workbench/items", { method: "POST", json: { image_ids: [...imageIds] } }),
+  removeWorkbenchItems: (imageIds) =>
+    request("/workbench/items", { method: "DELETE", json: { image_ids: [...imageIds] } }),
   patternCategories: (options) => request("/pattern-categories", options),
   createPatternCategory: (name) =>
     request("/pattern-categories", { method: "POST", json: { name } }),

@@ -103,6 +103,35 @@
   opacity: 0.42;
 }
 
+.bp-group__del {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  opacity: 0.4;
+}
+
+.bp-group__del .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.bp-group__del:hover,
+.bp-group__del:focus-visible {
+  color: var(--error);
+  opacity: 1;
+}
+
+.bp-group:hover .bp-group__del,
+.bp-group:focus-within .bp-group__del {
+  opacity: 0.72;
+}
+
+@media (hover: none) {
+  .bp-group__del {
+    opacity: 0.72;
+  }
+}
+
 .bp-group__meta {
   padding: 0 6px 5px 34px;
   font-size: var(--text-min);
@@ -2196,5 +2225,435 @@
   .pf-meter span {
     animation: none;
     transition: none;
+  }
+}
+
+/* ================================================================ 工作台多选与成员 */
+
+.bp-check {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 28px;
+  cursor: pointer;
+}
+
+.bp-check input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.bp-check__box {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
+  background: var(--bg-1);
+  color: transparent;
+  transition: background var(--dur-2), border-color var(--dur-2), color var(--dur-2);
+}
+
+.bp-check__box .icon {
+  width: 11px;
+  height: 11px;
+}
+
+.bp-check input:checked + .bp-check__box {
+  border-color: transparent;
+  background: var(--cinnabar-deep);
+  color: var(--on-accent);
+}
+
+.bp-check input:indeterminate + .bp-check__box {
+  border-color: transparent;
+  background: var(--cinnabar-deep);
+  color: var(--on-accent);
+}
+
+.bp-check input:focus-visible + .bp-check__box {
+  box-shadow: var(--ring-focus);
+}
+
+.bp-check--all {
+  width: auto;
+  gap: 6px;
+  padding-inline: 2px;
+}
+
+.bp-selectbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--line-1);
+}
+
+.bp-selectbar__label {
+  font-size: var(--text-label);
+  color: var(--text-2);
+}
+
+.bp-selectbar__count {
+  font-size: var(--text-min);
+  color: var(--text-4);
+}
+
+.bp-selectbar__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.bp-selectbar__acts .btn {
+  --btn-h: 28px;
+  --btn-pad: 9px;
+  font-size: var(--text-min);
+}
+
+.bp-selectbar__del:hover,
+.bp-selectbar__del:focus-visible {
+  color: var(--error);
+  border-color: var(--error-line);
+}
+
+.bp-group.is-selected {
+  border-radius: var(--r-xs);
+  background: color-mix(in srgb, var(--cinnabar-deep) 7%, transparent);
+}
+
+.bp-group__add {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  opacity: 0.62;
+  color: var(--cinnabar-deep);
+}
+
+.bp-group__add .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.bp-group__add:hover,
+.bp-group__add:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .bp-group__add {
+    opacity: 0.85;
+  }
+}
+
+@media (max-width: 560px) {
+  .bp-selectbar__acts {
+    width: 100%;
+    margin-left: 0;
+  }
+  .bp-selectbar__acts .btn {
+    flex: 1 1 auto;
+  }
+}
+
+/* ================================================================ 添加纹样浮窗 */
+
+.pp-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, #000 38%, transparent);
+  animation: pp-fade var(--dur-2) var(--ease-out) both;
+}
+
+.pp {
+  display: flex;
+  flex-direction: column;
+  width: min(680px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  background: var(--bg-0);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+}
+
+.pp__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px 14px;
+  border-bottom: 1px solid var(--line-1);
+}
+
+.pp__title {
+  margin-top: 4px;
+  font-family: var(--font-serif);
+  font-size: var(--text-section);
+  line-height: 1.25;
+  color: var(--text-1);
+}
+
+.pp__lead {
+  margin-top: 8px;
+  font-size: var(--text-label);
+  line-height: 1.7;
+  color: var(--text-3);
+}
+
+.pp__close {
+  flex: none;
+}
+
+.pp__search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 22px 0;
+  padding: 0 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--bg-1);
+  color: var(--text-3);
+}
+
+.pp__search .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.pp__search .input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding-inline: 0;
+}
+
+.pp__error {
+  margin: 10px 22px 0;
+  font-size: var(--text-label);
+  color: var(--error);
+}
+
+.pp__list {
+  flex: 1;
+  min-height: 120px;
+  overflow: auto;
+  padding: 12px 14px 6px;
+}
+
+.pp-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pp-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background var(--dur-2), border-color var(--dur-2);
+}
+
+.pp-item:hover,
+.pp-item:focus-within {
+  background: var(--bg-1);
+  border-color: var(--line-1);
+}
+
+.pp-item.is-checked {
+  border-color: color-mix(in srgb, var(--cinnabar-deep) 42%, transparent);
+  background: color-mix(in srgb, var(--cinnabar-deep) 6%, transparent);
+}
+
+.pp-item.is-added {
+  cursor: default;
+  opacity: 0.68;
+}
+
+.pp-item > input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pp-check {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--bg-0);
+  color: transparent;
+}
+
+.pp-check .icon {
+  width: 12px;
+  height: 12px;
+}
+
+.pp-item > input:checked + .pp-check {
+  border-color: transparent;
+  background: var(--cinnabar-deep);
+  color: var(--on-accent);
+}
+
+.pp-item > input:focus-visible + .pp-check {
+  box-shadow: var(--ring-focus);
+}
+
+.pp-item.is-added .pp-check {
+  opacity: 0.4;
+}
+
+.pp-item__thumb {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 52px;
+  height: 52px;
+  overflow: hidden;
+  border-radius: var(--r-xs);
+  background: var(--bg-1);
+}
+
+.pp-item__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.pp-item__file {
+  color: var(--text-4);
+}
+
+.pp-item__file .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.pp-item__text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.pp-item__name {
+  font-size: var(--text-sm);
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pp-item__meta {
+  font-size: var(--text-min);
+  color: var(--text-4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pp-item__added {
+  flex: none;
+  margin-left: auto;
+  font-size: var(--text-min);
+  color: var(--text-4);
+}
+
+.pp-state {
+  padding: 30px 12px;
+  text-align: center;
+  font-size: var(--text-label);
+  line-height: 1.8;
+  color: var(--text-3);
+}
+
+.pp-state--error {
+  color: var(--text-2);
+}
+
+.pp__more {
+  margin: 2px 22px 10px;
+}
+
+.pp__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 12px 22px;
+  border-top: 1px solid var(--line-1);
+  background: var(--bg-1);
+}
+
+.pp__count {
+  font-size: var(--text-min);
+  color: var(--text-4);
+}
+
+.pp__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+@keyframes pp-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 560px) {
+  .pp-layer {
+    padding: 10px;
+    place-items: end center;
+  }
+  .pp {
+    max-height: calc(100vh - 20px);
+  }
+  .pp__head,
+  .pp__search,
+  .pp__error,
+  .pp__foot {
+    margin-inline: 0;
+    padding-inline: 14px;
+  }
+  .pp__search {
+    margin-inline: 14px;
+  }
+  .pp__foot .pp__acts {
+    width: 100%;
+    margin-left: 0;
+  }
+  .pp__acts .btn {
+    flex: 1 1 auto;
   }
 }

@@ -254,7 +254,7 @@ test("侧栏按原图分区：当前组置顶，别的原图资产不并入 stor
       ],
       next_cursor: null,
     });
-  await batch.loadPatternPage({});
+  await batch.loadWorkbenchPage({});
   const groups = batch.batchGroups();
   assert.deepEqual(groups.map((group) => group.imageId), ["image-a", "image-b"]);
   assert.equal(groups[0].current, true);
@@ -263,7 +263,100 @@ test("侧栏按原图分区：当前组置顶，别的原图资产不并入 stor
   assert.deepEqual(store.session.assets.map((item) => item.asset_id).sort(), ["a-orig", "a-svg"]);
 });
 
-test("工作台纹样列：按原图分组渲染，跨图缩略图走 openAsset 深链", async () => {
+test("工作台纹样列：默认不镜像纹样库，加入/移出只改成员关系", async () => {
+  store.resetSession();
+  network.handler = (call) => {
+    if (call.path === "/api/v1/workbench/items" && call.method === "GET") {
+      return json({ items: [], next_cursor: null });
+    }
+    throw new Error(`unexpected ${call.method} ${call.path}`);
+  };
+  await batch.loadWorkbenchPage({});
+  assert.deepEqual(batch.batchSnapshot().groups, []);
+  assert.deepEqual(batch.batchSnapshot().members, []);
+
+  const item = pattern("image-a", "A 图", [asset("a-orig", "original")]);
+  network.handler = (call) => {
+    if (call.path === "/api/v1/workbench/items" && call.method === "POST") {
+      return json({ added: ["image-a"], added_count: 1, existing_count: 0, missing: [] });
+    }
+    throw new Error(`unexpected ${call.method} ${call.path}`);
+  };
+  await batch.addWorkbenchItems([item]);
+  assert.deepEqual(batch.batchSnapshot().members, ["image-a"]);
+  assert.equal(batch.batchSnapshot().groups[0].member, true);
+
+  // 工作台当前组用 camelCase 结构传入（imageId/assets）也必须能加入。
+  network.handler = (call) => {
+    if (call.path === "/api/v1/workbench/items" && call.method === "POST") {
+      const payload = JSON.parse(String(call.body || "{}"));
+      return json({ added: payload.image_ids || [], added_count: 1, existing_count: 0, missing: [] });
+    }
+    throw new Error(`unexpected ${call.method} ${call.path}`);
+  };
+  await batch.addWorkbenchItems([
+    { imageId: "image-c", name: "C 图", assets: [asset("c-orig", "original")], member: false },
+  ]);
+  assert.ok(batch.batchSnapshot().members.includes("image-c"));
+
+  network.handler = (call) => {
+    if (call.path === "/api/v1/workbench/items" && call.method === "DELETE") {
+      return json({ removed: 1, image_ids: ["image-a"] });
+    }
+    throw new Error(`unexpected ${call.method} ${call.path}`);
+  };
+  await batch.removeWorkbenchMembers(["image-a", "image-c"]);
+  assert.deepEqual(batch.batchSnapshot().members, []);
+  assert.deepEqual(batch.batchSnapshot().groups, []);
+});
+
+test("工作台「全选」先读完全部分页，超过一页也不漏组", async () => {
+  store.resetSession();
+  network.handler = (call) => {
+    const cursor = call.query.get("cursor");
+    if (!cursor) {
+      return json({
+        items: [pattern("image-a", "A", [asset("a1", "original")])],
+        next_cursor: "1",
+      });
+    }
+    return json({
+      items: [pattern("image-b", "B", [asset("b1", "original")])],
+      next_cursor: null,
+    });
+  };
+  await batch.loadWorkbenchPage({});
+  assert.equal(batch.workbenchHasMore(), true);
+  assert.equal(await batch.loadAllWorkbenchItems(), true);
+  assert.equal(batch.workbenchHasMore(), false);
+  assert.deepEqual(batch.batchSnapshot().groups.map((group) => group.imageId), ["image-a", "image-b"]);
+});
+
+test("工作台纹样列提供多选、全选、移出与批量删除入口", () => {
+  store.session = {
+    imageId: "image-current",
+    image: { image_id: "image-current", meta: { source_name: "当前图" } },
+    assets: [asset("cur-orig", "original")],
+    currentAssetId: "cur-orig",
+    jobs: [],
+    busy: false,
+    activeJob: null,
+    error: "",
+  };
+  const html = batch.patternColumnHtml({ selected: new Set(["image-current"]) });
+  assert.match(html, /data-act="workbench-picker"[^>]*>[\s\S]*?添加纹样/);
+  assert.match(html, /data-pattern-select-all/);
+  assert.match(html, /data-pattern-select[^>]*data-image="image-current"/);
+  assert.match(html, /data-pattern-select[^>]*checked/);
+  assert.match(html, /data-act="bp-remove-selected"/);
+  assert.match(html, /data-act="bp-delete-selected"/);
+  assert.match(html, /已选 1 \/ 1 个/);
+  // 当前会话尚未加入成员表：提供显式「加入工作台」，不偷偷写入。
+  assert.match(html, /data-act="pattern-add"[^>]*data-image="image-current"/);
+  assert.match(html, /未加入工作台/);
+});
+
+test("工作台列按原图分组渲染，跨图缩略图走 openAsset 深链", async () => {
   const originalWindow = globalThis.window;
   globalThis.window = {
     matchMedia: () => ({ matches: false }),
@@ -294,7 +387,7 @@ test("工作台纹样列：按原图分组渲染，跨图缩略图走 openAsset 
         ],
         next_cursor: null,
       });
-    await batch.loadPatternPage({});
+    await batch.loadWorkbenchPage({});
     const state = { stage: 1, tile: "2x2", zoom: "fit", brush: 24, compare: false };
     const html = workbench.default.render(state, { state: {} }, new URLSearchParams());
     assert.match(html, /aria-label="纹样"/);
@@ -446,8 +539,23 @@ test("纹样库分组卡片保留档案、分类、工作台与导出入口", ()
   assert.match(html, /data-open="a2"/);
   assert.match(html, /data-act="pattern-workbench"/);
   assert.match(html, /data-act="pattern-export"/);
+  assert.match(html, /data-act="pattern-delete"/);
   assert.match(html, /data-act="assign"/);
   assert.match(html, /祥云/);
+});
+
+test("纹样库批量选择：卡片显示勾选与全选入口，默认不显示", () => {
+  const group = pattern("image-a", "A 图", [asset("a1", "original")]);
+  const plain = libraryView.patternGroupHtml(group);
+  assert.doesNotMatch(plain, /data-lb-select/);
+  const selectedHtml = libraryView.patternGroupHtml(group, {
+    select: true,
+    chosen: new Set(["image-a"]),
+  });
+  assert.match(selectedHtml, /lb-pattern--select/);
+  assert.match(selectedHtml, /is-selected/);
+  assert.match(selectedHtml, /data-lb-select="image-a"[^>]*checked/);
+  assert.match(libraryView.default.render(), /data-act="select-mode"/);
 });
 
 test("删除分类只解除归类，不删除原图组或版本", async () => {

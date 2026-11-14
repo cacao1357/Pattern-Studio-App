@@ -62,6 +62,10 @@ def mount_pattern_library(app: FastAPI, current_store):
     def pattern(image_id: UUID):
         return library().get_pattern(str(image_id))
 
+    @app.delete("/api/v1/patterns/{image_id}")
+    def delete_pattern(image_id: UUID):
+        return library().delete_pattern(str(image_id))
+
     @app.put("/api/v1/patterns/{image_id}/categories")
     def set_pattern_categories(image_id: UUID, payload: PatternCategoriesUpdate):
         return library().set_categories(str(image_id), [str(value) for value in payload.category_ids], payload.revision)

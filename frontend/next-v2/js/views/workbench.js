@@ -20,19 +20,25 @@ import { icon } from "../icons.js";
 import { store } from "../store.js";
 import { api as http } from "../api.js";
 import {
+  addWorkbenchItems,
   batchGroups,
   dismissUploadPanel,
   ensureBatchIndex,
   forgetGroupAsset,
+  forgetPatternGroup,
   importFiles,
-  loadPatternPage,
+  loadAllWorkbenchItems,
+  loadWorkbenchPage,
   openPattern,
   openPatternAsset,
   patternColumnHtml,
+  reloadBatchIndex,
+  removeWorkbenchMembers,
   retryFailedImports,
   togglePatternGroup,
 } from "../batch.js";
 import { openBatchExport } from "./batch-export.js";
+import { closePatternPicker, openPatternPicker } from "./pattern-picker.js";
 import { openRunDialog } from "./processing-panel.js";
 import {
   formatPixels,
@@ -345,6 +351,8 @@ const ui = {
   notice: "",
   sessionError: "",
   compareX: 55,
+  /** 工作台纹样列的多选集合；只在当前页面存活，不写入浏览器存储。 */
+  patternSelected: new Set(),
 };
 
 const cand = {
@@ -1269,11 +1277,11 @@ function railHtml(state) {
 }
 
 /**
- * 纹样单独一列：按原图 image_id 分区，同图的所有处理结果留在同一组。
+ * 纹样单独一列：只显示用户选入工作台的原图组；当前会话未加入时临时置顶。
  * 分组索引在 batch.js，当前会话之外的组不会并入 store.session。
  */
-function assetsHtml() {
-  return patternColumnHtml();
+function assetsHtml(state) {
+  return patternColumnHtml({ selected: ui.patternSelected });
 }
 
 /* ------------------------------------------------------------------ 中栏画布 */
@@ -3723,6 +3731,245 @@ function removeSessionAsset(api, assetId) {
   api.toast(`已从工作台移除${kindLabel(removed.kind)}；可随时从纹样库重新打开。`, "info");
 }
 
+/** 删除请求进行中：避免连点重复提交，第二次只会得到 404。 */
+let deletingPattern = "";
+
+/** 丢掉已经不在当前列里的选中项（删除、移出或筛选变化后）。 */
+function prunePatternSelection() {
+  const ids = new Set(batchGroups().map((group) => group.imageId));
+  for (const imageId of [...ui.patternSelected]) {
+    if (!ids.has(imageId)) ui.patternSelected.delete(imageId);
+  }
+}
+
+/** 局部同步多选栏，不整页重绘，避免勾选时丢失滚动位置。 */
+function syncPatternSelectionDom(root) {
+  if (!root) return;
+  prunePatternSelection();
+  const groups = batchGroups();
+  const ids = groups.map((group) => group.imageId);
+  const count = ids.filter((imageId) => ui.patternSelected.has(imageId)).length;
+  root.querySelectorAll("[data-pattern-select]").forEach((input) => {
+    const on = ui.patternSelected.has(input.dataset.image);
+    if (input.checked !== on) input.checked = on;
+    input.closest(".bp-group")?.classList.toggle("is-selected", on);
+  });
+  const all = root.querySelector("[data-pattern-select-all]");
+  if (all) {
+    all.checked = ids.length > 0 && count === ids.length;
+    all.indeterminate = count > 0 && count < ids.length;
+  }
+  const countEl = root.querySelector("[data-pattern-selected-count]");
+  if (countEl) countEl.textContent = `已选 ${count} / ${ids.length} 个`;
+  const remove = root.querySelector('[data-act="bp-remove-selected"]');
+  if (remove) remove.disabled = count === 0;
+  const removeHint = root.querySelector('[data-act="bp-delete-selected"]');
+  if (removeHint) removeHint.disabled = count === 0;
+}
+
+/** 勾选/取消勾选一个原图组。 */
+function togglePatternSelection(imageId, on) {
+  if (!imageId) return;
+  if (on) ui.patternSelected.add(imageId);
+  else ui.patternSelected.delete(imageId);
+}
+
+/** 全选或清空工作台里的全部原图组；全选会先读完剩余分页。 */
+async function selectAllPatterns(on, api, root) {
+  if (!on) {
+    for (const group of batchGroups()) ui.patternSelected.delete(group.imageId);
+    syncPatternSelectionDom(root);
+    return;
+  }
+  const before = batchGroups().length;
+  const complete = await loadAllWorkbenchItems();
+  for (const group of batchGroups()) ui.patternSelected.add(group.imageId);
+  // 新分页已经并入索引，但 DOM 里还没有：重绘一次，勾选状态才会出现。
+  if (batchGroups().length !== before) repaintIfHere(api);
+  else syncPatternSelectionDom(root);
+  if (!complete) {
+    api.toast("还有部分工作台纹样没有载入，当前只选中了已载入的组。", "warn");
+  }
+}
+
+/** 从纹样库挑几张加入工作台；纹样库本身不受影响。 */
+function openWorkbenchPicker(api) {
+  const existing = batchGroups().filter((group) => group.member).map((group) => group.imageId);
+  openPatternPicker({
+    existing,
+    onAdd: async (items) => {
+      const result = await addWorkbenchItems(items);
+      const added = Number(result?.added_count) || 0;
+      api.toast(
+        added ? `已把 ${added} 张纹样加入工作台。` : "所选纹样都已在工作台里。",
+        added ? "done" : "info"
+      );
+      if (!(location.hash || "").includes("#/workbench")) return;
+      repaintIfHere(api);
+    },
+  });
+}
+
+/** 把当前会话原图加入工作台（深链打开时它只临时显示在列首）。 */
+async function addCurrentPattern(api, imageId) {
+  const group = batchGroups().find((entry) => entry.imageId === imageId);
+  if (!group) return;
+  try {
+    await addWorkbenchItems([group]);
+    api.toast(`已把「${group.name}」加入工作台，刷新后仍会保留。`, "done");
+    repaintIfHere(api);
+  } catch (error) {
+    api.toast(error?.message || "加入工作台失败，请稍后再试。", "warn");
+  }
+}
+
+/** 只移出工作台：成员关系删除，纹样、版本与文件都保留。 */
+async function removeSelectedPatterns(api) {
+  const groups = batchGroups().filter((group) => ui.patternSelected.has(group.imageId));
+  if (!groups.length) {
+    api.toast("先勾选要移出的纹样。", "info");
+    return;
+  }
+  const removable = groups.filter((group) => group.member).map((group) => group.imageId);
+  if (!removable.length) {
+    api.toast("选中的纹样本来就不在工作台里；纹样库仍保留它们。", "info");
+    return;
+  }
+  try {
+    await removeWorkbenchMembers(removable);
+    for (const imageId of removable) ui.patternSelected.delete(imageId);
+    const keepsCurrent = removable.includes(store.session.imageId);
+    api.toast(
+      `已把 ${removable.length} 张纹样移出工作台；纹样库与文件保持原样。${
+        keepsCurrent ? "当前原图仍留在本次会话里。" : ""
+      }`,
+      "done"
+    );
+    repaintIfHere(api);
+  } catch (error) {
+    api.toast(error?.message || "移出工作台失败，请稍后再试。", "warn");
+  }
+}
+
+/** 批量永久删除选中的原图组；逐个执行，单个失败不阻断其他组。 */
+async function deleteSelectedPatterns(api) {
+  if (deletingPattern) return;
+  prunePatternSelection();
+  const groups = batchGroups().filter((group) => ui.patternSelected.has(group.imageId));
+  if (!groups.length) {
+    api.toast("先勾选要删除的纹样。", "info");
+    return;
+  }
+  if (ui.running || store.session.activeJob) {
+    api.toast("任务进行中，完成或取消后再删除。", "warn");
+    return;
+  }
+  const versions = groups.reduce((sum, group) => sum + group.assets.length, 0);
+  const wasCurrent = groups.some((group) => group.imageId === store.session.imageId);
+  if (
+    !window.confirm(
+      `永久删除选中的 ${groups.length} 个原图组（共 ${versions} 个版本）？\n原图、全部处理版本、PNG/SVG 文件与这些纹样的任务记录都会删除，无法恢复。`
+    )
+  ) {
+    return;
+  }
+  deletingPattern = "__batch__";
+  let deleted = 0;
+  let filesFailed = 0;
+  const failures = [];
+  for (const group of groups) {
+    try {
+      const result = await store.deletePatternGroup(group.imageId);
+      forgetPatternGroup(group.imageId);
+      ui.patternSelected.delete(group.imageId);
+      deleted += 1;
+      filesFailed += Number(result?.files_failed) || 0;
+    } catch (error) {
+      if (error?.code === "IMAGE_NOT_FOUND") {
+        // 其他窗口已删除：按已完成处理，同步本地列表。
+        forgetPatternGroup(group.imageId);
+        ui.patternSelected.delete(group.imageId);
+        deleted += 1;
+        continue;
+      }
+      failures.push({ name: group.name, message: error?.message || "删除失败" });
+    }
+  }
+  deletingPattern = "";
+  if (!batchGroups().length) reloadBatchIndex({ onChange: () => repaintIfHere(api) });
+  if (wasCurrent) {
+    api.resetTarget?.();
+    api.set({ targetError: null, stage: 1, compare: false });
+    api.go("workbench");
+  } else {
+    repaintIfHere(api);
+  }
+  if (deleted) api.toast(`已删除 ${deleted} 个原图组。`, "done");
+  if (failures.length) {
+    const first = failures[0];
+    api.toast(
+      `${failures.length} 个原图组未能删除：${first.name} · ${first.message}`,
+      "warn"
+    );
+  }
+  if (filesFailed) {
+    api.toast(`有 ${filesFailed} 个文件未能从磁盘删除，记录已移除，请稍后手动清理。`, "warn");
+  }
+}
+
+/** 永久删除整张原图组：服务端删除全部版本与文件，工作台同步移出该组。 */
+function deletePattern(api, imageId, name) {
+  if (!imageId || deletingPattern) return;
+  if (ui.running || store.session.activeJob) {
+    api.toast("任务进行中，完成或取消后再删除。", "warn");
+    return;
+  }
+  const group = batchGroups().find((entry) => entry.imageId === imageId);
+  const label = String(group?.name || name || "").trim() || "这张纹样";
+  const count = group?.assets?.length || 0;
+  const wasCurrent = store.session.imageId === imageId;
+  const detail = count ? `及全部 ${count} 个版本` : "及其全部处理结果";
+  if (!window.confirm(`永久删除「${label}」${detail}？\n原图、PNG/SVG 文件与这张纹样的任务记录都会删除，无法恢复。`)) return;
+  deletingPattern = imageId;
+  store
+    .deletePatternGroup(imageId)
+    .then((result) => {
+      forgetPatternGroup(imageId);
+      ui.patternSelected.delete(imageId);
+      if (!batchGroups().length) reloadBatchIndex({ onChange: () => repaintIfHere(api) });
+      const removed = Number(result?.assets) || count;
+      if (wasCurrent) {
+        api.resetTarget?.();
+        api.set({ targetError: null, stage: 1, compare: false });
+        api.go("workbench");
+      }
+      api.toast(`已删除「${label}」${removed ? `（${removed} 个版本）` : ""}。`, "done");
+      if (Number(result?.files_failed) > 0) {
+        api.toast(`有 ${result.files_failed} 个文件未能从磁盘删除，记录已移除，请稍后手动清理。`, "warn");
+      }
+    })
+    .catch((error) => {
+      if (error?.code === "IMAGE_NOT_FOUND") {
+        // 其他窗口已删除：同步本地索引与会话，不把 404 当普通失败。
+        forgetPatternGroup(imageId);
+        ui.patternSelected.delete(imageId);
+        if (wasCurrent) {
+          store.resetSession();
+          api.resetTarget?.();
+          api.set({ targetError: null, stage: 1, compare: false });
+          api.go("workbench");
+        }
+        api.toast("这张纹样已经不存在，列表已刷新。", "warn");
+        return;
+      }
+      api.toast(error?.message || "删除失败，请稍后再试。", "warn");
+    })
+    .finally(() => {
+      deletingPattern = "";
+      if (!wasCurrent) repaintIfHere(api);
+    });
+}
+
 /** 结束一次工作：只清空当前会话，纹样库、任务与资产记录保留。 */
 function clearWorkbench(api) {
   if (!store.session.imageId && !store.session.assets.length) {
@@ -4990,6 +5237,21 @@ function handleClick(root, state, api, event) {
     case "clear-session":
       clearWorkbench(api);
       break;
+    case "delete-pattern":
+      deletePattern(api, el.dataset.image || "", el.dataset.name || "");
+      break;
+    case "workbench-picker":
+      openWorkbenchPicker(api);
+      break;
+    case "pattern-add":
+      addCurrentPattern(api, el.dataset.image || "");
+      break;
+    case "bp-remove-selected":
+      removeSelectedPatterns(api);
+      break;
+    case "bp-delete-selected":
+      deleteSelectedPatterns(api);
+      break;
     case "stage":
       stageClick(root, api, el);
       break;
@@ -5021,7 +5283,7 @@ function handleClick(root, state, api, event) {
       if (el.disabled) break;
       el.disabled = true;
       el.textContent = "载入中…";
-      loadPatternPage({ append: true, onChange: () => repaintIfHere(api) });
+      loadWorkbenchPage({ append: true, onChange: () => repaintIfHere(api) });
       break;
     case "batch-dismiss":
       dismissUploadPanel();
@@ -5310,6 +5572,15 @@ function handleChange(root, state, api, event) {
     }
     return;
   }
+  if (input.matches("[data-pattern-select]")) {
+    togglePatternSelection(input.dataset.image || "", input.checked);
+    syncPatternSelectionDom(root);
+    return;
+  }
+  if (input.matches("[data-pattern-select-all]")) {
+    selectAllPatterns(input.checked, api, root);
+    return;
+  }
   if (input.matches("[data-check]")) {
     patchCheckbox(root, state, api, input.dataset.check, input.checked);
     return;
@@ -5396,7 +5667,7 @@ export default {
     return `
     <div class="wb" data-stage="${stage.key}">
       ${railHtml(state)}
-      ${assetsHtml()}
+      ${assetsHtml(state)}
       ${mainHtml(stage, state)}
       ${panelHtml(stage, state)}
     </div>`;
@@ -5407,7 +5678,10 @@ export default {
     if (!wb) return;
     // 同一节点重复 mount（竞态重绘/重复刷新）只挂一次事件与订阅；
     // 否则一次点击会被两个 handleClick 处理，勾选先加后删。
-    if (mountedRoot === wb) return;
+    if (mountedRoot === wb) {
+      syncPatternSelectionDom(wb);
+      return;
+    }
     mountedRoot = wb;
 
     wb.addEventListener("click", (event) => handleClick(wb, state, api, event));
@@ -5418,7 +5692,8 @@ export default {
     bindCrop(wb, state, api);
     bindMask(wb, state, api);
     revealCurrentThumb(wb);
-    // 首次进入时把最近的原图组读进索引；只读排序，不切换会话。
+    syncPatternSelectionDom(wb);
+    // 首次进入时把用户选入工作台的原图组读进索引；只读排序，不切换会话。
     ensureBatchIndex({ onChange: () => repaintIfHere(api) });
 
     // 键盘 C 与点击“对比”走同一套可用性检查（app.js 只派发事件）。
@@ -5501,6 +5776,12 @@ export default {
   },
 
   unmount() {
+    // unmount 在每次局部重绘前也会调用；只有真的离开工作台才清理选择与浮窗。
+    const leaving = typeof location === "undefined" || !(location.hash || "").includes("#/workbench");
+    if (leaving) {
+      closePatternPicker();
+      ui.patternSelected.clear();
+    }
     if (unsubscribe) unsubscribe();
     unsubscribe = null;
     if (compareKeyHandler) document.removeEventListener("ps:toggle-compare", compareKeyHandler);

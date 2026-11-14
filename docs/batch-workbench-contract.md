@@ -16,6 +16,27 @@
 
 `GET /api/v1/patterns/{image_id}` 返回同一组结构。不存在时 404。
 
+## 工作台纹样选择
+
+工作台「纹样」列不是纹样库的镜像：它只显示用户明确加入的原图组。成员关系单独存储（`workbench_items`），加入/移出不删除纹样库记录。
+
+- `GET /api/v1/workbench/items?limit=20&cursor=` 返回 `{items,next_cursor}`，`items` 与 `GET /api/v1/patterns/{image_id}` 同构，并额外带 `added_at`。`limit` 为 1..50，默认 20；按加入顺序从新到旧分页，游标是上一页最后一项的成员位置。
+- `POST /api/v1/workbench/items` JSON：`{"image_ids":["..."]}`，一次 1..200 个，UUID 去重。返回 `{added,added_count,existing_count,missing}`；未知原图 ID 放入 `missing`，不报 404，也不会把其他组一起失败。工作台最多 500 张，超限返回 409 `WORKBENCH_LIMIT`。
+- `DELETE /api/v1/workbench/items` JSON：`{"image_ids":["..."]}`，一次 1..200 个。只删除成员关系，返回 `{removed,image_ids}`；原图、版本、文件与任务记录都保留。
+- 加入是幂等的：重复加入不会重复插入，也不会改变已有顺序。
+- 前端入口：工作台列的「添加纹样」浮窗（从 `/patterns` 搜索、勾选，`全选已载入` 只作用于浮窗已载入项）、上传/批量导入成功后自动加入、纹样库的「在工作台打开」和档案抽屉打开也会尝试加入。当前会话原图若尚未加入，仍临时显示在列首，并提供显式「加入工作台」。
+- 移出工作台只影响选择：每个组可由多选栏「移出工作台」批量移出；当前会话原图移出后仍留在工作台会话里，直到清空或切换。
+
+## 删除原图组
+
+`DELETE /api/v1/patterns/{image_id}` 永久删除该原图组及其全部版本，不可恢复。成功返回 `{image_id,deleted:true,assets,jobs,files_removed,files_failed}`。
+
+- 归属沿用 `GET /api/v1/patterns/{image_id}` 的同一套原图与父子来源关系；只删除该组资产、原图组记录、分类关联、该组的本机任务/流程记录及其资产文件。其他原图组和题材分类本身不动。
+- 该组有 `queued` / `running` 任务时返回 409 `PATTERN_BUSY`；属于 `running` / `cancelling` 批次且该项仍在排队、执行或等待确认时返回 409 `PATTERN_IN_BATCH`。应先结束任务或取消批次，避免后台任务向已删除的组发布结果。
+- 云端调用账本（`provider_calls`）保留用于费用核对；只删除其引用的本机素材和任务。
+- 原图组不存在时返回 404 `IMAGE_NOT_FOUND`。删除是显式用户操作，与“上传/处理不自动删除素材”的规则不冲突。
+- 前端入口：纹样库每个原图组头部的「删除整组」、档案抽屉里的「删除整组」，以及工作台「纹样」列每个组头部的删除按钮；三处都要求二次确认并说明会删除原图、处理结果与任务记录。工作台与纹样库的多选栏都提供「全选」和「删除选中」：一次确认后逐个调用本接口，单个组失败（例如仍有运行中任务）不会阻断其他组，完成后汇总失败原因。工作台「全选」会先读完剩余分页；纹样库「全选」只作用于当前已载入且可见的组。
+
 ## 手动分类
 
 `GET /api/v1/pattern-categories` 返回 `{ "items": [{"category_id", "name", "revision"}] }`，按名称稳定排序。

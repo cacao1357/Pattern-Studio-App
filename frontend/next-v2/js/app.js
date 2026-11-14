@@ -17,6 +17,7 @@ import { injectIcons, icon } from "./icons.js";
 import { STAGES, resolveStage } from "./data.js";
 import { api as http } from "./api.js";
 import { store } from "./store.js";
+import { rememberWorkbenchMember } from "./batch.js";
 import { kindLabel, shortId, escapeHtml } from "./format.js";
 import { initView } from "./motion.js";
 import homeView from "./views/home.js";
@@ -567,6 +568,13 @@ async function uploadFile(file) {
     // 晚到的上传结果不再发布、也不导航，避免抢回用户已打开的会话。
     const { result, session } = await store.uploadToSession(file);
     progressToast?.remove();
+    // 在工作台上传即视为用户把这组纹样选入工作台；失败不影响打开与处理。
+    if (result?.image_id) {
+      http
+        .addWorkbenchItems([result.image_id])
+        .then(() => rememberWorkbenchMember(result.image_id))
+        .catch(() => {});
+    }
     if (!session) {
       store.loadRecent();
       api.toast("已上传，但会话已切换，未自动打开这张纹样；可在纹样库中重新进入。", "warn");

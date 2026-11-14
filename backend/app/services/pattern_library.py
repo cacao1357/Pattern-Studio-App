@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import unicodedata
 from uuid import UUID, uuid4
 
@@ -194,6 +195,94 @@ class PatternLibrary:
 
     def get_pattern(self, image_id):
         return self._pattern(image_id)
+
+    def delete_pattern(self, image_id):
+        """Permanently remove one original-image group and every version it owns.
+
+        The group must be idle: queued/running jobs and active batches are
+        refused so a worker cannot publish into a half-deleted group. Category
+        links, task rows and asset files of this group are removed with it.
+        Provider call records stay as the cost ledger. Other groups are not
+        touched: ownership is the same recursive relation used by image history.
+        """
+        image_id = self._image_id(image_id)
+        with self.store.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            image = db.execute("SELECT id,original_id,normalized_id FROM images WHERE id=?",
+                               (image_id,)).fetchone()
+            if image is None:
+                raise ServiceError("IMAGE_NOT_FOUND", "Pattern not found", 404)
+            owned = [row["id"] for row in db.execute("""
+                WITH RECURSIVE owned(id) AS (
+                    SELECT id FROM assets WHERE id IN (?,?) OR metadata->>'image_id'=?
+                    UNION SELECT r.child_id FROM asset_relations r JOIN owned o ON r.parent_id=o.id
+                    UNION SELECT a.id FROM assets a JOIN owned o ON a.metadata->>'source_asset_id'=o.id
+                ) SELECT id FROM owned""", (image["original_id"], image["normalized_id"], image_id))]
+            marks = ",".join("?" for _ in owned)
+            if db.execute(f"""SELECT count(*) FROM local_jobs
+                    WHERE state IN ('queued','running') AND input_id IN ({marks})""",
+                          tuple(owned)).fetchone()[0]:
+                raise ServiceError("PATTERN_BUSY",
+                    "This pattern still has a queued or running task; finish or cancel it first", 409)
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='processing_batches'").fetchone():
+                for row in db.execute("SELECT items_json FROM processing_batches WHERE state IN ('running','cancelling')"):
+                    if any(item.get("image_id") == image_id and item.get("state") in {"queued", "running", "waiting", "cancelling"}
+                           for item in json.loads(row["items_json"])):
+                        raise ServiceError("PATTERN_IN_BATCH",
+                            "This pattern is part of a running processing batch; cancel that batch first", 409)
+            job_ids = [row["id"] for row in db.execute(
+                f"SELECT id FROM local_jobs WHERE input_id IN ({marks})", tuple(owned))]
+            job_marks = ",".join("?" for _ in job_ids)
+            flow_sql, flow_values = f"SELECT id FROM ai_flows WHERE input_id IN ({marks})", list(owned)
+            if job_ids:
+                flow_sql += (f" OR decomposition_job_id IN ({job_marks})"
+                             f" OR continuation_job_id IN ({job_marks})")
+                flow_values += list(job_ids) * 2
+            flow_ids = [row["id"] for row in db.execute(flow_sql, tuple(flow_values))]
+            files = [(row["id"], row["suffix"]) for row in db.execute(
+                f"SELECT id,suffix FROM assets WHERE id IN ({marks})", tuple(owned))]
+            flow_marks = ",".join("?" for _ in flow_ids)
+            feedback_ids = []
+            if job_ids:
+                feedback_ids = [row["id"] for row in db.execute(
+                    f"SELECT id FROM feedback WHERE job_id IN ({job_marks})", tuple(job_ids))]
+                db.execute(f"""DELETE FROM consents WHERE feedback_id IN
+                    (SELECT id FROM feedback WHERE job_id IN ({job_marks}))""", tuple(job_ids))
+                db.execute(f"DELETE FROM feedback WHERE job_id IN ({job_marks})", tuple(job_ids))
+                db.execute(f"DELETE FROM repair_decisions WHERE job_id IN ({job_marks})", tuple(job_ids))
+                db.execute(f"DELETE FROM workflow_branches WHERE job_id IN ({job_marks})", tuple(job_ids))
+                db.execute(f"DELETE FROM workflow_branches WHERE parent_job_id IN ({job_marks})", tuple(job_ids))
+            if flow_ids:
+                db.execute(f"DELETE FROM workflow_branches WHERE flow_id IN ({flow_marks})", tuple(flow_ids))
+                db.execute(f"DELETE FROM workflow_selections WHERE flow_id IN ({flow_marks})", tuple(flow_ids))
+                db.execute(f"DELETE FROM ai_flows WHERE id IN ({flow_marks})", tuple(flow_ids))
+            if job_ids:
+                db.execute(f"UPDATE local_jobs SET retry_of=NULL WHERE retry_of IN ({job_marks})", tuple(job_ids))
+                db.execute(f"DELETE FROM local_pipelines WHERE id IN ({job_marks})", tuple(job_ids))
+                db.execute(f"DELETE FROM local_jobs WHERE id IN ({job_marks})", tuple(job_ids))
+            db.execute("DELETE FROM pattern_category_members WHERE image_id=?", (image_id,))
+            db.execute("DELETE FROM pattern_category_revisions WHERE image_id=?", (image_id,))
+            db.execute("DELETE FROM image_meta WHERE image_id=?", (image_id,))
+            db.execute("DELETE FROM images WHERE id=?", (image_id,))
+            db.execute(f"DELETE FROM asset_relations WHERE child_id IN ({marks}) OR parent_id IN ({marks})",
+                       tuple(owned) + tuple(owned))
+            db.execute(f"DELETE FROM assets WHERE id IN ({marks})", tuple(owned))
+            targets = [image_id, *owned, *job_ids, *feedback_ids]
+            db.execute(f"DELETE FROM local_keys WHERE target_id IN ({','.join('?' for _ in targets)})",
+                       tuple(targets))
+            db.commit()
+        removed, failed = 0, 0
+        for asset_id, suffix in files:
+            path = (self.store.assets_root / (asset_id + suffix)).resolve()
+            if path.parent != self.store.assets_root.resolve():
+                continue
+            try:
+                path.unlink(missing_ok=True)
+                removed += 1
+            except OSError:
+                failed += 1
+        return {"image_id": image_id, "deleted": True, "assets": len(owned),
+                "jobs": len(job_ids), "files_removed": removed, "files_failed": failed}
 
     def list_patterns(self, limit=20, cursor=None, query="", kind=None, category_id=None):
         if type(limit) is not int or not 1 <= limit <= 50:

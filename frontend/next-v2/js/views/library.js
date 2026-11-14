@@ -14,6 +14,7 @@
    ============================================================================= */
 
 import { api as http } from "../api.js";
+import { forgetPatternGroup, rememberWorkbenchMember } from "../batch.js";
 import { store } from "../store.js";
 import { icon } from "../icons.js";
 import {
@@ -73,6 +74,12 @@ let catManage = false;
 let catForm = null;
 let catDeletePending = "";
 let catDeleteTimer = 0;
+/** 删除原图组请求进行中：避免连点重复提交。 */
+let deletingPattern = "";
+/** 纹样库多选：只在当前页面存活；「全选」只作用于当前已载入且可见的组。 */
+let selectMode = false;
+let selected = new Set();
+let batchDeleting = false;
 
 /* ---------- 小工具 ---------- */
 
@@ -235,6 +242,9 @@ function headHtml() {
       <a class="btn btn--ghost btn--sm" href="${http.manifestUrl()}" download>${icon("download")}下载数据清单</a>
       <button class="btn btn--ghost btn--sm" type="button" data-act="export-loaded">${icon("download")}导出已载入</button>
       <button class="btn btn--ghost btn--sm" type="button" data-act="process-batch">${icon("play")}批量处理</button>
+      <button class="btn btn--ghost btn--sm" type="button" data-act="select-mode" aria-pressed="${selectMode}">
+        ${icon(selectMode ? "close" : "check")}${selectMode ? "退出选择" : "批量选择"}
+      </button>
       <button class="btn btn--primary btn--sm" type="button" data-act="upload" data-magnetic>${icon("upload")}上传纹样</button>
     </div>
   </header>`;
@@ -490,16 +500,29 @@ function assetRowHtml(asset) {
   </li>`;
 }
 
-export function patternGroupHtml(group) {
+export function patternGroupHtml(group, { select = selectMode, chosen = selected } = {}) {
   const categories = group.categories || [];
+  const checked = chosen.has(group.image_id);
   return `
-  <section class="lb-pattern" data-pattern="${esc(group.image_id)}">
+  <section class="lb-pattern${select ? " lb-pattern--select" : ""}${checked ? " is-selected" : ""}"
+    data-pattern="${esc(group.image_id)}">
     <header class="lb-pattern__head">
-      <div class="lb-pattern__title">
-        <h3 class="lb-pattern__name">${esc(group.name || "未命名纹样")}</h3>
-        <p class="mono lb-pattern__meta">#${esc(shortId(group.image_id))} · 登记 ${esc(
-          formatTime(group.created_at, { withDate: true })
-        )} · ${group.assets.length} 个版本</p>
+      <div class="lb-pattern__lead">
+        ${
+          select
+            ? `<label class="lb-check" title="选择这组纹样">
+                <input type="checkbox" data-lb-select="${esc(group.image_id)}" ${checked ? "checked" : ""}
+                  aria-label="${esc(`选择 ${group.name || "未命名纹样"}`)}" />
+                <span class="lb-check__box" aria-hidden="true">${icon("check")}</span>
+              </label>`
+            : ""
+        }
+        <div class="lb-pattern__title">
+          <h3 class="lb-pattern__name">${esc(group.name || "未命名纹样")}</h3>
+          <p class="mono lb-pattern__meta">#${esc(shortId(group.image_id))} · 登记 ${esc(
+            formatTime(group.created_at, { withDate: true })
+          )} · ${group.assets.length} 个版本</p>
+        </div>
       </div>
       <div class="lb-pattern__cats">
         ${
@@ -527,6 +550,10 @@ export function patternGroupHtml(group) {
         <button class="btn btn--quiet btn--sm" type="button" data-act="pattern-export" data-image="${esc(group.image_id)}">
           ${icon("download")}导出本组
         </button>
+        <button class="btn btn--quiet btn--sm lb-pattern__del" type="button" data-act="pattern-delete"
+          data-image="${esc(group.image_id)}" data-name="${esc(group.name || "")}" aria-label="删除整组纹样">
+          ${icon("trash")}删除整组
+        </button>
       </div>
     </header>
     ${
@@ -537,14 +564,50 @@ export function patternGroupHtml(group) {
   </section>`;
 }
 
+/** 当前筛选/载入范围之外的选择不再保留，避免误删看不见的组。 */
+function pruneSelection(groups = displayedPatterns(patterns().items, {
+  grade: patterns().grade,
+  sort: patterns().sort,
+})) {
+  const visible = new Set(groups.map((group) => group.image_id));
+  for (const imageId of [...selected]) {
+    if (!visible.has(imageId)) selected.delete(imageId);
+  }
+}
+
+function selectionBarHtml(groups) {
+  if (!selectMode) return "";
+  const count = groups.filter((group) => selected.has(group.image_id)).length;
+  return `
+  <div class="lb-batchbar" data-lb-batchbar>
+    <label class="lb-check lb-batchbar__all">
+      <input type="checkbox" data-lb-select-all ${count && count === groups.length ? "checked" : ""}
+        ${groups.length ? "" : "disabled"} aria-label="全选当前已载入的纹样" />
+      <span class="lb-check__box" aria-hidden="true">${icon("check")}</span>
+      <span>全选当前结果</span>
+    </label>
+    <span class="mono lb-batchbar__count">已选 ${count} / ${groups.length} 组</span>
+    <span class="lb-batchbar__acts">
+      <button class="btn btn--quiet btn--sm lb-batchbar__clear" type="button" data-act="batch-clear" ${count ? "" : "disabled"}>
+        取消选择
+      </button>
+      <button class="btn btn--quiet btn--sm lb-batchbar__del" type="button" data-act="batch-delete" ${count ? "" : "disabled"}>
+        ${icon("trash")}删除选中
+      </button>
+    </span>
+    <p class="lb-batchbar__hint">只处理当前已载入且可见的组；未载入的分页不在选择范围内。</p>
+  </div>`;
+}
+
 function bodyHtml() {
   const lib = patterns();
   if (!loaded()) return loadingHtml();
   if (lib.loading && !lib.items.length) return loadingHtml();
   if (lib.error && !lib.items.length) return errorHtml(lib.error);
   const groups = displayedPatterns(lib.items, { grade: lib.grade, sort: lib.sort });
+  pruneSelection(groups);
   if (!groups.length) return emptyHtml();
-  return `<div class="lb-patterns">${groups.map(patternGroupHtml).join("")}</div>`;
+  return `${selectionBarHtml(groups)}<div class="lb-patterns">${groups.map((group) => patternGroupHtml(group)).join("")}</div>`;
 }
 
 function countHtml() {
@@ -618,6 +681,14 @@ function paintCategories(page) {
   if (catForm) page.querySelector("[data-cat-input]")?.focus({ preventScroll: true });
 }
 
+function paintSelectMode(page) {
+  if (!page || !page.isConnected) return;
+  const button = page.querySelector('[data-act="select-mode"]');
+  if (!button) return;
+  button.setAttribute("aria-pressed", String(selectMode));
+  button.innerHTML = `${icon(selectMode ? "close" : "check")}${selectMode ? "退出选择" : "批量选择"}`;
+}
+
 function paintResults(page, { animate = false } = {}) {
   if (!page || !page.isConnected) return;
   const body = page.querySelector("[data-lb-body]");
@@ -647,6 +718,7 @@ function paintResults(page, { animate = false } = {}) {
   if (clear) clear.hidden = !isFiltered();
   paintMore(page);
   paintFooter(page);
+  paintSelectMode(page);
 }
 
 /* ---------- 载入（最新查询优先） ---------- */
@@ -780,6 +852,115 @@ async function deleteCategory(page, api, categoryId) {
   }
 }
 
+/* ---------- 删除原图组 ---------- */
+
+/**
+ * 永久删除整张原图组：服务端同时删除原图、规范输入、全部衍生版本、
+ * 文件与这张纹样的任务记录。题材分类本身和其他原图组保留。
+ */
+/**
+ * 批量永久删除：一次确认，逐个执行；单个组失败不会阻断其他组。
+ * 选择范围只限当前已载入且可见的组，避免误删未载入分页。
+ */
+async function deleteSelectedPatterns(page, api) {
+  if (batchDeleting || deletingPattern) return;
+  const groups = displayedPatterns(patterns().items, {
+    grade: patterns().grade,
+    sort: patterns().sort,
+  }).filter((group) => selected.has(group.image_id));
+  if (!groups.length) {
+    api.toast("先勾选要删除的原图组。", "info");
+    return;
+  }
+  const versions = groups.reduce((sum, group) => sum + (group.assets || []).length, 0);
+  if (
+    !window.confirm(
+      `永久删除选中的 ${groups.length} 个原图组（共 ${versions} 个版本）？\n原图、全部处理版本、PNG/SVG 文件与这些纹样的任务记录都会删除，无法恢复。`
+    )
+  ) {
+    return;
+  }
+  batchDeleting = true;
+  let deleted = 0;
+  let filesFailed = 0;
+  const failures = [];
+  for (const group of groups) {
+    try {
+      const result = await store.deletePatternGroup(group.image_id);
+      forgetPatternGroup(group.image_id);
+      selected.delete(group.image_id);
+      deleted += 1;
+      filesFailed += Number(result?.files_failed) || 0;
+    } catch (error) {
+      if (error?.code === "IMAGE_NOT_FOUND") {
+        forgetPatternGroup(group.image_id);
+        selected.delete(group.image_id);
+        deleted += 1;
+        continue;
+      }
+      failures.push({ name: group.name, message: error?.message || "删除失败" });
+    }
+  }
+  batchDeleting = false;
+  try {
+    await store.loadDataset();
+    paintStats(page);
+    await requestPatterns(page, api);
+  } catch {
+    paintResults(page, { animate: true });
+  }
+  if (deleted) api.toast(`已删除 ${deleted} 个原图组。`, "done");
+  if (failures.length) {
+    const first = failures[0];
+    api.toast(`${failures.length} 个原图组未能删除：${first.name} · ${first.message}`, "warn");
+  }
+  if (filesFailed) {
+    api.toast(`有 ${filesFailed} 个文件未能从磁盘删除，记录已移除，请稍后手动清理。`, "warn");
+  }
+}
+
+async function deletePattern(page, api, imageId, name) {
+  if (!imageId || deletingPattern || batchDeleting) return;
+  const group = patterns().items.find((item) => item.image_id === imageId);
+  const label = String(group?.name || name || "").trim() || "这张纹样";
+  const count = group?.assets?.length || 0;
+  const detail = count ? `及全部 ${count} 个版本` : "及其全部处理结果";
+  if (
+    !window.confirm(
+      `永久删除「${label}」${detail}？\n原图、PNG/SVG 文件与这张纹样的任务记录都会删除，无法恢复。`
+    )
+  ) {
+    return;
+  }
+  deletingPattern = imageId;
+  try {
+    const result = await store.deletePatternGroup(imageId);
+    forgetPatternGroup(imageId);
+    selected.delete(imageId);
+    api.closeDrawer();
+    const removed = Number(result?.assets) || count;
+    api.toast(`已删除「${label}」${removed ? `（${removed} 个版本）` : ""}。`, "done");
+    if (Number(result?.files_failed) > 0) {
+      api.toast(`有 ${result.files_failed} 个文件未能从磁盘删除，记录已移除，请稍后手动清理。`, "warn");
+    }
+    await store.loadDataset();
+    paintStats(page);
+    await requestPatterns(page, api);
+  } catch (error) {
+    if (error?.code === "IMAGE_NOT_FOUND") {
+      // 已被其他窗口删除：把本地列表拉回服务端状态，不再当作失败。
+      forgetPatternGroup(imageId);
+      selected.delete(imageId);
+      await requestPatterns(page, api);
+      api.toast("这张纹样已经被删除，列表已刷新。", "warn");
+    } else {
+      api.toast(error?.message || "删除失败，请稍后再试。", "warn");
+    }
+  } finally {
+    deletingPattern = "";
+  }
+}
+
 /* ---------- 档案抽屉 ---------- */
 
 function kvRow(label, value) {
@@ -908,13 +1089,14 @@ function drawerBody(asset, pattern = null) {
       }
       <a class="btn btn--ghost btn--sm" href="${http.assetDownloadUrl(asset.asset_id)}" download>${icon("download")}下载</a>
       <button class="btn btn--ghost btn--sm" type="button" data-drawer-action="copy">${icon("file")}复制资产 ID</button>
+      ${pattern ? `<button class="btn btn--quiet btn--sm lb-pattern__del" type="button" data-drawer-action="delete-pattern">${icon("trash")}删除整组</button>` : ""}
       <button class="btn btn--primary btn--sm" type="button" data-drawer-action="workbench">${icon("arrow")}在工作台打开</button>
     </div>
     <p class="drawer-foot">字段来自本机资产记录；预览与下载直接读取本机文件。一个原图组可同时归入多个题材分类。</p>
   `;
 }
 
-async function drawerAction(action, asset, button, api) {
+async function drawerAction(action, asset, button, api, pattern = null) {
   if (action === "preview") {
     const opened = window.open(http.assetPreviewUrl(asset.asset_id), "_blank");
     if (opened) opened.opener = null;
@@ -930,6 +1112,11 @@ async function drawerAction(action, asset, button, api) {
     }
     return;
   }
+  if (action === "delete-pattern") {
+    if (!pattern) return;
+    deletePattern(ctx?.page, api, pattern.image_id, pattern.name);
+    return;
+  }
   if (action === "workbench") {
     if (button) button.disabled = true;
     try {
@@ -938,6 +1125,13 @@ async function drawerAction(action, asset, button, api) {
       const { asset: opened, stage } = result;
       const query = { asset: opened.asset_id, stage };
       if (opened.image_id) query.image = opened.image_id;
+      if (opened.image_id) {
+        // 从纹样库明确打开，等于把这张原图加入工作台；失败不阻断打开。
+        await http
+          .addWorkbenchItems([opened.image_id])
+          .then(() => rememberWorkbenchMember(opened.image_id))
+          .catch(() => {});
+      }
       api.closeDrawer();
       api.go("workbench", { query });
     } catch (error) {
@@ -961,7 +1155,7 @@ function openAssetDrawer(asset, trigger, api, pattern = null) {
     const hit = event.target.closest("[data-drawer-action]");
     if (!hit || !el.contains(hit)) return;
     event.preventDefault();
-    drawerAction(hit.dataset.drawerAction, asset, hit, api);
+    drawerAction(hit.dataset.drawerAction, asset, hit, api, pattern);
   });
 
   const observer = new MutationObserver(() => {
@@ -1246,7 +1440,30 @@ export default {
           break;
         }
         case "pattern-workbench":
+          try {
+            await http.addWorkbenchItems([hit.dataset.image]);
+            rememberWorkbenchMember(hit.dataset.image);
+          } catch {
+            // 打开是主操作；加入失败时仍允许进入工作台，之后可从工作台补加。
+          }
           api.go("workbench", { query: { image: hit.dataset.image, stage: 1 } });
+          break;
+        case "select-mode":
+          selectMode = !selectMode;
+          if (!selectMode) selected = new Set();
+          paintResults(page);
+          paintSelectMode(page);
+          api.toast(
+            selectMode ? "已进入批量选择：勾选后可以一次删除多个原图组。" : "已退出批量选择。",
+            "info"
+          );
+          break;
+        case "batch-clear":
+          selected = new Set();
+          paintResults(page);
+          break;
+        case "batch-delete":
+          deleteSelectedPatterns(page, api);
           break;
         case "process-batch": {
           const groups = displayedPatterns(patterns().items, {
@@ -1279,6 +1496,9 @@ export default {
           }
           break;
         }
+        case "pattern-delete":
+          deletePattern(page, api, hit.dataset.image || "", hit.dataset.name || "");
+          break;
         case "export-loaded": {
           const groups = displayedPatterns(patterns().items, {
             grade: patterns().grade,
@@ -1294,6 +1514,25 @@ export default {
         default:
           break;
       }
+    });
+
+    page.addEventListener("change", (event) => {
+      const all = event.target.closest("[data-lb-select-all]");
+      if (all) {
+        const groups = displayedPatterns(patterns().items, {
+          grade: patterns().grade,
+          sort: patterns().sort,
+        });
+        if (all.checked) for (const group of groups) selected.add(group.image_id);
+        else for (const group of groups) selected.delete(group.image_id);
+        paintResults(page);
+        return;
+      }
+      const checkbox = event.target.closest("[data-lb-select]");
+      if (!checkbox) return;
+      if (checkbox.checked) selected.add(checkbox.dataset.lbSelect);
+      else selected.delete(checkbox.dataset.lbSelect);
+      paintResults(page);
     });
 
     page.addEventListener("keydown", (event) => {
@@ -1372,6 +1611,13 @@ export default {
     catManage = false;
     catForm = null;
     catDeletePending = "";
+    // unmount 在局部重绘前也会调用：只有真的离开纹样库才丢弃批量选择。
+    const leaving = typeof location === "undefined" || !(location.hash || "").includes("#/library");
+    if (leaving) {
+      selectMode = false;
+      selected = new Set();
+      batchDeleting = false;
+    }
     ctx = null;
   },
 };

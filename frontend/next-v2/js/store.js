@@ -675,6 +675,19 @@ export const store = {
     return result;
   },
 
+  /**
+   * 永久删除整张原图组：原图、规范输入、全部衍生版本、文件与这张纹样的
+   * 任务记录都由服务端一并删除；题材分类本身和其他原图组保留。
+   * 若删的是当前会话的原图，同时结束会话，避免继续指向已不存在的资产。
+   */
+  async deletePatternGroup(imageId) {
+    const result = await api.deletePattern(imageId);
+    this.patterns.items = this.patterns.items.filter((item) => item.image_id !== imageId);
+    emit("patterns");
+    if (this.session.imageId === imageId) this.resetSession();
+    return result;
+  },
+
   /** 整组替换分类；revision 过期由调用方重新读取该组后重试。 */
   async setPatternCategoriesFor(imageId, categoryIds, revision) {
     const result = await api.setPatternCategories(imageId, {

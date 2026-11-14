@@ -1230,6 +1230,13 @@
   font-size: var(--text-label);
 }
 
+/* 破坏性操作默认保持安静，悬停或键盘聚焦时才显警示色。 */
+.lb-pattern__del:hover,
+.lb-pattern__del:focus-visible {
+  color: var(--error);
+  border-color: var(--error-line);
+}
+
 /* 组内网格 */
 .lb-assets {
   display: grid;
@@ -1674,5 +1681,124 @@
   }
   .lb-state__spinner {
     animation: none;
+  }
+}
+
+/* ------------------------------------------------------------------ 批量选择 */
+
+.lb-pattern__lead {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.lb-pattern__lead .lb-pattern__title {
+  flex: 1;
+  min-width: 0;
+}
+
+.lb-pattern.is-selected {
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--cinnabar-deep) 5%, transparent);
+}
+
+.lb-check {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  cursor: pointer;
+}
+
+.lb-check input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.lb-check__box {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--bg-1);
+  color: transparent;
+  transition: background var(--dur-2), border-color var(--dur-2), color var(--dur-2);
+}
+
+.lb-check__box .icon {
+  width: 12px;
+  height: 12px;
+}
+
+.lb-check input:checked + .lb-check__box {
+  border-color: transparent;
+  background: var(--cinnabar-deep);
+  color: var(--on-accent);
+}
+
+.lb-check input:focus-visible + .lb-check__box {
+  box-shadow: var(--ring-focus);
+}
+
+.lb-pattern--select .lb-check {
+  margin-top: 2px;
+}
+
+.lb-batchbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-sm);
+  background: var(--bg-1);
+}
+
+.lb-batchbar__all {
+  font-size: var(--text-label);
+  color: var(--text-2);
+}
+
+.lb-batchbar__count {
+  font-size: var(--text-min);
+  color: var(--text-4);
+}
+
+.lb-batchbar__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.lb-batchbar__del:hover,
+.lb-batchbar__del:focus-visible {
+  color: var(--error);
+  border-color: var(--error-line);
+}
+
+.lb-batchbar__hint {
+  flex-basis: 100%;
+  font-size: var(--text-min);
+  line-height: 1.6;
+  color: var(--text-4);
+}
+
+@media (max-width: 720px) {
+  .lb-batchbar__acts {
+    width: 100%;
+    margin-left: 0;
+  }
+  .lb-batchbar__acts .btn {
+    flex: 1 1 auto;
   }
 }

@@ -26,6 +26,7 @@ from app.api.datasets import mount_datasets
 from app.api.finishing import mount_finishing
 from app.api.svg_edit import mount_svg_edit
 from app.api.pattern_library import mount_pattern_library
+from app.api.workbench_items import mount_workbench_items
 from app.api.batch_workbench import mount_batch_workbench
 from app.services.batch_workbench import BatchWorkbench
 from app.services.finishing_workbench import FinishingWorkbench
@@ -257,6 +258,7 @@ def create_app(settings: Settings | None = None, *, transport: httpx.BaseTranspo
 
     mount_workbench(app, current_store, current_local_service, current_worker)
     mount_pattern_library(app, current_store)
+    mount_workbench_items(app, current_store)
     mount_batch_workbench(app, current_batch_service)
     mount_frontend(app)
     mount_svg_edit(app, current_store)

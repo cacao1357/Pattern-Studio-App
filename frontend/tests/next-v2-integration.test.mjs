@@ -2332,3 +2332,81 @@ test("付费关闭时新生成入口只提示，不提交任何云端请求", as
   assert.equal(countCalls("/api/v1/jobs/repair", "POST"), 0);
   assert.match(toasts[0] || "", /云端新生成已关闭/);
 });
+
+/* ------------------------------------------------------------------ 删除原图组 */
+
+test("删除原图组：DELETE 成功后移出列表，并清空同一原图的会话", async () => {
+  setHandler((call) => {
+    if (call.method === "DELETE" && call.path === "/api/v1/patterns/image-del") {
+      return json({ image_id: "image-del", deleted: true, assets: 4, jobs: 2 });
+    }
+    throw new Error(`unexpected fetch: ${call.method} ${call.path}`);
+  });
+  store.patterns.items = [
+    { image_id: "image-del", assets: [{ asset_id: "asset-del" }] },
+    { image_id: "image-keep", assets: [{ asset_id: "asset-keep" }] },
+  ];
+  store.session.imageId = "image-del";
+  store.session.assets = [{ asset_id: "asset-del", kind: "original" }];
+  try {
+    const result = await store.deletePatternGroup("image-del");
+    assert.equal(result.deleted, true);
+    assert.deepEqual(store.patterns.items.map((item) => item.image_id), ["image-keep"]);
+    assert.equal(store.session.imageId, "");
+    assert.deepEqual(store.session.assets, []);
+    assert.equal(countCalls("/api/v1/patterns/image-del", "DELETE"), 1);
+  } finally {
+    store.resetSession();
+    store.patterns.items = [];
+  }
+});
+
+test("删除原图组被拒绝时保留列表与会话，并给出中文原因", async () => {
+  setHandler(() => json({ error: { code: "PATTERN_BUSY", message: "queued task" } }, 409));
+  store.patterns.items = [{ image_id: "image-busy", assets: [] }];
+  store.session.imageId = "image-busy";
+  try {
+    await assert.rejects(
+      () => store.deletePatternGroup("image-busy"),
+      (error) => {
+        assert.equal(error.code, "PATTERN_BUSY");
+        assert.match(error.message, /任务/);
+        return true;
+      }
+    );
+    assert.deepEqual(store.patterns.items.map((item) => item.image_id), ["image-busy"]);
+    assert.equal(store.session.imageId, "image-busy");
+  } finally {
+    store.resetSession();
+    store.patterns.items = [];
+  }
+});
+
+test("工作台纹样列提供整组删除入口，删除后同步移出侧栏索引", async () => {
+  store.resetSession();
+  batchModule.resetBatchState();
+  setHandler((call) => {
+    if (call.path === "/api/v1/workbench/items") {
+      return json({
+        items: [
+          { image_id: "img-a", name: "甲", assets: [{ asset_id: "asset-a", kind: "original", created_at: "2026-01-01T00:00:00Z" }] },
+          { image_id: "img-b", name: "乙", assets: [] },
+        ],
+        next_cursor: null,
+      });
+    }
+    throw new Error(`unexpected fetch: ${call.path}`);
+  });
+  try {
+    await batchModule.loadWorkbenchPage({});
+    assert.deepEqual(batchModule.batchSnapshot().groups.map((group) => group.imageId), ["img-a", "img-b"]);
+    const html = batchModule.patternColumnHtml();
+    assert.match(html, /data-act="delete-pattern"/);
+    assert.match(html, /data-image="img-a"/);
+    assert.equal(batchModule.forgetPatternGroup("img-a"), true);
+    assert.deepEqual(batchModule.batchSnapshot().groups.map((group) => group.imageId), ["img-b"]);
+    assert.doesNotMatch(batchModule.patternColumnHtml(), /data-image="img-a"/);
+  } finally {
+    batchModule.resetBatchState();
+  }
+});

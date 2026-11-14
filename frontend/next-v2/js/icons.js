@@ -50,6 +50,7 @@ const ICONS = {
   gallery: `<rect x="3.6" y="4.6" width="16.8" height="14.8" rx="1.4"/><path d="m3.6 15.4 4.8-4.6 4 3.8 3.2-3 4.6 4.2"/>`,
   list: `<path d="M4.4 6.6h15.2M4.4 12h15.2M4.4 17.4h15.2"/>`,
   seal: `<rect x="4.4" y="4.4" width="15.2" height="15.2" rx="1.6"/><path d="M8.6 9.2h6.8M8.6 12h6.8M8.6 14.8h4.2"/>`,
+  trash: `<path d="M4.4 6.8h15.2"/><path d="M9.2 6.8V4.6h5.6v2.2"/><path d="M6.4 6.8l.9 12.6h9.4l.9-12.6"/><path d="M10.2 10.4v5.4M13.8 10.4v5.4"/>`,
 };
 
 export function injectIcons() {
