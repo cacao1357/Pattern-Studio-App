@@ -48,6 +48,9 @@ const MASK_MAX_POINTS = 2048;
 /** 单次打包导出的资产上限；界面勾选与提交使用同一上限。 */
 const EXPORT_LIMIT = 24;
 
+/** 会话底座：原件与规范输入不能从工作台移除。 */
+const SESSION_BASE_KINDS = new Set(["original", "normalized", "normalized_input"]);
+
 /** 平铺单元允许的资产类型（与后端 TILE_UNIT_KINDS 一致） */
 const TILE_UNIT_KINDS = new Set(["cropped", "transparent_png", "lineart", "accepted_repair"]);
 /** 本机 RGB/RGBA 输入资产类型（裁切/提取/线稿/矢量化的合法输入）。
@@ -1053,6 +1056,7 @@ function assetThumbTitle(asset, version, versions = 1) {
 function assetGroupMarkup(group) {
   const collapsed = collapsedGroups.has(group.key);
   const currentId = store.session.currentAssetId;
+  const locked = Boolean(ui.running || store.session.activeJob);
   const headTitle = `${group.stage ? `第 ${group.stage.n} 道 ${group.stage.name}` : "其它资产"} · ${group.count} 项`;
   /* 组内先按类型（工序内的固定顺序）再按时间倒序：同类型的版本挨在一起，方便对比。 */
   const ordered = [...group.entries].sort(
@@ -1065,7 +1069,8 @@ function assetGroupMarkup(group) {
       const on = asset.asset_id === currentId;
       const url = assetPreview(asset);
       const versionText = versions > 1 ? ` v${version}` : "";
-      return `<li>
+      const removable = !SESSION_BASE_KINDS.has(asset.kind);
+      return `<li class="wb-thumb-item">
         <button class="wb-thumb" type="button" data-act="asset" data-id="${asset.asset_id}"
           aria-current="${on ? "true" : "false"}"
           aria-label="${esc(`${label}${versionText} · ${dimsOf(asset)} · ${clockOf(asset)}${on ? " · 当前资产" : ""}`)}"
@@ -1081,6 +1086,14 @@ function assetGroupMarkup(group) {
           </span>
           <span class="wb-thumb__cap">${esc(label)}</span>
         </button>
+        ${
+          removable
+            ? `<button class="wb-thumb__del" type="button" data-act="remove-asset" data-id="${asset.asset_id}"
+                ${locked ? "disabled" : ""}
+                aria-label="${esc(`从工作台移除 ${label}${versionText}`)}"
+                title="从工作台移除（纹样库记录保留）">${icon("close")}</button>`
+            : ""
+        }
       </li>`;
     })
     .join("");
@@ -1129,6 +1142,8 @@ function railHtml(state) {
   const doneCount = STAGES.filter((stage) => statuses[stage.key]).length;
   const grade = gradeOf();
   const stampClass = grade && "ABCU".includes(grade) ? `stamp--${grade.toLowerCase()}` : "stamp--u";
+  const hasSession = Boolean(store.session.imageId || store.session.assets.length);
+  const locked = Boolean(ui.running || store.session.activeJob);
 
   return `
   <aside class="wb-rail" aria-label="文档与工序">
@@ -1189,6 +1204,12 @@ function railHtml(state) {
       <button class="btn btn--ghost btn--sm btn--block" type="button" data-act="go-export">
         ${icon("download")}平铺与导出
       </button>
+      ${
+        hasSession
+          ? `<button class="btn btn--quiet btn--sm btn--block" type="button" data-act="clear-session"
+              ${locked ? "disabled" : ""} title="清空当前工作台；纹样库与任务记录保留">${icon("close")}清空工作台</button>`
+          : ""
+      }
     </div>
   </aside>`;
 }
@@ -3454,6 +3475,46 @@ function cycleAsset(root, api, delta) {
   api.toast(`${delta < 0 ? "上一个" : "下一个"}资产：${kindLabel(next.kind)} ${shortId(next.asset_id)}`, "info");
 }
 
+/** 从当前工作台移除一份派生资产；纹样库与任务记录不动。 */
+function removeSessionAsset(api, assetId) {
+  const asset = store.assetById(assetId);
+  if (!asset) return;
+  if (SESSION_BASE_KINDS.has(asset.kind)) {
+    api.toast("原件与规范输入是工作台底座，不能移除。", "warn");
+    return;
+  }
+  if (ui.running || store.session.activeJob) {
+    api.toast("任务进行中，完成或取消后再移除。", "warn");
+    return;
+  }
+  if (!window.confirm(`从工作台移除「${kindLabel(asset.kind)}」？纹样库与任务记录会保留。`)) return;
+  const removed = store.removeAsset(assetId);
+  if (!removed) return;
+  draft.exportIds = (draft.exportIds || []).filter((id) => id !== assetId);
+  if (draft.tileUnitId === assetId) {
+    draft.tileUnitId = "";
+    draft.tileUnitTouched = false;
+  }
+  api.toast(`已从工作台移除${kindLabel(removed.kind)}；可随时从纹样库重新打开。`, "info");
+}
+
+/** 结束一次工作：只清空当前会话，纹样库、任务与资产记录保留。 */
+function clearWorkbench(api) {
+  if (!store.session.imageId && !store.session.assets.length) {
+    api.toast("工作台已经是空的。", "info");
+    return;
+  }
+  if (ui.running || store.session.activeJob) {
+    api.toast("任务进行中，完成或取消后再清空。", "warn");
+    return;
+  }
+  if (!window.confirm("清空当前工作台？纹样库与任务记录会保留。")) return;
+  store.resetSession();
+  api.set({ targetError: null, stage: 1, compare: false, tile: "2x2" });
+  api.go("workbench");
+  api.toast("工作台已清空。", "info");
+}
+
 function handleSeg(root, state, api, button) {
   const key = button.dataset.seg;
   const value = button.dataset.val;
@@ -4590,6 +4651,12 @@ function handleClick(root, state, api, event) {
   const stage = currentStage(state);
 
   switch (act) {
+    case "remove-asset":
+      removeSessionAsset(api, el.dataset.id);
+      break;
+    case "clear-session":
+      clearWorkbench(api);
+      break;
     case "stage":
       stageClick(root, api, el);
       break;

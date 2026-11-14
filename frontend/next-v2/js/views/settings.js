@@ -144,11 +144,9 @@ function headHtml(record) {
   return `
   <header class="st-head">
     <div class="st-head__text">
-      <p class="eyebrow">四 · 配置</p>
       <h1 class="title st-head__title">设置</h1>
       <p class="lead st-head__lead">
-        这些设置只影响云端调用，保存后用于下一次调用。<br />
-        密钥只显示是否已配置，不回显内容。
+        只影响云端调用；密钥只显示是否已配置，不回显内容。
       </p>
     </div>
     <div class="st-head__meta">

@@ -187,10 +187,9 @@ function headHtml() {
   return `
   <header class="lb-head">
     <div class="lb-head__text">
-      <p class="eyebrow">三 · 资产索引</p>
       <h1 class="title lb-head__title">纹样库</h1>
       <p class="lead lb-head__lead">
-        全部资产都在这里，可切换网格或列表查看。
+        全部资产与来源记录。
       </p>
     </div>
     <div class="lb-head__acts">

@@ -301,69 +301,6 @@
   opacity: 0.45;
 }
 
-/* ------------------------------------------------------------------ 跑马灯 */
-
-.ticker {
-  position: relative;
-  margin-top: 8px;
-  border-top: 1px solid var(--line-1);
-  border-bottom: 1px solid var(--line-1);
-  overflow: hidden;
-  padding-block: 11px;
-  background: color-mix(in srgb, var(--text-1) 1.4%, transparent);
-}
-.ticker::before,
-.ticker::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 90px;
-  z-index: 2;
-  pointer-events: none;
-}
-.ticker::before {
-  left: 0;
-  background: linear-gradient(90deg, var(--bg-0), transparent);
-}
-.ticker::after {
-  right: 0;
-  background: linear-gradient(270deg, var(--bg-0), transparent);
-}
-.ticker__track {
-  display: flex;
-  align-items: center;
-  width: max-content;
-  animation: ticker 46s linear infinite;
-}
-.ticker:hover .ticker__track {
-  animation-play-state: paused;
-}
-@keyframes ticker {
-  to { transform: translateX(-50%); }
-}
-.ticker__item {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding-inline: 22px;
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  letter-spacing: 0.12em;
-  color: var(--text-3);
-  white-space: nowrap;
-}
-.ticker__no {
-  color: var(--cinnabar-hi);
-  font-size: 12.5px;
-}
-.ticker__dot {
-  color: var(--text-4);
-}
-.ticker__item--accent {
-  color: var(--gold);
-}
-
 /* ------------------------------------------------------------------ 续做 */
 
 .section--tight {
@@ -468,8 +405,7 @@
 
 .flow {
   display: grid;
-  /* 八道工序 + 云端调用摘要 = 9 项，三列正好三行，避免末行留下空位。 */
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -1134,9 +1070,6 @@
   .specimen__caption {
     align-items: flex-start;
   }
-  .ticker__item {
-    padding-inline: 14px;
-  }
 }
 
 /* =============================================================================
@@ -1178,21 +1111,6 @@
   font-size: 12.5px;
   letter-spacing: 0.06em;
   color: var(--text-3);
-}
-
-/* --- 跑马灯 --- */
-.ticker {
-  padding-block: 12px;
-}
-.ticker__item {
-  font-family: var(--font-sans);
-  font-size: 13.5px;
-  letter-spacing: 0.06em;
-  color: var(--text-3);
-}
-.ticker__no {
-  font-family: var(--font-latin);
-  font-size: 12.5px;
 }
 
 /* --- 续做卡 --- */

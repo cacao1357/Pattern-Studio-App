@@ -322,6 +322,11 @@
 }
 
 /* 单个版本：纸面缩略图 + 版本号 + 生成时刻 */
+.wb-thumb-item {
+  position: relative;
+  min-width: 0;
+}
+
 .wb-thumb {
   display: flex;
   flex-direction: column;
@@ -387,6 +392,47 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.wb-thumb__del {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--bg-0) 84%, transparent);
+  color: var(--text-2);
+  opacity: 0.55;
+  cursor: pointer;
+  transition: opacity var(--dur-1), color var(--dur-1), border-color var(--dur-1);
+}
+.wb-thumb__del .icon {
+  width: 11px;
+  height: 11px;
+}
+.wb-thumb__del:hover,
+.wb-thumb__del:focus-visible {
+  color: var(--error);
+  border-color: var(--error-line);
+  opacity: 1;
+}
+.wb-thumb-item:hover .wb-thumb__del,
+.wb-thumb-item:focus-within .wb-thumb__del {
+  opacity: 1;
+}
+.wb-thumb__del:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+@media (hover: none) {
+  .wb-thumb__del {
+    opacity: 1;
+  }
+}
 .wb-thumb[aria-current="true"] .wb-thumb__plate {
   box-shadow: 0 0 0 2px var(--cinnabar), inset 0 0 0 1px var(--line-1);
 }
@@ -401,6 +447,9 @@
 /* 打包：分隔线由工序轨的下边框给出，这里只留间距 */
 .wb-rail__foot {
   flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   margin-top: auto;
   padding: 9px 12px 11px;
 }

@@ -372,6 +372,25 @@ export const store = {
     emit("session");
   },
 
+  /**
+   * 只从当前工作台移除一份派生资产，不删除纹样库里的记录。
+   * 原件与规范输入是会话底座，不允许移除。
+   */
+  removeAsset(assetId) {
+    const index = this.session.assets.findIndex((asset) => asset.asset_id === assetId);
+    if (index < 0) return null;
+    const removed = this.session.assets[index];
+    if (["original", "normalized", "normalized_input"].includes(removed.kind)) return null;
+    const remaining = this.session.assets.filter((asset) => asset.asset_id !== assetId);
+    if (this.session.currentAssetId === assetId) {
+      const fallback = this.session.assets[index - 1] || this.session.assets[index + 1] || null;
+      this.session.currentAssetId = fallback?.asset_id || "";
+    }
+    this.session.assets = remaining;
+    emit("session");
+    return removed;
+  },
+
   currentAsset() {
     return this.session.assets.find((asset) => asset.asset_id === this.session.currentAssetId) || null;
   },

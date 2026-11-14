@@ -224,7 +224,9 @@ function syncWorkbenchUrl() {
   if (state.route !== "workbench") return;
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
   if (store.session.imageId) params.set("image", store.session.imageId);
+  else params.delete("image");
   if (store.session.currentAssetId) params.set("asset", store.session.currentAssetId);
+  else params.delete("asset");
   params.set("stage", String(state.stage || 1));
   params.set("v", "2");
   if (state.compare) params.set("compare", "1");
@@ -254,31 +256,20 @@ function renderStatusbar() {
   const health = store.health;
   const online = Boolean(health && health.status === "ok");
   const asset = store.currentAsset();
-  const imageId = store.session.imageId;
   const cloud = store.seedream?.enabled ? "云端已连接" : "云端未配置";
   const isWorkbench = state.route === "workbench";
-  const datasetTotal = store.dataset?.total_images;
   bar.innerHTML = `
     <span class="statusbar__item" title="${online ? "数据库、存储与后台任务均正常" : escapeHtml(store.healthError || "尚未连接本机服务")}">
       <span class="svc__dot${online ? "" : " is-off"}" aria-hidden="true"></span>${online ? "本机服务正常" : "本机服务未连接"}
     </span>
-    <span class="statusbar__item statusbar__item--hide-sm">${imageId ? "#" + shortId(imageId) : "未打开纹样"}</span>
     ${
       isWorkbench
         ? `<span class="statusbar__item"><span class="accent">工序 ${stage.n}</span> ${stage.name}</span>
-           ${asset ? `<span class="statusbar__item"><span class="accent">${kindLabel(asset.kind)}</span> ${shortId(asset.asset_id)}</span>` : ""}`
-        : `<span class="statusbar__item statusbar__item--hide-sm">数据集 ${datasetTotal ?? "—"} 张</span>
-           <span class="statusbar__item statusbar__item--hide-sm">最近 ${store.recentAssets.length} 项成果</span>`
+           ${asset ? `<span class="statusbar__item">${kindLabel(asset.kind)}</span>` : ""}`
+        : ""
     }
     <span class="statusbar__item statusbar__item--hide-sm">${cloud}</span>
     <span class="statusbar__item statusbar__item--grow"></span>
-    ${
-      isWorkbench
-        ? `<span class="statusbar__item statusbar__item--hide-sm"><span class="statusbar__key">1</span>–<span class="statusbar__key">8</span> 工序</span>
-           <span class="statusbar__item statusbar__item--hide-sm"><span class="statusbar__key">[</span><span class="statusbar__key">]</span> 资产</span>
-           <span class="statusbar__item"><span class="statusbar__key">C</span> 对比</span>`
-        : `<span class="statusbar__item statusbar__item--hide-sm"><span class="statusbar__key">Ctrl</span> <span class="statusbar__key">K</span> 命令面板</span>`
-    }
   `;
 }
 

@@ -290,7 +290,7 @@ function detailHtml(job) {
 
     <dl class="kv tk-kv">
       <div class="kv__row"><dt>任务编号</dt><dd class="mono">${esc(job.job_id)}</dd></div>
-      <div class="kv__row"><dt>状态</dt><dd>${esc(jobStateLabel(job.state))} · ${esc(job.state || "—")}</dd></div>
+      <div class="kv__row"><dt>状态</dt><dd>${esc(jobStateLabel(job.state))}</dd></div>
       <div class="kv__row"><dt>创建时间</dt><dd class="mono">${esc(formatTime(job.created_at, { withDate: true }))}</dd></div>
       <div class="kv__row"><dt>完成时间</dt><dd class="mono">${esc(formatTime(job.finished_at, { withDate: true }))}</dd></div>
       <div class="kv__row"><dt>尝试次数</dt><dd>第 ${Number(job.attempt || 1)} 次</dd></div>
@@ -406,9 +406,8 @@ export default {
       <div class="wrap">
         <header class="tk-head">
           <div class="tk-head__text">
-            <p class="eyebrow">任务 · 本机记录</p>
             <h1 class="title tk-title">任务</h1>
-            <p class="lead">本机处理与云端调用记录；失败任务可重试，运行中的任务可取消。</p>
+            <p class="lead">本机与云端任务记录。</p>
           </div>
           <div class="tk-head__acts">
             <span class="mono tk-count" data-tk-count>正在读取任务…</span>

@@ -136,12 +136,9 @@ function renderResume(api) {
   const stageNo = current || 1;
   const stageInfo = STAGES[stageNo - 1] || STAGES[0];
   const running = store.session?.activeJob;
-  const note =
-    running && running.kind
-      ? `正在跑「${escapeHtml(jobKindLabel(running.kind))}」，停在第 ${stageNo} 道工序「${escapeHtml(stageInfo.name)}」。`
-      : job
-        ? `最近任务「${escapeHtml(jobKindLabel(job.kind))}」${escapeHtml(jobStateLabel(job.state))}；当前在第 ${stageNo} 道工序「${escapeHtml(stageInfo.name)}」。`
-        : `当前在第 ${stageNo} 道工序「${escapeHtml(stageInfo.name)}」。`;
+  const note = running
+    ? `正在处理第 ${stageNo} 道工序「${escapeHtml(stageInfo.name)}」。`
+    : `当前停在第 ${stageNo} 道工序「${escapeHtml(stageInfo.name)}」。`;
   return `
     <div class="resume card" data-reveal data-spotlight>
       <div class="resume__thumb">
@@ -152,11 +149,11 @@ function renderResume(api) {
       <div class="resume__main">
         <div class="resume__top">
           <p class="label">接着上次</p>
-          <span class="resume__time">最近 ${job ? relativeTime(job.updated_at) : relativeTime(asset?.created_at)}</span>
+          <span class="resume__time">${job ? relativeTime(job.updated_at) : relativeTime(asset?.created_at)}</span>
         </div>
         <h2 class="resume__name">${
           asset ? escapeHtml(kindLabel(asset.kind)) : escapeHtml(jobKindLabel(job.kind))
-        }${asset ? ` <span class="mono">${shortId(asset.asset_id)}</span>` : ""}</h2>
+        }</h2>
         <p class="resume__note">${note}</p>
         <ol class="resume__steps" aria-label="八道工序进度">
           ${STAGES.map(
@@ -187,6 +184,7 @@ function renderFlow() {
         const n = i + 1;
         const sample = sampleFor(s);
         const status = n === current ? "最近一步" : done.has(n) ? "已完成" : "待开始";
+        const showStatus = n === current || done.has(n);
         return `
         <button class="flow__card card card--hover ${n === current ? "is-current" : ""}"
           type="button" data-stage="${n}" data-spotlight data-reveal style="--i:${i}"
@@ -201,17 +199,15 @@ function renderFlow() {
           <span class="flow__name">${s.name}</span>
           <span class="flow__title">${s.title}</span>
           <span class="flow__note">${s.note}</span>
-          <span class="flow__state">
-            <span class="dot ${n === current ? "dot--cinnabar" : done.has(n) ? "" : "dot--idle"}"></span>${status}
-          </span>
+          ${
+            showStatus
+              ? `<span class="flow__state">
+                  <span class="dot ${n === current ? "dot--cinnabar" : ""}"></span>${status}
+                </span>`
+              : ""
+          }
         </button>`;
       }).join("")}
-      <div class="flow__summary card" data-reveal style="--i:8">
-        <p class="label">云端调用</p>
-        <p class="flow__summary-num">${store.seedream?.budget?.call_count ?? 0} <span class="flow__summary-unit">次</span></p>
-        <p class="flow__summary-copy">03 修复、04 候选与 05 云端线稿会调用云端。</p>
-        <p class="flow__summary-foot">调用次数只作记录。</p>
-      </div>
     </div>
   `;
 }
@@ -225,14 +221,14 @@ function specimenCard(asset, index) {
         ${thumbMarkup(asset)}
         <span class="recent__grade"><span class="stamp stamp--${(asset.grade || "U").toLowerCase()}">${asset.grade || "—"}</span></span>
         <span class="recent__hover">
-          <span class="recent__hover-row">${escapeHtml(kindLabel(asset.kind))} · ${escapeHtml(gradeLabel(asset.grade))}</span>
+          <span class="recent__hover-row">${escapeHtml(kindLabel(asset.kind))}</span>
           <span class="recent__hover-row mono">${escapeHtml(dimsOf(asset))} · ${escapeHtml(relativeTime(asset.created_at))}</span>
           <span class="recent__hover-cta">查看档案 ${icon("arrow")}</span>
         </span>
       </span>
       <span class="recent__meta">
         <span class="recent__name">${escapeHtml(kindLabel(asset.kind))}</span>
-        <span class="recent__sub">${shortId(asset.asset_id)} · ${escapeHtml(dimsOf(asset))} · ${escapeHtml(formatTime(asset.created_at))}</span>
+        <span class="recent__sub">${escapeHtml(dimsOf(asset))} · ${escapeHtml(formatTime(asset.created_at))}</span>
       </span>
     </button>
   `;
@@ -261,7 +257,7 @@ function renderGate() {
           <span class="gate__icon">${icon("cpu")}</span>
           <div>
             <h3 class="h3">本机流程</h3>
-            <p class="gate__kicker">01–02、05 本地路线、06–08 在本机完成</p>
+            <p class="gate__kicker">除云端生成外均在本机完成</p>
           </div>
         </div>
         <ul class="gate__list">
@@ -290,12 +286,9 @@ function renderGate() {
           <span class="gate__icon gate__icon--accent">${icon("cloud")}</span>
           <div>
             <h3 class="h3">云端生成</h3>
-            <p class="gate__kicker">用于 03 修复、04 候选与 05 云端线稿</p>
+            <p class="gate__kicker">03 修复、04 候选与 05 云端线稿</p>
           </div>
           <span class="chip ${enabled ? "chip--jade" : "chip--gold"} gate__chip">${enabled ? "已开通" : "未开通"}</span>
-        </div>
-        <div class="gate__budget">
-          <p class="gate__budget-note">已调用 ${budget?.call_count ?? 0} 次</p>
         </div>
         ${
           blockers.length
@@ -318,7 +311,6 @@ export default {
 
   render(state, api) {
     const latest = store.recentAssets.find((asset) => hasPreview(asset)) || null;
-    const job = store.recentJobs[0];
     const dataset = store.dataset;
 
     return `
@@ -327,12 +319,11 @@ export default {
           <div class="hero__ghost" aria-hidden="true" data-parallax="0.05">${medallionGhost()}</div>
           <div class="wrap hero__inner">
             <div class="hero__copy">
-              <p class="eyebrow" data-reveal style="--i:0">纹样提取 · 矢量化 · 平铺检查</p>
               <h1 class="display hero__title" data-reveal style="--i:1">
-                上传纹样，<br />导出<em>可编辑 SVG</em>。
+                上传纹样，<br />导出<em>可编辑 SVG</em>
               </h1>
               <p class="lead hero__lead" data-reveal style="--i:2">
-                自动去底、提线稿、生成矢量、检查平铺接缝；<br />参数可调，每步产物独立。
+                自动去底、提线稿、生成矢量、检查平铺接缝。
               </p>
               <div class="hero__actions" data-reveal style="--i:3">
                 <a class="btn btn--primary" href="#/workbench" data-magnetic>
@@ -351,7 +342,6 @@ export default {
                     latest
                       ? `<div class="specimen__single plate plate--grain">
                            ${thumbMarkup(latest, { eager: true })}
-                           <span class="specimen__seal" aria-hidden="true">样</span>
                          </div>`
                       : `<div class="specimen__single specimen__single--empty" role="img" aria-label="还没有可展示的成果">
                            <span class="mono">还没有成果</span>
@@ -363,37 +353,18 @@ export default {
                     <p class="specimen__name">${latest ? escapeHtml(kindLabel(latest.kind)) : "纹样工作台"}</p>
                     <p class="mono">${
                       latest
-                        ? `${shortId(latest.asset_id)} · ${escapeHtml(dimsOf(latest))} · ${escapeHtml(formatTime(latest.created_at, { withDate: true }))}`
+                        ? escapeHtml(dimsOf(latest))
                         : "上传后，最近的成果会显示在这里"
                     }</p>
                   </div>
                   <div class="specimen__caption-side">
                     ${latest ? `<span class="stamp stamp--${(latest.grade || "U").toLowerCase()}">${latest.grade || "—"}</span>` : ""}
-                    <span class="mono">${latest ? escapeHtml(kindLabel(latest.kind)) : "—"}</span>
                   </div>
                 </div>
               </div>
-
-              ${
-                job
-                  ? `<p class="hero__drag-hint">最近任务：${escapeHtml(jobKindLabel(job.kind))} · ${escapeHtml(jobStateLabel(job.state))} · ${escapeHtml(relativeTime(job.updated_at))}</p>`
-                  : `<p class="hero__drag-hint">上传或打开纹样后，可从任意一道工序继续</p>`
-              }
             </div>
           </div>
         </section>
-
-        <div class="ticker" aria-hidden="true">
-          <div class="ticker__track">
-            ${Array.from({ length: 2 }, () =>
-              STAGES.map(
-                (s) => `<span class="ticker__item"><span class="ticker__no">${s.n}</span>${s.title}<span class="ticker__dot">·</span></span>`
-              ).join("")
-            ).join("")}
-            <span class="ticker__item ticker__item--accent">可编辑 SVG<span class="ticker__dot">·</span></span>
-            <span class="ticker__item ticker__item--accent">每步独立产物<span class="ticker__dot">·</span></span>
-          </div>
-        </div>
 
         <section class="section section--tight">
           <div class="wrap">
@@ -405,8 +376,7 @@ export default {
           <div class="wrap">
             <header class="sec-head">
               <div class="sec-head__main">
-                <span class="sec-head__no">二 · 八道工序</span>
-                <h2 class="section-title">八步，从原图到矢量</h2>
+                <h2 class="section-title">八道工序</h2>
               </div>
               <p class="sec-head__aside">每一步都能单独重跑。</p>
             </header>
@@ -418,11 +388,10 @@ export default {
           <div class="wrap">
             <header class="sec-head">
               <div class="sec-head__main">
-                <span class="sec-head__no">三 · 成果</span>
                 <h2 class="section-title">最近成果</h2>
               </div>
               <p class="sec-head__aside">
-                ${dataset ? `共 ${dataset.total_images} 张图片 · A 级 ${dataset.grades?.A ?? 0} · 重复内容 ${dataset.duplicate_content_ids ?? 0}` : "正在读取数据"}
+                ${dataset ? `${dataset.total_images} 张图片 · A 级 ${dataset.grades?.A ?? 0}` : "正在读取数据"}
                 <a class="sec-head__link" href="#/library">去纹样库看全部 ${icon("arrow")}</a>
               </p>
             </header>
@@ -434,10 +403,9 @@ export default {
           <div class="wrap">
             <header class="sec-head">
               <div class="sec-head__main">
-                <span class="sec-head__no">四 · 云端</span>
-                <h2 class="section-title">云端生成</h2>
+                <h2 class="section-title">云端</h2>
               </div>
-              <p class="sec-head__aside">只在 03 修复、04 候选与 05 云端线稿使用云端。</p>
+              <p class="sec-head__aside">03 修复、04 候选与 05 云端线稿按次调用。</p>
             </header>
             ${renderGate()}
           </div>
@@ -446,15 +414,12 @@ export default {
         <section class="section section--closing">
           <div class="wrap wrap--tight">
             <div class="closing" data-reveal>
-              <p class="eyebrow">工作方式</p>
-              <h2 class="title closing__title">每一步都出独立产物。</h2>
-              <p class="copy">每道工序的结果是一个新资产；换参数重跑会生成新版本，旧版本仍留在会话与纹样库里。云端生成（03 / 04 / 05）每次调用前都要勾选确认。</p>
+              <h2 class="title closing__title">每一步都留独立产物</h2>
               <div class="closing__actions">
                 <button class="btn btn--primary" type="button" data-upload data-magnetic>
                   从上传纹样开始 ${icon("arrow")}
                 </button>
                 <a class="btn btn--ghost" href="#/notes">使用说明</a>
-                <span class="closing__meta">导出 SVG / PNG / ZIP</span>
               </div>
             </div>
           </div>

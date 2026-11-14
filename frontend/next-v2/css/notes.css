@@ -1,11 +1,15 @@
 /* notes.css — 本稿说明：评审叙事、参考来源、边界与接入路线。 */
 
 .notes-hero {
-  padding-block: clamp(44px, 6vw, 84px) clamp(28px, 4vw, 48px);
+  padding-block: clamp(36px, 5vw, 64px) clamp(12px, 2vw, 24px);
+}
+
+.notes-hero + .section {
+  padding-top: clamp(36px, 4vw, 58px);
 }
 
 .notes-hero__title {
-  margin-top: 16px;
+  margin-top: 0;
   max-width: 13em;
   text-wrap: balance;
 }

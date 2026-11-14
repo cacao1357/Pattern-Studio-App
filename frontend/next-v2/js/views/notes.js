@@ -32,24 +32,16 @@ export default {
     return `
       <div class="notes">
         <section class="notes-hero wrap wrap--tight">
-          <p class="eyebrow">八道工序 · 参数可改</p>
           <h1 class="title notes-hero__title">从原图到可编辑 SVG，八道工序各有产物。</h1>
           <p class="lead notes-hero__lead">
             上传后按工序推进，任意一步都可以重跑。
           </p>
-          <div class="notes-hero__chips">
-            <span class="chip chip--jade">${icon("check")}可编辑 SVG</span>
-            <span class="chip">${icon("flask")}参数可调</span>
-            <span class="chip">${icon("layers")}每步独立产物</span>
-            <span class="chip">${icon("download")}ZIP 打包导出</span>
-          </div>
         </section>
 
         <section class="section">
           <div class="wrap">
             <header class="sec-head">
               <div class="sec-head__main">
-                <span class="sec-head__no">一 · 八道工序</span>
                 <h2 class="section-title">每一步在做什么</h2>
               </div>
               <p class="sec-head__aside">不必按顺序走完，从任意一道工序都能进入。</p>
@@ -71,7 +63,6 @@ export default {
           <div class="wrap">
             <header class="sec-head">
               <div class="sec-head__main">
-                <span class="sec-head__no">二 · 入口与快捷键</span>
                 <h2 class="section-title">常用的几个动作</h2>
               </div>
               <p class="sec-head__aside">顶部「上传纹样」随时可用；工作台左栏的资产轨决定当前画布显示哪一个资产。</p>
@@ -107,7 +98,6 @@ export default {
           <div class="wrap">
             <header class="sec-head">
               <div class="sec-head__main">
-                <span class="sec-head__no">三 · 数据与云端</span>
                 <h2 class="section-title">数据在哪，哪里会花钱</h2>
               </div>
               <p class="sec-head__aside">下面这些可以直接核对。</p>
@@ -136,7 +126,6 @@ export default {
           <div class="wrap wrap--tight">
             <header class="sec-head">
               <div class="sec-head__main">
-                <span class="sec-head__no">四 · 故障排查</span>
                 <h2 class="section-title">遇到问题时先看这里</h2>
               </div>
               <p class="sec-head__aside">先看错误原因，再决定是否重试。</p>
