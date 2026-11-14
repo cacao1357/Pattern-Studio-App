@@ -1148,6 +1148,508 @@
   }
 }
 
+/* =============================================================================
+   按原图分组的索引（2026-11）：每组一张原图，组内保留全部处理版本。
+   仍使用 tokens.css 的变量与既有 .lb-chip / .lb-tag 组件。
+   ============================================================================= */
+
+.lb-patterns {
+  display: flex;
+  flex-direction: column;
+}
+
+.lb-pattern {
+  padding-block: 22px 24px;
+  border-bottom: 1px solid var(--line-1);
+}
+
+.lb-pattern:first-child {
+  padding-top: 8px;
+}
+
+.lb-pattern__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 18px;
+  align-items: start;
+  margin-bottom: 14px;
+}
+
+.lb-pattern__title {
+  min-width: 0;
+}
+
+.lb-pattern__name {
+  font-family: var(--font-serif);
+  font-size: var(--text-h3);
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+  color: var(--text-1);
+  word-break: break-word;
+}
+
+.lb-pattern__meta {
+  margin-top: 4px;
+  font-size: var(--text-min);
+  letter-spacing: 0.03em;
+  color: var(--text-4);
+  word-break: break-word;
+}
+
+.lb-pattern__cats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.lb-pattern__cat {
+  height: 26px;
+  font-size: var(--text-min);
+}
+
+.lb-pattern__uncat {
+  font-size: var(--text-label);
+  color: var(--text-4);
+}
+
+.lb-pattern__acts {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.lb-pattern__acts .btn {
+  --btn-h: 30px;
+  --btn-pad: 11px;
+  font-size: var(--text-label);
+}
+
+/* 组内网格 */
+.lb-assets {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lb-assetli {
+  min-width: 0;
+}
+
+.lb-asset {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: 100%;
+  text-align: left;
+  border-radius: var(--r-sm);
+}
+
+.lb-asset__plate {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  padding: 9px;
+  background: var(--paper-0);
+  border: 1px solid var(--paper-2);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-paper);
+  transition: transform var(--dur-3) var(--ease-emphasis), box-shadow var(--dur-3) var(--ease-out),
+    border-color var(--dur-2) var(--ease-out);
+}
+
+.lb-asset:hover .lb-asset__plate,
+.lb-asset:focus-visible .lb-asset__plate {
+  transform: translateY(-3px);
+  border-color: var(--paper-3);
+  box-shadow: var(--shadow-plate);
+}
+
+.lb-asset__img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 2px;
+}
+
+.lb-asset__grade {
+  position: absolute;
+  top: 11px;
+  right: 11px;
+  z-index: 3;
+}
+
+.lb-asset__grade .stamp {
+  background: var(--paper-0);
+}
+
+.lb-asset__hover {
+  position: absolute;
+  inset: 9px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 3px;
+  padding: 11px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, transparent 0%, var(--glass) 52%, var(--glass) 100%);
+  color: var(--text-1);
+  opacity: 0;
+  transform: translateY(5px);
+  pointer-events: none;
+  transition: opacity var(--dur-2) var(--ease-out), transform var(--dur-2) var(--ease-emphasis);
+}
+
+.lb-asset:hover .lb-asset__hover,
+.lb-asset:focus-visible .lb-asset__hover {
+  opacity: 1;
+  transform: none;
+}
+
+.lb-asset__hover-name {
+  font-family: var(--font-serif);
+  font-size: var(--text-body);
+  font-weight: 600;
+}
+
+.lb-asset__hover-row {
+  font-size: var(--text-min);
+  color: var(--text-2);
+}
+
+.lb-asset__hover-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: var(--text-min);
+  color: var(--cinnabar-hi);
+}
+
+.lb-asset__hover-cta .icon {
+  width: 13px;
+  height: 13px;
+}
+
+.lb-asset__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 8px;
+}
+
+.lb-asset__name {
+  font-size: var(--text-body);
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lb-asset__sub {
+  font-size: var(--text-min);
+  color: var(--text-4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lb-asset__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 4px;
+}
+
+/* 组内列表视图 */
+.lb-prows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line-1);
+}
+
+.lb-prowli + .lb-prowli {
+  border-top: 1px solid var(--line-1);
+}
+
+.lb-prow {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1.4fr) 44px minmax(0, 0.9fr) 100px 80px 92px;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 9px 6px;
+  text-align: left;
+  color: var(--text-2);
+  transition: background var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out);
+}
+
+.lb-prow:hover,
+.lb-prow:focus-visible {
+  background: var(--bg-1);
+  color: var(--text-1);
+}
+
+.lb-prow__thumb {
+  display: block;
+  width: 42px;
+  height: 42px;
+  padding: 3px;
+  background: var(--paper-0);
+  border: 1px solid var(--paper-2);
+  border-radius: var(--r-xs);
+}
+
+.lb-prow__img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.lb-prow__thumb .lb-media__ph {
+  gap: 0;
+}
+
+.lb-prow__thumb .lb-media__ph span {
+  display: none;
+}
+
+.lb-prow__name {
+  font-family: var(--font-serif);
+  font-size: var(--text-body);
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lb-prow__license,
+.lb-prow__dims,
+.lb-prow__bytes,
+.lb-prow__time {
+  font-size: var(--text-min);
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lb-prow__license.is-warn {
+  color: var(--gold);
+}
+
+/* 分类筛选与管理 */
+.lb-cats {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 13px;
+  border-top: 1px solid var(--line-1);
+}
+
+.lb-cats__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+
+.lb-cats__row .label {
+  margin-right: 4px;
+}
+
+.lb-cats__spacer {
+  flex: 1 1 auto;
+}
+
+.lb-cats__row .btn {
+  --btn-h: 30px;
+  --btn-pad: 11px;
+  font-size: var(--text-label);
+}
+
+.lb-cats__manage[aria-pressed="true"] {
+  border-color: var(--cinnabar-line);
+  color: var(--cinnabar-hi);
+}
+
+.lb-cats__error {
+  font-size: var(--text-label);
+  line-height: 1.7;
+  color: var(--gold);
+}
+
+.lb-cat-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.lb-cat-form__input {
+  width: min(300px, 100%);
+  height: 36px;
+}
+
+.lb-cats__manage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-sm);
+  background: var(--bg-1);
+}
+
+.lb-cat-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 8px;
+  align-items: center;
+  padding-block: 5px;
+}
+
+.lb-cat-row + .lb-cat-row {
+  border-top: 1px solid var(--line-1);
+}
+
+.lb-cat-row__name {
+  min-width: 0;
+  font-size: var(--text-body);
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lb-cat-row__rev {
+  font-size: var(--text-min);
+  color: var(--text-4);
+}
+
+.lb-cat-row .btn {
+  --btn-h: 28px;
+  --btn-pad: 10px;
+  font-size: var(--text-min);
+}
+
+/* 归类抽屉 */
+.lb-assign {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 16px 0 20px;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line-1);
+}
+
+.lb-assign__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--line-1);
+  font-size: var(--text-body);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.lb-assign__row input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--cinnabar);
+  flex: none;
+}
+
+.lb-assign__rev {
+  margin-left: auto;
+  font-size: var(--text-min);
+  color: var(--text-4);
+}
+
+.lb-drawer__version {
+  height: 28px;
+  font-size: var(--text-min);
+}
+
+/* 分组视图的响应式 */
+@media (max-width: 1100px) {
+  .lb-pattern__head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .lb-pattern__cats,
+  .lb-pattern__acts {
+    grid-column: 1;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 900px) {
+  .lb-assets {
+    grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+    gap: 12px;
+  }
+  .lb-prow {
+    grid-template-columns: 44px minmax(0, 1.4fr) 42px minmax(0, 1fr) 88px 78px;
+  }
+  .lb-prow__time {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .lb-pattern {
+    padding-block: 18px;
+  }
+  .lb-pattern__acts {
+    width: 100%;
+  }
+  .lb-pattern__acts .btn {
+    flex: 1 1 auto;
+  }
+  .lb-assets {
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+    gap: 10px;
+  }
+  .lb-cat-row {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+  .lb-cat-row__rev {
+    display: none;
+  }
+  .lb-prow {
+    grid-template-columns: 40px minmax(0, 1fr) 40px 80px;
+    gap: 8px;
+  }
+  .lb-prow__license,
+  .lb-prow__bytes {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lb-asset__plate,
+  .lb-asset__hover {
+    transition: none;
+  }
+  .lb-asset:hover .lb-asset__plate {
+    transform: none;
+  }
+}
+
 /* ------------------------------------------------------------------ 动效降级 */
 
 @media (prefers-reduced-motion: reduce) {

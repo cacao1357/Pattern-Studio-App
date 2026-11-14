@@ -20,6 +20,7 @@ import { store } from "./store.js";
 import { kindLabel, shortId, escapeHtml } from "./format.js";
 import { initView } from "./motion.js";
 import homeView from "./views/home.js";
+import { initProcessingUI, openProcessingWindow } from "./views/processing-panel.js";
 
 const BRAND = "纹样工作台";
 
@@ -218,7 +219,7 @@ function applyParams(params, route) {
   if (tile === "2x2" || tile === "3x3") state.tile = tile;
   const open = params.get("open");
   // 只有纹样库的 ?open= 才应该打开档案抽屉；其它路由上带这个参数不能留给下一次进库。
-  if (open && route === "library") store.library.openId = open;
+  if (open && route === "library") store.patterns.openId = open;
 }
 
 async function resolveView(route) {
@@ -436,6 +437,7 @@ const COMMANDS = [
   { group: "操作", label: "平铺 2 × 2", hint: "", icon: "tile", run: () => api.go("workbench", { query: { stage: 8, tile: "2x2" } }) },
   { group: "操作", label: "平铺 3 × 3", hint: "", icon: "tile", run: () => api.go("workbench", { query: { stage: 8, tile: "3x3" } }) },
   { group: "操作", label: "打包导出", hint: "", icon: "download", run: () => api.go("workbench", { query: { stage: 8 } }) },
+  { group: "操作", label: "处理批次与预设", hint: "", icon: "play", run: () => openProcessingWindow() },
 ];
 
 let cmdkItems = [];
@@ -749,6 +751,8 @@ function cycleAsset(delta) {
 export function boot() {
   injectIcons();
   bindShell();
+  // 批次浮窗与预设入口挂在外壳上：换页不卸载，刷新后从服务端批次列表恢复。
+  initProcessingUI(api);
   store.subscribe(() => {
     renderStatusbar();
     renderServiceChip();

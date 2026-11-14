@@ -30,6 +30,35 @@ const CODE_MESSAGES = {
   INVALID_REQUEST: "请求参数不符合接口约定。",
   INVALID_SETTINGS: "设置校验未通过，请检查填写内容。",
   STALE_SETTINGS: "设置已被其他操作更新，请刷新后重新保存。",
+  STALE_REVISION: "这份记录已被其他操作更新，请重新读取后再保存。",
+  CATEGORY_EXISTS: "已经有同名的题材分类，请换一个名字。",
+  CATEGORY_LIMIT: "题材分类最多 200 个，请先删除不用的分类。",
+  CATEGORY_NOT_FOUND: "找不到这个题材分类，可能已被删除。",
+  INVALID_CATEGORY_NAME: "分类名需要 1–60 个字符，且不能包含控制字符。",
+  IMAGE_NOT_FOUND: "没有找到这张原图，可能已被移除。",
+  EXPORT_SIZE_LIMIT: "所选文件超过 128 MiB 导出上限，请少选几个。",
+  EXPORT_LAYOUT_INVALID: "导出目录布局不受支持。",
+  NESTED_EXPORT: "不能把已有的 ZIP 再打包一次，请只选图片或 SVG。",
+  LICENSE_REVIEW_REQUIRED: "所选资产里有未登记的许可证，请先确认许可提示再导出。",
+  BATCH_CLOUD_CONSENT_REQUIRED: "云端预设需要同时确认本批次上传与可能费用，两项都不默认勾选。",
+  BATCH_INPUT_KIND: "所选预设不能处理这个资产类型，请换一个输入版本。",
+  BATCH_IMAGE_REQUIRED: "请选择属于已登记原图的输入资产。",
+  BATCH_RESUME_ASSET_MISMATCH: "这个结果不是当前版本的后代，或类型不符合这一步；请在工作台生成正确结果后再选。",
+  BATCH_ITEM_NOT_WAITING: "这张图当前没有待确认的人工步骤，请刷新批次。",
+  BATCH_ITEM_NOT_FOUND: "找不到这张图的批次项，请刷新批次。",
+  BATCH_NOT_FOUND: "找不到这个批次，可能已被移除。",
+  BATCH_OUTPUT_MISSING: "任务完成但没有发布预期产物，请检查任务记录。",
+  BATCH_STEP_FAILED: "批次步骤失败，不会自动重试。",
+  BATCH_STEP_UNSUPPORTED: "预设里有当前服务不支持的步骤。",
+  BATCH_RECIPE_INVALID: "预设路线与步骤不匹配，请重新保存预设。",
+  BATCH_PRESET_INVALID: "预设参数未通过校验，请检查后重新保存。",
+  PRESET_NOT_FOUND: "找不到这个流程预设。",
+  BUILTIN_PRESET: "内置预设不能删除；可以复制或修改。",
+  INVALID_PRESET_NAME: "预设名需要 1–80 个字符。",
+  IDEMPOTENCY_CONFLICT: "提交标识冲突，请重新发起。",
+  QUEUE_FULL: "本机任务队列已满，批次会等待空位后继续，不算失败。",
+  PROVIDER_OUTCOME_UNKNOWN: "云端结果未知：不会自动重试，请先到任务记录核对。",
+  CANCEL_REQUIRES_RECONCILIATION: "云端调用需要先核对结果；取消会等待终态，不能撤回已发送的请求。",
   WORKER_BUSY: "本机处理队列正在忙，请等当前任务结束后再试。",
   WORKER_MEMORY_LIMIT: "本机处理达到内存上限，请换更小的图或降低矢量化细节。",
   WORKER_TIMEOUT: "本机处理超时，请换更小的图或稍后重试。",
@@ -233,6 +262,26 @@ export const api = {
     for (const kind of kinds) if (kind) query.append("kind", kind);
     return request(`/assets?${query}`, rest);
   },
+
+  /* --- 纹样分组与手动分类（接口合同见 docs/batch-workbench-contract.md） --- */
+  patterns: ({ limit = 20, cursor = "", q = "", kind = "", categoryId = "", ...rest } = {}) => {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (cursor) query.set("cursor", cursor);
+    if (q) query.set("q", q);
+    if (kind) query.set("kind", kind);
+    if (categoryId) query.set("category_id", categoryId);
+    return request(`/patterns?${query}`, rest);
+  },
+  pattern: (imageId, options) => request(`/patterns/${enc(imageId)}`, options),
+  patternCategories: (options) => request("/pattern-categories", options),
+  createPatternCategory: (name) =>
+    request("/pattern-categories", { method: "POST", json: { name } }),
+  renamePatternCategory: (categoryId, payload) =>
+    request(`/pattern-categories/${enc(categoryId)}`, { method: "PUT", json: payload }),
+  deletePatternCategory: (categoryId, revision) =>
+    request(`/pattern-categories/${enc(categoryId)}?revision=${enc(revision)}`, { method: "DELETE" }),
+  setPatternCategories: (imageId, payload) =>
+    request(`/patterns/${enc(imageId)}/categories`, { method: "PUT", json: payload }),
   asset: (assetId, options) => request(`/assets/${enc(assetId)}`, options),
   assetPreviewUrl: (assetId, stamp = "") =>
     `${BASE}/assets/${enc(assetId)}/preview${stamp ? `?v=${enc(stamp)}` : ""}`,
@@ -307,6 +356,34 @@ export const api = {
       json: payload,
       headers: { "Idempotency-Key": idempotencyKey() },
     }),
+
+  /* --- 流程预设与持久批次（接口合同见 docs/batch-workbench-contract.md） --- */
+  workflowPresets: (options) => request("/workflow-presets", options),
+  createWorkflowPreset: (payload) =>
+    request("/workflow-presets", { method: "POST", json: payload }),
+  updateWorkflowPreset: (presetId, payload) =>
+    request(`/workflow-presets/${enc(presetId)}`, { method: "PUT", json: payload }),
+  deleteWorkflowPreset: (presetId, revision) =>
+    request(`/workflow-presets/${enc(presetId)}?revision=${enc(revision)}`, { method: "DELETE" }),
+  processingBatches: ({ limit = 20, cursor = "", ...rest } = {}) => {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (cursor) query.set("cursor", cursor);
+    return request(`/processing-batches?${query}`, rest);
+  },
+  processingBatch: (batchId, options) => request(`/processing-batches/${enc(batchId)}`, options),
+  createProcessingBatch: (payload) =>
+    request("/processing-batches", {
+      method: "POST",
+      json: payload,
+      headers: { "Idempotency-Key": idempotencyKey() },
+    }),
+  resumeProcessingItem: (batchId, itemId, payload) =>
+    request(`/processing-batches/${enc(batchId)}/items/${enc(itemId)}/resume`, {
+      method: "POST",
+      json: payload,
+    }),
+  cancelProcessingBatch: (batchId, payload) =>
+    request(`/processing-batches/${enc(batchId)}/cancel`, { method: "POST", json: payload }),
 
   /* --- 平铺与数据集 --- */
   tilePreview: (payload) =>

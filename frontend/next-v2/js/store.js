@@ -91,18 +91,29 @@ export const store = {
   datasetLoaded: false,
   datasetLoadedAt: 0,
   session: blankSession(),
-  library: {
+  /**
+   * 纹样库按原图分组的分页状态（GET /api/v1/patterns）。
+   * items 是「原图组」而不是单个资产；筛选与分页都在服务端完成，翻页后
+   * 仍只有已载入的组会被选中/导出。openId 供 ?open= 深链在列表载入后打开档案。
+   */
+  patterns: {
     items: [],
     cursor: "",
     nextCursor: null,
     loading: false,
     error: "",
     q: "",
-    kinds: [],
+    kind: "",
+    categoryId: "",
+    /** 评级/排序/视图只看已载入的组，不触发回源；与旧的纹样库行为一致。 */
     grade: "全部",
     sort: "最新",
     view: "grid",
-    totalHint: 0,
+    categories: [],
+    categoriesLoading: false,
+    categoriesError: "",
+    loadedAt: 0,
+    openId: "",
   },
 
   subscribe(listener) {
@@ -504,54 +515,197 @@ export const store = {
     }
   },
 
-  /* ------------------------------------------------------------ 纹样库 */
+  /* ------------------------------------------------------------ 纹样库（按原图分组） */
 
-  async loadLibrary({ append = false } = {}) {
-    const lib = this.library;
-    if (lib.loading) return;
-    lib.loading = true;
-    lib.error = "";
-    emit("library-loading");
+  async loadPatterns({ append = false } = {}) {
+    const state = this.patterns;
+    // 始终以最新一次筛选为准：新请求立刻取消旧请求，而不是因为 loading
+    // 直接返回；这样搜索/分类快速切换时旧响应不会覆盖新条件。
+    const seq = ++patternSeq;
+    patternAbort?.abort?.();
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    patternAbort = controller;
+    state.loading = true;
+    state.error = "";
+    emit("patterns-loading");
     try {
-      const page = await api.assets({
-        limit: 50,
-        cursor: append ? lib.cursor : "",
-        q: lib.q,
-        kinds: lib.kinds,
-      });
-      const items = append ? [...lib.items, ...(page.items || [])] : page.items || [];
-      lib.items = this.filterAndSort(items);
-      lib.cursor = page.next_cursor || "";
-      lib.nextCursor = page.next_cursor || null;
-      lib.totalHint = lib.items.length;
+      const page = await api.patterns(
+        {
+          limit: PATTERN_PAGE_SIZE,
+          cursor: append ? state.cursor : "",
+          q: state.q,
+          kind: state.kind,
+          categoryId: state.categoryId,
+        },
+        { signal: controller?.signal }
+      );
+      if (seq !== patternSeq) return null;
+      const items = (page?.items || []).filter((item) => item && item.image_id);
+      state.items = append ? [...state.items, ...items] : items;
+      state.cursor = page?.next_cursor || "";
+      state.nextCursor = page?.next_cursor || null;
+      state.loadedAt = Date.now();
+      return page;
     } catch (error) {
-      lib.error = error?.message || "纹样库读取失败。";
-      if (!append) lib.items = [];
+      if (seq !== patternSeq) return null;
+      // 被新筛选主动取消的旧请求不写错误，交给最新请求的结果。
+      if (error?.message === "请求已取消。") return null;
+      state.error = error?.message || "纹样库读取失败。";
+      if (!append) {
+        state.items = [];
+        state.cursor = "";
+        state.nextCursor = null;
+      }
+      return null;
     } finally {
-      lib.loading = false;
-      emit("library");
+      if (seq === patternSeq) {
+        state.loading = false;
+        patternAbort = null;
+        emit("patterns");
+      }
     }
   },
 
-  filterAndSort(items) {
-    const lib = this.library;
-    let list = items.slice();
-    if (lib.grade !== "全部") list = list.filter((asset) => (asset.grade || "U") === lib.grade);
-    const order = { A: 0, B: 1, C: 2, U: 3 };
-    if (lib.sort === "评级") {
-      list.sort((a, b) => (order[a.grade] ?? 4) - (order[b.grade] ?? 4) || String(b.created_at).localeCompare(String(a.created_at)));
-    } else if (lib.sort === "最早") {
-      list.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
-    } else if (lib.sort === "类型") {
-      list.sort((a, b) => String(a.kind).localeCompare(String(b.kind)) || String(b.created_at).localeCompare(String(a.created_at)));
+  /** 筛选变化时清掉已载入分页；调用方随后用 loadPatterns({append:false}) 回源。 */
+  setPatternQuery(partial) {
+    const state = this.patterns;
+    const before = [state.q, state.kind, state.categoryId].join("\u0000");
+    Object.assign(state, partial);
+    const after = [state.q, state.kind, state.categoryId].join("\u0000");
+    if (before !== after) {
+      state.cursor = "";
+      state.nextCursor = null;
+      state.loading = false;
+      patternSeq += 1;
+      patternAbort?.abort?.();
+      patternAbort = null;
     }
-    return list;
+    emit("patterns-query");
   },
 
-  setLibraryQuery(partial) {
-    Object.assign(this.library, partial);
-    emit("library-query");
+  resetPatterns() {
+    patternSeq += 1;
+    patternAbort?.abort?.();
+    patternAbort = null;
+    const state = this.patterns;
+    state.items = [];
+    state.cursor = "";
+    state.nextCursor = null;
+    state.loading = false;
+    state.error = "";
+    emit("patterns");
+  },
+
+  async loadPatternCategories() {
+    const state = this.patterns;
+    if (state.categoriesLoading) return state.categories;
+    state.categoriesLoading = true;
+    state.categoriesError = "";
+    emit("pattern-categories-loading");
+    try {
+      const page = await api.patternCategories();
+      state.categories = sortCategories(page?.items || []);
+      return state.categories;
+    } catch (error) {
+      state.categoriesError = error?.message || "题材分类读取失败。";
+      return state.categories;
+    } finally {
+      state.categoriesLoading = false;
+      emit("pattern-categories");
+    }
+  },
+
+  categoryById(categoryId) {
+    return this.patterns.categories.find((entry) => entry.category_id === categoryId) || null;
+  },
+
+  patternById(imageId) {
+    return this.patterns.items.find((item) => item.image_id === imageId) || null;
+  },
+
+  replacePattern(item) {
+    if (!item?.image_id) return null;
+    const index = this.patterns.items.findIndex((entry) => entry.image_id === item.image_id);
+    if (index < 0) return null;
+    this.patterns.items[index] = item;
+    emit("patterns");
+    return item;
+  },
+
+  async createPatternCategory(name) {
+    const created = await api.createPatternCategory(name);
+    this.patterns.categories = sortCategories([...this.patterns.categories, created]);
+    emit("pattern-categories");
+    return created;
+  },
+
+  async renamePatternCategory(categoryId, name, revision) {
+    const updated = await api.renamePatternCategory(categoryId, { name, revision });
+    const state = this.patterns;
+    state.categories = sortCategories(
+      state.categories.map((entry) => (entry.category_id === categoryId ? { ...entry, ...updated } : entry))
+    );
+    // 组内 categories 是快照：重命名后同步，避免列表里继续显示旧名字。
+    state.items = state.items.map((item) => ({
+      ...item,
+      categories: (item.categories || []).map((entry) =>
+        entry.category_id === categoryId ? { ...entry, name: updated.name, revision: updated.revision } : entry
+      ),
+    }));
+    emit("pattern-categories");
+    return updated;
+  },
+
+  /** 删除分类只解除归类：纹样组、资产与 revision 之外的内容保持不动。 */
+  async deletePatternCategory(categoryId, revision) {
+    const result = await api.deletePatternCategory(categoryId, revision);
+    const state = this.patterns;
+    state.categories = state.categories.filter((entry) => entry.category_id !== categoryId);
+    if (state.categoryId === categoryId) {
+      state.categoryId = "";
+      state.cursor = "";
+      state.nextCursor = null;
+    }
+    state.items = state.items.map((item) => ({
+      ...item,
+      category_ids: (item.category_ids || []).filter((id) => id !== categoryId),
+      categories: (item.categories || []).filter((entry) => entry.category_id !== categoryId),
+    }));
+    emit("pattern-categories");
+    return result;
+  },
+
+  /** 整组替换分类；revision 过期由调用方重新读取该组后重试。 */
+  async setPatternCategoriesFor(imageId, categoryIds, revision) {
+    const result = await api.setPatternCategories(imageId, {
+      category_ids: [...categoryIds],
+      revision,
+    });
+    const item = this.patternById(imageId);
+    if (item) {
+      const byId = new Map(this.patterns.categories.map((entry) => [entry.category_id, entry]));
+      item.category_ids = [...(result.category_ids || [])];
+      item.categories = item.category_ids
+        .map((id) => byId.get(id))
+        .filter(Boolean)
+        .map((entry) => ({ ...entry }));
+      item.revision = Number(result.revision) || item.revision || 0;
+    }
+    emit("patterns");
+    return result;
   },
 };
+
+const PATTERN_PAGE_SIZE = 20;
+/* 纹样库请求序号与取消句柄：旧响应不得覆盖新的搜索/筛选结果。 */
+let patternSeq = 0;
+let patternAbort = null;
+
+function sortCategories(items) {
+  return [...items].sort((a, b) =>
+    String(a?.name || "").localeCompare(String(b?.name || ""), "zh-Hans-CN") ||
+    String(a?.category_id || "").localeCompare(String(b?.category_id || ""))
+  );
+}
 
 export { ApiError };

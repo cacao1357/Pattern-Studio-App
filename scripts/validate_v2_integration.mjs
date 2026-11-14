@@ -17,7 +17,8 @@ const checks = [];
 const archiveOnly = process.argv.includes("--archive-only");
 const sessionOnly = process.argv.includes("--session-only");
 const layoutOnly = process.argv.includes("--layout-only");
-const pagesOnly = layoutOnly || process.argv.includes("--pages-only");
+const batchOnly = process.argv.includes("--batch-only");
+const pagesOnly = batchOnly || layoutOnly || process.argv.includes("--pages-only");
 let fixture, browser, socket;
 
 function firstLine(child, stream, matcher) {
@@ -101,7 +102,8 @@ try {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     const diagnostic = await evaluate("({stage:document.querySelector('.wb')?.dataset.stage,error:document.querySelector('.wb-error')?.textContent,notice:document.querySelector('.wb-note')?.textContent,layers:[...document.querySelectorAll('[data-act=layer]')].map(e=>({id:e.dataset.id,on:e.getAttribute('aria-pressed')})),compose:document.querySelector('[data-act=compose-layers]')?.outerHTML})");
-    throw new Error("UI timeout: " + label + " " + JSON.stringify({ diagnostic, errors, requests: requests.slice(-12) }));
+    const batchDiagnostic = batchOnly ? await evaluate("({error:document.querySelector('.pf-error')?.textContent,run:document.querySelector('.pf-run')?.innerText?.slice(-1400)})") : undefined;
+    throw new Error("UI timeout: " + label + " " + JSON.stringify({ diagnostic, batchDiagnostic, errors, requests: requests.slice(-12) }));
   };
   const check = (label) => { checks.push(label); console.log("PASS " + label); };
   const click = (id) => evaluate(`document.getElementById(${JSON.stringify(id)}).click()`);
@@ -109,6 +111,108 @@ try {
 
 
   await call("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  if (batchOnly) {
+    await call("Page.navigate", { url: info.url + "/#/workbench?asset=" + info.input_asset_id + "&stage=1&v=2" });
+    await waitFor("Boolean(document.querySelector('[data-act=batch-import]'))", "batch workbench entry");
+    const imported = await evaluate(`(async()=>{
+      const {importFiles}=await import('/js/batch.js');
+      const {app}=await import('/js/app.js');
+      const files=[];
+      for(let i=0;i<3;i++){
+        const canvas=document.createElement('canvas');canvas.width=64;canvas.height=64;
+        const c=canvas.getContext('2d');c.fillStyle='white';c.fillRect(0,0,64,64);
+        c.strokeStyle='black';c.lineWidth=4;c.strokeRect(8+i,8,45-i,45);
+        const blob=await new Promise(r=>canvas.toBlob(r,'image/png'));
+        files.push(new File([blob],'batch-smoke-'+i+'.png',{type:'image/png',lastModified:100+i}));
+      }
+      files.push(new File(['invalid'],'unsupported.txt',{type:'text/plain'}));
+      return importFiles(files,{onChange:()=>app.render()});
+    })()`);
+    assert.equal(imported.done, 3);
+    assert.equal(imported.skipped, 1);
+    await waitFor("document.querySelectorAll('[data-pattern]').length>=4", "separate original groups");
+    const groupIds = await evaluate("[...document.querySelectorAll('[data-pattern]')].map(e=>e.dataset.pattern)");
+    assert.equal(new Set(groupIds).size, groupIds.length);
+    assert.equal(await evaluate("getComputedStyle(document.querySelector('.wb-steps'),'::before').content"), "none");
+    assert.notEqual(await evaluate("getComputedStyle(document.querySelector('.wb-step')).backgroundColor"), "rgba(0, 0, 0, 0)");
+    check("batch import preserves three originals, reports unsupported file and renders separate pattern groups");
+    await writeFile(path.join(output,"batch-workbench.png"),Buffer.from((await call("Page.captureScreenshot",{format:"png"})).data,"base64"));
+
+    const batchLayoutFailures = [];
+    for (const [width,height] of [[1440,900],[1080,720],[390,844]]) {
+      await call("Emulation.setDeviceMetricsOverride",{width,height,deviceScaleFactor:1,mobile:width<820});
+      await new Promise(r=>setTimeout(r,200));
+      const geometry=await evaluate(`(()=>{
+        const scroller=document.querySelector('.wb-groups');
+        const first=scroller.querySelector('[data-pattern]');
+        const copies=Array.from({length:25},()=>first.cloneNode(true));scroller.append(...copies);
+        scroller.scrollTop=scroller.scrollHeight;
+        const result={vertical:document.documentElement.scrollHeight>innerHeight+1,
+          horizontal:document.documentElement.scrollWidth>innerWidth+1,scrolls:scroller.scrollTop>0};
+        copies.forEach(e=>e.remove());scroller.scrollTop=0;return result;
+      })()`);
+      if (geometry.vertical || geometry.horizontal || !geometry.scrolls) batchLayoutFailures.push({width,height,...geometry});
+    }
+    await call("Emulation.setDeviceMetricsOverride",{width:1440,height:900,deviceScaleFactor:1,mobile:false});
+    if (!batchLayoutFailures.length) check("pattern column scrolls internally while the page remains fixed at desktop and mobile sizes");
+
+    await evaluate("document.querySelector('[data-act=open-export]').click()");
+    await waitFor("Boolean(document.querySelector('[data-bx-all]'))", "export modal");
+    await evaluate("document.querySelector('[data-bx-none]').click();document.querySelector('[data-bx-kind=original]').click()");
+    const exportChoice = await evaluate("import('/js/views/batch-export.js').then(m=>m.exportModalSnapshot())");
+    assert.equal(exportChoice.stats.count, groupIds.length);
+    await evaluate("document.querySelector('[data-bx-zoom]').click()");
+    await waitFor("Boolean(document.querySelector('[data-bx-zoom-close]'))", "export enlarged preview");
+    await evaluate("document.querySelector('[data-bx-zoom-close]').click();document.querySelector('[data-bx-license]').click();document.querySelector('[data-bx-submit]').click()");
+    await waitFor("Boolean(document.querySelector('[data-bx-download]'))", "real batch ZIP",30000);
+    assert.ok(await evaluate("fetch(document.querySelector('[data-bx-download]').href).then(async r=>r.ok&&(await r.blob()).size>0)"));
+    await writeFile(path.join(output,"batch-export.png"),Buffer.from((await call("Page.captureScreenshot",{format:"png"})).data,"base64"));
+    await evaluate("document.querySelector('[data-bx-close]').click()");
+    check("export modal selects a common processing type, enlarges thumbnails and produces a real ZIP");
+
+    await evaluate("location.hash='#/library'");
+    await waitFor("document.querySelector('[data-act=assign]') && document.querySelector('[data-act=process-batch]')", "grouped library");
+    for (const name of ["批量验收","多重归类"]) {
+      await evaluate("document.querySelector('[data-act=cat-new]').click()");
+      await fill("lb-cat-input",name);
+      await evaluate("document.querySelector('[data-act=cat-save]').click()");
+      await waitFor(`document.querySelector('[data-act=cat-filter]') && document.querySelector('.lb-cats').textContent.includes(${JSON.stringify(name)})`, "create category "+name);
+    }
+    await evaluate("document.querySelector('[data-act=assign]').click()");
+    await waitFor("document.querySelectorAll('[data-assign]').length===2", "many-to-many category assignment");
+    await evaluate("document.querySelectorAll('[data-assign]').forEach(e=>e.click());document.querySelector('[data-assign-save]').click()");
+    await waitFor("!document.querySelector('[data-assign-save]')", "category save");
+    const assignment=await evaluate("fetch('/api/v1/patterns').then(r=>r.json()).then(p=>p.items.find(g=>g.category_ids.length===2))");
+    assert.ok(assignment);
+    check("grouped library creates manual categories and assigns one original to multiple categories");
+
+    await evaluate("document.querySelector('[data-act=process-batch]').click()");
+    await waitFor("Boolean(document.querySelector('[data-pf-run-preset]'))", "batch preset picker");
+    await evaluate(`(()=>{const select=document.querySelector('[data-pf-run-preset]');
+      const option=[...select.options].find(o=>o.textContent.includes('颜色提取'));
+      select.value=option.value;select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+    await evaluate(`(()=>{const box=[...document.querySelectorAll('[data-pf-image]')].find(e=>e.closest('label').textContent.includes('synthetic-pattern'));
+      if(box?.checked)box.click();})()`);
+    await waitFor("document.querySelector('[data-pf-run-start]')?.disabled===false", "local preset ready");
+    assert.equal(await evaluate("document.querySelectorAll('[data-pf-consent-upload]').length"),0);
+    await evaluate("document.querySelector('[data-pf-run-start]').click()");
+    await waitFor("import('/js/processing.js').then(m=>Boolean(m.processing.detail?.batch_id))", "batch admitted");
+    const batchId=await evaluate("import('/js/processing.js').then(m=>m.processing.detail.batch_id)");
+    await waitFor("Boolean(document.querySelector('[data-pf-collapse]'))", "progress floating window");
+    await evaluate("document.querySelector('[data-pf-collapse]').click()");
+    await waitFor(`fetch('/api/v1/processing-batches/'+${JSON.stringify(batchId)}).then(r=>r.json()).then(b=>b.state==='succeeded')`, "real batch finishes with collapsed UI",60000);
+    await evaluate("window.__batchBeforeReload=true");
+    await call("Page.reload");
+    await waitFor("window.__batchBeforeReload!==true && Boolean(document.querySelector('#pf-dock:not([hidden])'))", "batch recovery after reload");
+    await evaluate("document.querySelector('#pf-dock').click()");
+    await waitFor("Boolean(document.querySelector('[data-pf-export-results]'))", "restored batch result actions");
+    await evaluate("document.querySelector('[data-pf-export-results]').click()");
+    await waitFor("Boolean(document.querySelector('[data-bx-kind=svg]'))", "shared export of SVG results");
+    await writeFile(path.join(output,"batch-results.png"),Buffer.from((await call("Page.captureScreenshot",{format:"png"})).data,"base64"));
+    await evaluate("document.querySelector('[data-bx-close]').click();document.querySelector('[data-pf-close-window]')?.click()");
+    check("saved preset runs a local batch, survives collapsed progress and reload, and reuses the SVG export picker");
+    assert.deepEqual(batchLayoutFailures,[],"batch layout must scroll only inside its regions");
+  }
   let model, uploaded, isolated;
   if (!archiveOnly && !pagesOnly) {
   await call("Page.navigate", { url: info.url + "/#/workbench?asset=" + info.input_asset_id + "&stage=3" });
@@ -219,7 +323,7 @@ try {
   await waitFor("document.querySelector('[data-act=run-model-lineart]')", "narrow model route");
   await writeFile(path.join(output,"workbench-narrow.png"),Buffer.from((await call("Page.captureScreenshot", {format:"png"})).data,"base64"));
   }
-  if (pagesOnly) {
+  if (pagesOnly && !batchOnly) {
     let pageCase=0;
     const navigatePage=async (url)=>{
       const freshUrl=new URL(url);

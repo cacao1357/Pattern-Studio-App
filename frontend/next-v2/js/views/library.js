@@ -1,12 +1,16 @@
 /* =============================================================================
-   views/library.js — 纹样库：本机 /api/v1/assets 的真实资产索引。
-   数据层：store.library（分页/搜索/类型/评级/排序/视图）+ store.dataset（统计）。
+   views/library.js — 纹样库：按原图 image_id 分组的真实资产索引。
+   数据层：store.patterns（GET /api/v1/patterns 服务端分页 + 手动分类）
+           store.dataset（数据集统计，保持原有统计条）。
    交互约定：
-   - 搜索、类型变化走服务端（q / kind 参数），250ms 防抖；
-   - 评级与排序只对已载入项做客户端过滤/排序，不发请求；
-   - 结果体局部重绘，输入框与焦点不被整页重绘打断；
-   - ?open=<assetId> 深链在列表载入后打开档案抽屉，并用 replaceState 清掉 open；
-   - 预览 / 下载 / 在工作台打开都直接走本机服务，不写浏览器存储、不请求外链。
+   - 搜索 / 类型 / 题材走服务端（q / kind / category_id），250ms 防抖；
+     快速切换以最新条件为准，旧请求由 store 取消，慢响应不会覆盖新结果。
+   - 评级 / 组内排序 / 网格-列表视图只作用于**已载入的组**，不回源；
+     分页继续使用 next_cursor，不把「已载入」说成「全库」。
+   - 分类可新建 / 重命名 / 删除；一个原图组可属于多个分类；删除分类只解除归类，
+     不删除原图或任何版本。
+   - ?open=<assetId> 深链在列表载入后打开档案抽屉，并用 replaceState 清掉 open。
+   - 预览 / 下载 / 在工作台打开继续直接走本机服务，不写浏览器存储、不请求外链。
    ============================================================================= */
 
 import { api as http } from "../api.js";
@@ -26,10 +30,12 @@ import {
   shortId,
   sourceLabel,
 } from "../format.js";
+import { openBatchExport } from "./batch-export.js";
+import { openRunDialog } from "./processing-panel.js";
 
 /* ---------- 常量 ---------- */
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE = 250;
 
 const SORTS = ["最新", "最早", "评级", "类型"];
@@ -39,63 +45,98 @@ const VIEWS = [
   ["list", "列表", "list"],
 ];
 
-/** 类型筛选 → 后端 kind 值（全部为空数组，由服务端返回所有类型） */
+/** 处理类型筛选 → 后端 kind 精确值（空字符串表示全部） */
 const KIND_FILTERS = [
-  { label: "全部", kinds: [] },
-  { label: "原图", kinds: ["original", "normalized_input", "crop", "cropped", "working_copy", "enhanced"] },
-  { label: "线稿", kinds: ["lineart", "contour_line_art"] },
-  { label: "矢量", kinds: ["svg"] },
-  { label: "透明 PNG", kinds: ["transparent_png"] },
-  { label: "蒙版", kinds: ["foreground_mask"] },
-  { label: "平铺", kinds: ["tile_preview"] },
+  { label: "全部", kind: "" },
+  { label: "原图", kind: "original" },
+  { label: "规范输入", kind: "normalized_input" },
+  { label: "裁切", kind: "cropped" },
+  { label: "线稿", kind: "lineart" },
+  { label: "透明 PNG", kind: "transparent_png" },
+  { label: "矢量 SVG", kind: "svg" },
+  { label: "平铺", kind: "tile_preview" },
 ];
 
 const ARCHIVE_KINDS = new Set(["export", "archive", "zip"]);
 const SVG_KINDS = new Set(["svg", "monochrome_svg", "color_svg"]);
+const GRADE_ORDER = { A: 0, B: 1, C: 2, U: 3 };
 
 /* ---------- 视图内状态 ---------- */
 
-/** 已载入的原始资产（服务端顺序：新 → 旧）；评级/排序只作用于这份副本 */
-let rawItems = [];
-let hasLoaded = false;
-let busy = false;
-let queued = null;
-/** 当前挂载上下文：{ page, api } */
 let ctx = null;
 let searchTimer = 0;
 let composing = false;
+/** 结果绘制序号：旧请求即使晚到也不能把新筛选的结果盖回去。 */
+let paintSeq = 0;
+let catManage = false;
+/** { mode: "create" | "rename", id } */
+let catForm = null;
+let catDeletePending = "";
+let catDeleteTimer = 0;
 
 /* ---------- 小工具 ---------- */
 
-const library = () => store.library;
+const patterns = () => store.patterns;
+const loaded = () => patterns().loadedAt > 0;
 
 const prefersReduced = () =>
   typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-const sameKinds = (a = [], b = []) => a.length === b.length && a.every((kind, index) => kind === b[index]);
-
-function activeKindFilter() {
-  return KIND_FILTERS.find((filter) => sameKinds(filter.kinds, library().kinds || [])) || KIND_FILTERS[0];
-}
+const activeKind = () => KIND_FILTERS.find((entry) => entry.kind === (patterns().kind || "")) || KIND_FILTERS[0];
 
 function isFiltered() {
-  const lib = library();
-  return Boolean(String(lib.q || "").trim()) || (lib.kinds || []).length > 0 || lib.grade !== "全部";
+  const lib = patterns();
+  return Boolean(String(lib.q || "").trim()) || Boolean(lib.kind) || Boolean(lib.categoryId) || lib.grade !== "全部";
 }
 
 function activeFilterText() {
-  const lib = library();
+  const lib = patterns();
   const parts = [];
   if (String(lib.q || "").trim()) parts.push(`关键词「${String(lib.q).trim()}」`);
-  const kind = activeKindFilter();
-  if (kind.label !== "全部") parts.push(`类型「${kind.label}」`);
+  const kind = activeKind();
+  if (kind.kind) parts.push(`类型「${kind.label}」`);
+  if (lib.categoryId) {
+    const category = store.categoryById(lib.categoryId);
+    parts.push(`题材「${category?.name || "已删除"}」`);
+  }
   if (lib.grade !== "全部") parts.push(`评级「${lib.grade} 级」`);
   return parts.join(" · ");
 }
 
-function currentList() {
-  if (!rawItems.length) return [];
-  return store.filterAndSort(rawItems);
+const createdMs = (value) => {
+  const ms = Date.parse(String(value || ""));
+  return Number.isNaN(ms) ? 0 : ms;
+};
+
+/** 组内排序；组顺序始终按服务端的原图登记顺序（新 → 旧）。 */
+export function sortGroupAssets(assets, sort = "最新") {
+  const list = [...(assets || [])];
+  const newest = (a, b) => createdMs(b.created_at) - createdMs(a.created_at);
+  if (sort === "最早") return list.sort((a, b) => createdMs(a.created_at) - createdMs(b.created_at));
+  if (sort === "评级") {
+    return list.sort(
+      (a, b) =>
+        (GRADE_ORDER[a.grade || "U"] ?? 4) - (GRADE_ORDER[b.grade || "U"] ?? 4) || newest(a, b)
+    );
+  }
+  if (sort === "类型") {
+    return list.sort(
+      (a, b) => kindLabel(a.kind).localeCompare(kindLabel(b.kind), "zh-Hans-CN") || newest(a, b)
+    );
+  }
+  return list.sort(newest);
+}
+
+/** 当前筛选下要显示的组：评级只筛组内版本，不让空组留在结果里。 */
+export function displayedPatterns(items = patterns().items, { grade = "全部", sort = "最新" } = {}) {
+  return (items || [])
+    .map((group) => {
+      const assets = (group.assets || []).filter(
+        (asset) => grade === "全部" || (asset.grade || "U") === grade
+      );
+      return { ...group, assets: sortGroupAssets(assets, sort) };
+    })
+    .filter((group) => group.assets.length > 0);
 }
 
 function previewable(asset) {
@@ -111,11 +152,11 @@ function licenseOf(asset) {
 const gradeStamp = (grade) =>
   `<span class="stamp stamp--${esc(String(grade || "U").toLowerCase())}" title="${esc(gradeLabel(grade))}">${esc(grade || "U")}</span>`;
 
-const chip = (act, value, current, text) => {
+const chip = (act, value, current, text, extra = "") => {
   const on = current === value;
   return `<button class="chip lb-chip${on ? " chip--accent" : ""}" type="button" data-act="${act}" data-val="${esc(
     value
-  )}" aria-pressed="${on}">${esc(text)}</button>`;
+  )}" aria-pressed="${on}"${extra}>${esc(text)}</button>`;
 };
 
 /* ---------- 统计条 ---------- */
@@ -145,7 +186,7 @@ function statsHtml() {
     license: Boolean(dataset && (dataset.license_coverage || 0) < 1),
   };
   const rows = [
-    ["total", "图片总数"],
+    ["total", "原图总数"],
     ["a", "A 级"],
     ["b", "B 级"],
     ["c", "C 级"],
@@ -175,46 +216,48 @@ function paintStats(page) {
     const el = page.querySelector(`[data-stat="${key}"]`);
     if (el && el.textContent !== String(value)) el.textContent = String(value);
   }
-  const duplicateRow = page.querySelector('[data-stat-row="duplicate"]');
-  if (duplicateRow) duplicateRow.classList.toggle("lb-stat--warn", Boolean(dataset && values.duplicate > 0));
-  const licenseRow = page.querySelector('[data-stat-row="license"]');
-  if (licenseRow) licenseRow.classList.toggle("lb-stat--warn", Boolean(dataset && (dataset.license_coverage || 0) < 1));
+  page.querySelector('[data-stat-row="duplicate"]')?.classList.toggle("lb-stat--warn", Boolean(dataset && values.duplicate > 0));
+  page
+    .querySelector('[data-stat-row="license"]')
+    ?.classList.toggle("lb-stat--warn", Boolean(dataset && (dataset.license_coverage || 0) < 1));
 }
 
-/* ---------- 页头 / 筛选栏 ---------- */
+/* ---------- 页头 ---------- */
 
 function headHtml() {
   return `
   <header class="lb-head">
     <div class="lb-head__text">
       <h1 class="title lb-head__title">纹样库</h1>
-      <p class="lead lb-head__lead">
-        全部资产与来源记录。
-      </p>
+      <p class="lead lb-head__lead">按原图分组查看全部版本：同一张原图的处理结果留在一组，不同原图分开。</p>
     </div>
     <div class="lb-head__acts">
       <a class="btn btn--ghost btn--sm" href="${http.manifestUrl()}" download>${icon("download")}下载数据清单</a>
+      <button class="btn btn--ghost btn--sm" type="button" data-act="export-loaded">${icon("download")}导出已载入</button>
+      <button class="btn btn--ghost btn--sm" type="button" data-act="process-batch">${icon("play")}批量处理</button>
       <button class="btn btn--primary btn--sm" type="button" data-act="upload" data-magnetic>${icon("upload")}上传纹样</button>
     </div>
   </header>`;
 }
 
+/* ---------- 筛选栏 ---------- */
+
 function filtersHtml() {
-  const lib = library();
-  const kind = activeKindFilter();
+  const lib = patterns();
+  const kind = activeKind();
   return `
   <div class="lb-filters" role="search" aria-label="筛选纹样">
     <div class="lb-filters__top">
       <label class="lb-search" for="lb-search-input">
-        <span class="sr-only">搜索纹样编号、类型、来源或评级</span>
+        <span class="sr-only">搜索纹样名称、来源、类型或资产编号</span>
         ${icon("search")}
         <input class="input lb-search__input" id="lb-search-input" name="纹样搜索" type="search" data-lb-q
-          value="${esc(lib.q)}" placeholder="搜索编号、类型、来源或评级…" autocomplete="off" spellcheck="false" />
+          value="${esc(lib.q)}" placeholder="搜索名称、来源、类型或资产编号…" autocomplete="off" spellcheck="false" />
       </label>
 
       <div class="lb-sort">
-        <label class="label lb-sort__label" for="lb-sort-select">排序</label>
-        <select class="select lb-sort__select" id="lb-sort-select" name="纹样排序" data-lb-sort>
+        <label class="label lb-sort__label" for="lb-sort-select">组内排序</label>
+        <select class="select lb-sort__select" id="lb-sort-select" name="版本排序" data-lb-sort>
           ${SORTS.map(
             (value) => `<option value="${esc(value)}"${lib.sort === value ? " selected" : ""}>${esc(value)}</option>`
           ).join("")}
@@ -233,23 +276,107 @@ function filtersHtml() {
     </div>
 
     <div class="lb-filters__bottom">
-      <div class="lb-chipgroup" role="group" aria-label="按类型筛选">
+      <div class="lb-chipgroup" role="group" aria-label="按处理类型筛选">
         <span class="label">类型</span>
         ${KIND_FILTERS.map((filter) => chip("kind", filter.label, kind.label, filter.label)).join("")}
       </div>
-      <div class="lb-chipgroup" role="group" aria-label="按评级筛选">
+      <div class="lb-chipgroup" role="group" aria-label="按评级筛选（只作用于已载入的组）">
         <span class="label">评级</span>
         ${GRADES.map((grade) => chip("grade", grade, lib.grade, grade === "全部" ? "全部" : `${grade} 级`)).join("")}
       </div>
     </div>
+
+    <div class="lb-cats" data-lb-cats>${categoryBarHtml()}</div>
   </div>`;
 }
+
+function categoryChipsHtml() {
+  const lib = patterns();
+  return `
+    <button class="chip lb-chip${lib.categoryId ? "" : " chip--accent"}" type="button" data-act="cat-filter" data-val=""
+      aria-pressed="${lib.categoryId ? "false" : "true"}">全部题材</button>
+    ${(lib.categories || [])
+      .map(
+        (category) =>
+          `<button class="chip lb-chip${lib.categoryId === category.category_id ? " chip--accent" : ""}" type="button"
+            data-act="cat-filter" data-val="${esc(category.category_id)}"
+            aria-pressed="${lib.categoryId === category.category_id}">${esc(category.name)}</button>`
+      )
+      .join("")}
+  `;
+}
+
+function categoryBarHtml() {
+  const lib = patterns();
+  const form = catForm;
+  return `
+  <div class="lb-cats__row" role="group" aria-label="按题材分类筛选">
+    <span class="label">题材</span>
+    ${categoryChipsHtml()}
+    <span class="lb-cats__spacer"></span>
+    <button class="btn btn--quiet btn--sm" type="button" data-act="cat-new">${icon("plus")}新建分类</button>
+    <button class="btn btn--quiet btn--sm lb-cats__manage" type="button" data-act="cat-manage" aria-pressed="${catManage}">
+      ${icon("sliders")}${catManage ? "收起管理" : "管理分类"}
+    </button>
+  </div>
+  ${
+    lib.categoriesError
+      ? `<p class="lb-cats__error" role="alert">${esc(lib.categoriesError)} <button class="btn btn--quiet btn--sm" type="button" data-act="cat-reload">重试</button></p>`
+      : ""
+  }
+  ${
+    form?.mode === "create"
+      ? `<div class="lb-cat-form" data-cat-form>
+          <label class="sr-only" for="lb-cat-input">新分类名称</label>
+          <input class="input lb-cat-form__input" id="lb-cat-input" data-cat-input maxlength="60"
+            value="${esc(form.value || "")}" placeholder="例如：祥云、花卉、几何…" autocomplete="off" />
+          <button class="btn btn--primary btn--sm" type="button" data-act="cat-save">创建</button>
+          <button class="btn btn--quiet btn--sm" type="button" data-act="cat-cancel">取消</button>
+        </div>`
+      : ""
+  }
+  ${
+    catManage
+      ? `<div class="lb-cats__manage-list" data-cat-manage-list>
+          ${
+            (lib.categories || []).length
+              ? lib.categories
+                  .map((category) => {
+                    const renaming = form?.mode === "rename" && form.id === category.category_id;
+                    const pending = catDeletePending === category.category_id;
+                    return `<div class="lb-cat-row" data-cat-row="${esc(category.category_id)}">
+                      ${
+                        renaming
+                          ? `<label class="sr-only" for="lb-cat-input">重命名 ${esc(category.name)}</label>
+                             <input class="input lb-cat-form__input" id="lb-cat-input" data-cat-input maxlength="60"
+                               value="${esc(form.value ?? category.name)}" autocomplete="off" />
+                             <button class="btn btn--primary btn--sm" type="button" data-act="cat-save">保存</button>
+                             <button class="btn btn--quiet btn--sm" type="button" data-act="cat-cancel">取消</button>`
+                          : `<span class="lb-cat-row__name">${esc(category.name)}</span>
+                             <span class="mono lb-cat-row__rev">修订 ${category.revision}</span>
+                             <button class="btn btn--quiet btn--sm" type="button" data-act="cat-rename" data-id="${esc(category.category_id)}">重命名</button>
+                             <button class="btn ${pending ? "btn--ghost" : "btn--quiet"} btn--sm" type="button"
+                               data-act="cat-delete" data-id="${esc(category.category_id)}" data-rev="${category.revision}">
+                               ${pending ? "确认删除？" : "删除"}</button>`
+                      }
+                    </div>`;
+                  })
+                  .join("")
+              : `<p class="field__hint">还没有题材分类。新建后可以把同一张原图归入多个分类。</p>`
+          }
+          <p class="field__hint">删除分类只解除归类，不会删除纹样、原图或任何处理结果。</p>
+        </div>`
+      : ""
+  }`;
+}
+
+/* ---------- 结果区 ---------- */
 
 function resultsHtml() {
   return `
   <section class="lb-results" aria-labelledby="lb-results-title">
     <div class="lb-results__bar">
-      <h2 class="h3 lb-results__title" id="lb-results-title" tabindex="-1">全部登记</h2>
+      <h2 class="h3 lb-results__title" id="lb-results-title" tabindex="-1">全部纹样</h2>
       <p class="mono lb-count" data-lb-count aria-live="polite"></p>
       <button class="btn btn--quiet btn--sm lb-clear" type="button" data-act="clear" hidden>
         ${icon("close")}清除筛选
@@ -259,7 +386,7 @@ function resultsHtml() {
     <div class="lb-results__body" data-lb-body></div>
 
     <div class="lb-more" data-lb-more hidden>
-      <button class="btn btn--ghost btn--sm" type="button" data-act="more">加载更多</button>
+      <button class="btn btn--ghost btn--sm" type="button" data-act="more">加载更多原图组</button>
       <p class="lb-more__note" data-more-note></p>
     </div>
 
@@ -267,14 +394,12 @@ function resultsHtml() {
   </section>`;
 }
 
-/* ---------- 结果体：加载 / 错误 / 空态 / 网格 / 列表 ---------- */
-
 function loadingHtml() {
   return `
   <div class="lb-state lb-loading" role="status">
     <span class="lb-state__spinner" aria-hidden="true"></span>
     <p class="lb-state__title">正在读取本机纹样库…</p>
-    <p class="lb-state__copy">资产索引来自本机服务 /api/v1/assets。</p>
+    <p class="lb-state__copy">按原图分组来自本机服务 /api/v1/patterns。</p>
   </div>`;
 }
 
@@ -294,151 +419,177 @@ function emptyHtml() {
     <div class="lb-empty">
       <span class="lb-empty__icon" aria-hidden="true">${icon("layers")}</span>
       <p class="lb-empty__title">还没有纹样</p>
-      <p class="lb-empty__copy">
-        上传第一张纹样，等级、尺寸与授权记录会一起登记。
-      </p>
+      <p class="lb-empty__copy">上传第一张原图，等级、尺寸与授权记录会一起登记；处理结果按原图分组显示。</p>
       <button class="btn btn--primary btn--sm" type="button" data-act="upload">${icon("upload")}上传纹样</button>
-      <p class="lb-empty__hint">文件保存在 storage/api/。</p>
+      <p class="lb-empty__hint">文件保存在本机 storage/api/。</p>
     </div>`;
   }
   const condition = activeFilterText();
   return `
   <div class="lb-empty">
     <span class="lb-empty__icon" aria-hidden="true">${icon("search")}</span>
-    <p class="lb-empty__title">没有找到匹配的纹样</p>
+    <p class="lb-empty__title">没有找到匹配的原图组</p>
     <p class="lb-empty__copy" role="status">
-      当前条件：${condition ? esc(condition) : "全部"}。试试缩短关键词，或把类型 / 评级改回「全部」。
+      当前条件：${condition ? esc(condition) : "全部"}。类型筛选会隐藏不匹配的组，组内仍保留全部版本；可缩短关键词或把条件改回「全部」。
     </p>
     <button class="btn btn--ghost btn--sm" type="button" data-act="clear">${icon("close")}清除筛选</button>
   </div>`;
 }
 
-function mediaHtml(asset, variant) {
+function mediaHtml(asset, variant = "card") {
   if (!previewable(asset)) {
     const note = ARCHIVE_KINDS.has(asset.kind) ? "打包文件" : "无预览";
     return `<span class="lb-media__ph" aria-hidden="true">${icon("file")}<span>${note}</span></span>`;
   }
-  return `<img class="${variant === "row" ? "lb-row__img" : "plate__img lb-card__img"}"
+  return `<img class="${variant === "row" ? "lb-prow__img" : "plate__img lb-asset__img"}"
     src="${http.assetPreviewUrl(asset.asset_id)}" alt="" loading="lazy" decoding="async" />`;
 }
 
-function cardHtml(asset) {
+function assetCardHtml(asset) {
   const license = licenseOf(asset);
   return `
-  <button class="lb-card" type="button" data-open="${asset.asset_id}" data-kind="${esc(asset.kind)}"
-    aria-haspopup="dialog" aria-expanded="false">
-    <span class="lb-card__plate plate plate--grain">
-      ${mediaHtml(asset, "card")}
-      <span class="lb-card__grade" aria-hidden="true">${gradeStamp(asset.grade)}</span>
-      <span class="lb-card__hover" aria-hidden="true">
-        <span class="lb-card__hover-label">${esc(shortId(asset.asset_id))}</span>
-        <span class="lb-card__hover-name">${esc(kindLabel(asset.kind))}</span>
-        <span class="lb-card__hover-row">${esc(dimsOf(asset))} · ${esc(formatBytes(asset.bytes))}</span>
-        <span class="lb-card__hover-row">${esc(sourceLabel(asset))}</span>
-        <span class="lb-card__hover-row">授权 · <span class="${license.unset ? "is-warn" : ""}">${esc(license.text)}</span></span>
-        <span class="lb-card__hover-cta">查看档案 ${icon("arrow")}</span>
+  <li class="lb-assetli">
+    <button class="lb-asset" type="button" data-open="${esc(asset.asset_id)}" data-kind="${esc(asset.kind)}"
+      aria-haspopup="dialog" aria-expanded="false"
+      title="${esc(`${kindLabel(asset.kind)} · ${dimsOf(asset)} · ${formatTime(asset.created_at, { withDate: true })}`)}">
+      <span class="lb-asset__plate plate plate--grain">
+        ${mediaHtml(asset)}
+        <span class="lb-asset__grade" aria-hidden="true">${gradeStamp(asset.grade)}</span>
+        <span class="lb-asset__hover" aria-hidden="true">
+          <span class="lb-asset__hover-name">${esc(kindLabel(asset.kind))}</span>
+          <span class="lb-asset__hover-row">${esc(dimsOf(asset))} · ${esc(formatBytes(asset.bytes))}</span>
+          <span class="lb-asset__hover-cta">查看档案 ${icon("arrow")}</span>
+        </span>
       </span>
-    </span>
-    <span class="lb-card__meta">
-      <span class="lb-card__name">${esc(kindLabel(asset.kind))}</span>
-      <span class="lb-card__sub">${esc(shortId(asset.asset_id))} · ${esc(dimsOf(asset))} · ${esc(relativeTime(asset.created_at))}</span>
-      <span class="lb-card__tags">
-        <span class="lb-tag">${esc(gradeLabel(asset.grade))}</span>
-        <span class="lb-tag${license.unset ? " lb-tag--warn" : ""}">${esc(license.text)}</span>
+      <span class="lb-asset__meta">
+        <span class="lb-asset__name">${esc(kindLabel(asset.kind))}</span>
+        <span class="lb-asset__sub mono">${esc(dimsOf(asset))} · ${esc(formatBytes(asset.bytes))}</span>
+        <span class="lb-asset__tags">
+          <span class="lb-tag${license.unset ? " lb-tag--warn" : ""}">${esc(license.text)}</span>
+          <span class="lb-tag">${esc(relativeTime(asset.created_at))}</span>
+        </span>
       </span>
-    </span>
-  </button>`;
-}
-
-function rowHtml(asset) {
-  const license = licenseOf(asset);
-  return `
-  <li class="lb-rowli">
-    <button class="lb-row" type="button" data-open="${asset.asset_id}"
-      aria-haspopup="dialog" aria-expanded="false">
-      <span class="lb-row__thumb lb-col--thumb">${mediaHtml(asset, "row")}</span>
-      <span class="lb-row__id mono lb-col--id">${esc(shortId(asset.asset_id))}</span>
-      <span class="lb-row__name lb-col--name">${esc(kindLabel(asset.kind))}</span>
-      <span class="lb-row__origin lb-col--origin">${esc(sourceLabel(asset))}</span>
-      <span class="lb-row__type lb-col--type${license.unset ? " is-warn" : ""}">${esc(license.text)}</span>
-      <span class="lb-row__grade lb-col--grade">${gradeStamp(asset.grade)}</span>
-      <span class="lb-row__dims mono lb-col--dims">${esc(dimsOf(asset))}</span>
-      <span class="lb-row__versions mono lb-col--versions">${esc(formatBytes(asset.bytes))}</span>
-      <span class="lb-row__updated mono lb-col--updated">${esc(relativeTime(asset.created_at))}</span>
     </button>
   </li>`;
 }
 
-function bodyHtml() {
-  const lib = library();
-  if (!hasLoaded) return loadingHtml();
-  if (lib.loading && !rawItems.length) return loadingHtml();
-  if (lib.error && !rawItems.length) return errorHtml(lib.error);
-  const list = currentList();
-  if (!list.length) return emptyHtml();
-  if (lib.view === "list") {
-    return `
-    <div class="lb-table">
-      <div class="lb-thead" aria-hidden="true">
-        <span class="lb-th lb-col--thumb">缩略</span>
-        <span class="lb-th lb-col--id">编号</span>
-        <span class="lb-th lb-col--name">类型</span>
-        <span class="lb-th lb-col--origin">来源</span>
-        <span class="lb-th lb-col--type">授权</span>
-        <span class="lb-th lb-col--grade">评级</span>
-        <span class="lb-th lb-col--dims">尺寸</span>
-        <span class="lb-th lb-col--versions">大小</span>
-        <span class="lb-th lb-col--updated">时间</span>
+function assetRowHtml(asset) {
+  const license = licenseOf(asset);
+  return `
+  <li class="lb-prowli">
+    <button class="lb-prow" type="button" data-open="${esc(asset.asset_id)}"
+      aria-haspopup="dialog" aria-expanded="false">
+      <span class="lb-prow__thumb">${mediaHtml(asset, "row")}</span>
+      <span class="lb-prow__name">${esc(kindLabel(asset.kind))}</span>
+      <span class="lb-prow__grade">${gradeStamp(asset.grade)}</span>
+      <span class="lb-prow__license${license.unset ? " is-warn" : ""}">${esc(license.text)}</span>
+      <span class="lb-prow__dims mono">${esc(dimsOf(asset))}</span>
+      <span class="lb-prow__bytes mono">${esc(formatBytes(asset.bytes))}</span>
+      <span class="lb-prow__time mono">${esc(relativeTime(asset.created_at))}</span>
+    </button>
+  </li>`;
+}
+
+export function patternGroupHtml(group) {
+  const categories = group.categories || [];
+  return `
+  <section class="lb-pattern" data-pattern="${esc(group.image_id)}">
+    <header class="lb-pattern__head">
+      <div class="lb-pattern__title">
+        <h3 class="lb-pattern__name">${esc(group.name || "未命名纹样")}</h3>
+        <p class="mono lb-pattern__meta">#${esc(shortId(group.image_id))} · 登记 ${esc(
+          formatTime(group.created_at, { withDate: true })
+        )} · ${group.assets.length} 个版本</p>
       </div>
-      <ul class="lb-rows">${list.map(rowHtml).join("")}</ul>
-    </div>`;
-  }
-  return `<div class="lb-grid">${list.map(cardHtml).join("")}</div>`;
+      <div class="lb-pattern__cats">
+        ${
+          categories.length
+            ? categories
+                .map(
+                  (category) =>
+                    `<button class="chip lb-chip lb-pattern__cat" type="button" data-act="cat-filter"
+                      data-val="${esc(category.category_id)}" title="筛选题材 ${esc(category.name)}">${esc(category.name)}</button>`
+                )
+                .join("")
+            : `<span class="lb-pattern__uncat">未归类</span>`
+        }
+        <button class="btn btn--quiet btn--sm" type="button" data-act="assign" data-image="${esc(group.image_id)}">
+          ${icon("star")}归类
+        </button>
+      </div>
+      <div class="lb-pattern__acts">
+        <button class="btn btn--ghost btn--sm" type="button" data-act="pattern-workbench" data-image="${esc(group.image_id)}">
+          ${icon("arrow")}在工作台打开
+        </button>
+        <button class="btn btn--ghost btn--sm" type="button" data-act="process-group" data-image="${esc(group.image_id)}">
+          ${icon("play")}处理本组
+        </button>
+        <button class="btn btn--quiet btn--sm" type="button" data-act="pattern-export" data-image="${esc(group.image_id)}">
+          ${icon("download")}导出本组
+        </button>
+      </div>
+    </header>
+    ${
+      patterns().view === "list"
+        ? `<ul class="lb-prows">${group.assets.map(assetRowHtml).join("")}</ul>`
+        : `<ul class="lb-assets">${group.assets.map(assetCardHtml).join("")}</ul>`
+    }
+  </section>`;
+}
+
+function bodyHtml() {
+  const lib = patterns();
+  if (!loaded()) return loadingHtml();
+  if (lib.loading && !lib.items.length) return loadingHtml();
+  if (lib.error && !lib.items.length) return errorHtml(lib.error);
+  const groups = displayedPatterns(lib.items, { grade: lib.grade, sort: lib.sort });
+  if (!groups.length) return emptyHtml();
+  return `<div class="lb-patterns">${groups.map(patternGroupHtml).join("")}</div>`;
 }
 
 function countHtml() {
-  const lib = library();
-  const filtered = isFiltered();
-  const flag = filtered ? '<span class="lb-count__flag">已筛选</span>' : "";
-  if (!hasLoaded || (lib.loading && !rawItems.length)) return "正在读取本机纹样库…";
-  const list = currentList();
+  const lib = patterns();
+  if (!loaded() || (lib.loading && !lib.items.length)) return "正在读取本机纹样库…";
+  const groups = displayedPatterns(lib.items, { grade: lib.grade, sort: lib.sort });
+  const flag = isFiltered() ? '<span class="lb-count__flag">已筛选</span>' : "";
   if (lib.loading) return `更新中… ${flag}`;
-  return `命中 <span class="num">${list.length}</span> / 已载入 <span class="num">${rawItems.length}</span> 项${flag}`;
+  return `命中 <span class="num">${groups.length}</span> 个原图组 / 已载入 <span class="num">${lib.items.length}</span> 组${flag}`;
 }
 
 function paintMore(page) {
   const wrap = page.querySelector("[data-lb-more]");
   if (!wrap) return;
-  const show = rawItems.length > 0;
+  const lib = patterns();
+  const show = lib.items.length > 0;
   wrap.hidden = !show;
   if (!show) return;
   const button = wrap.querySelector('[data-act="more"]');
   const note = wrap.querySelector("[data-more-note]");
-  const loading = busy || library().loading;
-  const hasMore = Boolean(library().nextCursor);
+  const hasMore = Boolean(lib.nextCursor);
   if (button) {
-    button.disabled = loading || !hasMore;
-    button.textContent = loading ? "载入中…" : hasMore ? "加载更多" : "已全部载入";
-    button.setAttribute("aria-busy", String(loading));
+    button.disabled = lib.loading || !hasMore;
+    button.textContent = lib.loading ? "载入中…" : hasMore ? "加载更多原图组" : "已全部载入";
+    button.setAttribute("aria-busy", String(lib.loading));
   }
   if (note) {
     note.textContent = hasMore
-      ? `已载入 ${rawItems.length} 项 · 每页 ${PAGE_SIZE} 项`
-      : `已载入 ${rawItems.length} 项 · 没有更多资产了`;
+      ? `已载入 ${lib.items.length} 个原图组 · 每页 ${PAGE_SIZE} 组 · 未载入的组不在当前选择与导出范围内`
+      : `已载入 ${lib.items.length} 个原图组 · 没有更多了`;
   }
 }
 
 function paintFooter(page) {
   const foot = page.querySelector("[data-lb-foot]");
   if (!foot) return;
+  const lib = patterns();
   const total = store.dataset ? store.dataset.total_images : "—";
-  foot.innerHTML = `数据来自本机服务 · 已载入 <span class="num">${rawItems.length}</span> 项 · 数据集共
-    <span class="num">${esc(String(total))}</span> 张图片 · 每页 ${PAGE_SIZE} 项`;
+  foot.innerHTML = `数据来自本机服务 · 已载入 <span class="num">${lib.items.length}</span> 个原图组 · 数据集共
+    <span class="num">${esc(String(total))}</span> 张原图 · 每组包含全部处理版本`;
 }
 
 function paintFilters(page) {
-  const lib = library();
-  const kind = activeKindFilter();
+  const lib = patterns();
+  const kind = activeKind();
   page.querySelectorAll('[data-act="kind"]').forEach((button) => {
     const on = button.dataset.val === kind.label;
     button.classList.toggle("chip--accent", on);
@@ -456,6 +607,15 @@ function paintFilters(page) {
   if (sort && sort.value !== lib.sort) sort.value = lib.sort;
   const search = page.querySelector("[data-lb-q]");
   if (search && document.activeElement !== search && search.value !== lib.q) search.value = lib.q;
+  paintCategories(page);
+}
+
+function paintCategories(page) {
+  if (!page || !page.isConnected) return;
+  const host = page.querySelector("[data-lb-cats]");
+  if (!host) return;
+  host.innerHTML = categoryBarHtml();
+  if (catForm) page.querySelector("[data-cat-input]")?.focus({ preventScroll: true });
 }
 
 function paintResults(page, { animate = false } = {}) {
@@ -469,7 +629,6 @@ function paintResults(page, { animate = false } = {}) {
       body.classList.add("is-swap");
     }
   }
-
   const count = page.querySelector("[data-lb-count]");
   if (count) {
     const next = countHtml();
@@ -482,43 +641,19 @@ function paintResults(page, { animate = false } = {}) {
       }
     }
   }
-
   const title = page.querySelector(".lb-results__title");
-  if (title) title.textContent = isFiltered() ? "筛选结果" : "全部登记";
-
+  if (title) title.textContent = isFiltered() ? "筛选结果" : "全部纹样";
   const clear = page.querySelector(".lb-clear");
   if (clear) clear.hidden = !isFiltered();
-
   paintMore(page);
   paintFooter(page);
 }
 
-/* ---------- 载入与分页 ---------- */
+/* ---------- 载入（最新查询优先） ---------- */
 
-/**
- * store.loadLibrary 会按当前的 grade / sort 就地过滤已载入项；这里临时用
- * 「全部 / 最新」载入原始分页（服务端顺序），再恢复用户的筛选与排序，
- * 好让评级与排序真正只作用于已载入项、切换时不再回源。
- */
-async function loadPage({ append = false } = {}) {
-  const lib = library();
-  const grade = lib.grade;
-  const sort = lib.sort;
-  if (grade !== "全部") lib.grade = "全部";
-  if (sort !== "最新") lib.sort = "最新";
-  try {
-    await store.loadLibrary({ append });
-  } finally {
-    lib.grade = grade;
-    lib.sort = sort;
-  }
-  rawItems = Array.isArray(lib.items) ? lib.items.slice() : [];
-  if (!append) hasLoaded = true;
-}
-
-function setPendingUI(page) {
+function setPendingUI(page, { append = false } = {}) {
   if (!page || !page.isConnected) return;
-  if (!rawItems.length) {
+  if (!append && !patterns().items.length) {
     const body = page.querySelector("[data-lb-body]");
     if (body) body.innerHTML = loadingHtml();
     const count = page.querySelector("[data-lb-count]");
@@ -527,56 +662,28 @@ function setPendingUI(page) {
   paintMore(page);
 }
 
-async function requestLibrary(page, api, { append = false } = {}) {
+async function requestPatterns(page, api, { append = false } = {}) {
   if (!page || !page.isConnected) return;
-  if (busy) {
-    const appendNext = Boolean((queued ? queued.append : false) && append) || (!queued && append);
-    queued = { page, api, append: appendNext };
-    return;
+  const seq = ++paintSeq;
+  setPendingUI(page, { append });
+  await store.loadPatterns({ append });
+  // 旧请求即使已返回，也只让最新一次绘制结果。
+  if (seq !== paintSeq || !ctx || ctx.page !== page || !page.isConnected) return;
+  paintStats(page);
+  paintResults(page, { animate: !append });
+  const error = patterns().error;
+  if (error && patterns().items.length && ctx.lastError !== error) {
+    ctx.lastError = error;
+    api.toast(error, "warn");
   }
-  busy = true;
-  let next = { page, api, append };
-  let lastPage = null;
-  while (next) {
-    const job = next;
-    next = null;
-    lastPage = job.page;
-    setPendingUI(job.page);
-    try {
-      await loadPage({ append: job.append });
-    } catch (error) {
-      if (!library().error) library().error = error?.message || "纹样库读取失败。";
-    }
-    if (ctx && ctx.page === job.page) {
-      paintStats(job.page);
-      paintResults(job.page, { animate: !job.append });
-      notifyLoadError(job.api);
-    }
-    if (queued) {
-      next = queued;
-      queued = null;
-    }
-  }
-  busy = false;
-  if (lastPage && ctx && ctx.page === lastPage) paintMore(lastPage);
 }
-
-function notifyLoadError(api) {
-  const error = library().error;
-  if (!error || !rawItems.length) return;
-  if (ctx && ctx.lastError === error) return;
-  if (ctx) ctx.lastError = error;
-  api.toast(error, "warn");
-}
-
-/* ---------- 筛选动作 ---------- */
 
 function scheduleSearch(page, api, value) {
-  store.setLibraryQuery({ q: value });
+  store.setPatternQuery({ q: value });
   if (searchTimer) clearTimeout(searchTimer);
   searchTimer = setTimeout(() => {
     searchTimer = 0;
-    requestLibrary(page, api);
+    requestPatterns(page, api);
   }, SEARCH_DEBOUNCE);
 }
 
@@ -585,11 +692,11 @@ function clearFilters(page, api) {
     clearTimeout(searchTimer);
     searchTimer = 0;
   }
-  store.setLibraryQuery({ q: "", kinds: [], grade: "全部" });
+  store.setPatternQuery({ q: "", kind: "", categoryId: "", grade: "全部" });
   const search = page.querySelector("[data-lb-q]");
   if (search) search.value = "";
   paintFilters(page);
-  requestLibrary(page, api);
+  requestPatterns(page, api);
 }
 
 function triggerUpload(api) {
@@ -599,6 +706,78 @@ function triggerUpload(api) {
     return;
   }
   api.toast("请使用页面顶部的「上传纹样」按钮", "info");
+}
+
+/* ---------- 分类操作 ---------- */
+
+function resetCategoryForm() {
+  catForm = null;
+  if (catDeleteTimer) clearTimeout(catDeleteTimer);
+  catDeleteTimer = 0;
+  catDeletePending = "";
+}
+
+function focusCategoryInput(page) {
+  page?.querySelector("[data-cat-input]")?.focus({ preventScroll: true });
+}
+
+async function saveCategoryForm(page, api) {
+  if (!catForm) return;
+  const input = page.querySelector("[data-cat-input]");
+  const value = String(input?.value ?? catForm.value ?? "").trim();
+  if (!value) {
+    api.toast("分类名不能为空。", "warn");
+    focusCategoryInput(page);
+    return;
+  }
+  const mode = catForm.mode;
+  const categoryId = catForm.id;
+  const revision = Number(store.categoryById(categoryId)?.revision || 0);
+  try {
+    if (mode === "rename" && categoryId) {
+      await store.renamePatternCategory(categoryId, value, revision);
+      api.toast("分类已重命名。", "done");
+    } else {
+      await store.createPatternCategory(value);
+      api.toast(`已创建题材分类「${value}」。`, "done");
+    }
+    catForm = null;
+    paintFilters(page);
+    paintResults(page, { animate: true });
+  } catch (error) {
+    if (error?.code === "STALE_REVISION") {
+      await store.loadPatternCategories();
+      catForm = null;
+      paintFilters(page);
+      api.toast("分类已被其他操作更新，已重新读取，请再试一次。", "warn");
+      return;
+    }
+    if (error?.code === "CATEGORY_EXISTS") api.toast("已经有同名的题材分类。", "warn");
+    else api.toast(error?.message || "分类保存失败。", "warn");
+    focusCategoryInput(page);
+  }
+}
+
+async function deleteCategory(page, api, categoryId) {
+  const category = store.categoryById(categoryId);
+  if (!category) return;
+  try {
+    await store.deletePatternCategory(categoryId, category.revision);
+    resetCategoryForm();
+    paintFilters(page);
+    paintResults(page, { animate: true });
+    api.toast(`已删除分类「${category.name}」；只解除归类，纹样与版本都保留。`, "done");
+    if (!patterns().categoryId) requestPatterns(page, api);
+  } catch (error) {
+    if (error?.code === "STALE_REVISION") {
+      await store.loadPatternCategories();
+      resetCategoryForm();
+      paintFilters(page);
+      api.toast("分类已被其他操作更新，已重新读取。", "warn");
+      return;
+    }
+    api.toast(error?.message || "删除分类失败。", "warn");
+  }
 }
 
 /* ---------- 档案抽屉 ---------- */
@@ -648,7 +827,7 @@ function parentsHtml(asset) {
     .join("")}</ul>`;
 }
 
-function drawerBody(asset) {
+function drawerBody(asset, pattern = null) {
   const license = licenseOf(asset);
   const preview = previewable(asset);
   const params = parametersRows(asset);
@@ -661,7 +840,6 @@ function drawerBody(asset) {
       `<span class="mono">${asset.provenance_status === "declared" ? "来源已声明" : "来源未核验"}</span>`
     );
   }
-
   return `
     <div class="drawer-plate plate plate--grain lb-drawer__plate">
       ${
@@ -681,6 +859,13 @@ function drawerBody(asset) {
       }
       ${asset.ai_inferred ? `<span class="chip chip--gold">云端推断</span>` : ""}
       ${asset.geometry_verified === false ? `<span class="chip chip--gold">几何未验证</span>` : ""}
+      ${
+        pattern
+          ? `<span class="chip lb-drawer__version">所属原图 #${esc(shortId(pattern.image_id))} · ${esc(
+              pattern.name || "未命名纹样"
+            )}</span>`
+          : ""
+      }
     </div>
 
     <dl class="kv">
@@ -725,7 +910,7 @@ function drawerBody(asset) {
       <button class="btn btn--ghost btn--sm" type="button" data-drawer-action="copy">${icon("file")}复制资产 ID</button>
       <button class="btn btn--primary btn--sm" type="button" data-drawer-action="workbench">${icon("arrow")}在工作台打开</button>
     </div>
-    <p class="drawer-foot">字段来自本机资产记录；预览与下载直接读取本机文件。</p>
+    <p class="drawer-foot">字段来自本机资产记录；预览与下载直接读取本机文件。一个原图组可同时归入多个题材分类。</p>
   `;
 }
 
@@ -762,11 +947,11 @@ async function drawerAction(action, asset, button, api) {
   }
 }
 
-function openAssetDrawer(asset, trigger, api) {
+function openAssetDrawer(asset, trigger, api, pattern = null) {
   const el = api.drawer({
     title: esc(kindLabel(asset.kind)),
     meta: `${esc(shortId(asset.asset_id))} · ${esc(formatTime(asset.created_at, { withDate: true }))}`,
-    body: drawerBody(asset),
+    body: drawerBody(asset, pattern),
   });
   if (!el) return;
   el.classList.add("lb-drawer");
@@ -779,7 +964,6 @@ function openAssetDrawer(asset, trigger, api) {
     drawerAction(hit.dataset.drawerAction, asset, hit, api);
   });
 
-  /* 抽屉被外壳移除后复位触发按钮的 aria-expanded；焦点由 api.drawer 归还 */
   const observer = new MutationObserver(() => {
     if (document.body.contains(el)) return;
     observer.disconnect();
@@ -787,6 +971,107 @@ function openAssetDrawer(asset, trigger, api) {
   });
   const host = document.querySelector(".app");
   if (host) observer.observe(host, { childList: true });
+}
+
+function findLoadedAsset(assetId) {
+  for (const group of patterns().items) {
+    const asset = (group.assets || []).find((entry) => entry.asset_id === assetId);
+    if (asset) return { asset, pattern: group };
+  }
+  return null;
+}
+
+/* ---------- 归类抽屉 ---------- */
+
+async function openAssignDrawer(pattern, api) {
+  if (!patterns().categories.length && !patterns().categoriesLoading) {
+    await store.loadPatternCategories();
+  }
+  const categories = patterns().categories;
+  const selected = new Set(pattern.category_ids || []);
+  const body = `
+    <p class="drawer-lead">同一张原图可以同时归入多个题材分类；保存会替换这一组的全部归类。删除分类只会解除归类，不删除纹样。</p>
+    ${
+      categories.length
+        ? `<ul class="lb-assign">${categories
+            .map(
+              (category) => `<li>
+                <label class="lb-assign__row">
+                  <input type="checkbox" data-assign="${esc(category.category_id)}" ${
+                    selected.has(category.category_id) ? "checked" : ""
+                  } />
+                  <span>${esc(category.name)}</span>
+                  <span class="mono lb-assign__rev">修订 ${category.revision}</span>
+                </label>
+              </li>`
+            )
+            .join("")}</ul>`
+        : `<p class="field__hint">还没有题材分类。先关闭这里，在筛选栏「新建分类」创建。</p>`
+    }
+    <div class="drawer-actions">
+      <button class="btn btn--primary btn--sm" type="button" data-assign-save${categories.length ? "" : " disabled"}>
+        ${icon("check")}保存归类
+      </button>
+      <button class="btn btn--quiet btn--sm" type="button" data-assign-cancel>取消</button>
+    </div>
+    <p class="drawer-foot">保存时使用该组当前修订号 ${Number(pattern.revision) || 0}；若已被其他窗口更新，会提示重新读取。</p>
+  `;
+  const el = api.drawer({
+    title: `归类 · ${esc(pattern.name || "未命名纹样")}`,
+    meta: `#${esc(shortId(pattern.image_id))} · 可同时属于多个分类`,
+    body,
+  });
+  if (!el) return;
+  el.addEventListener("click", async (event) => {
+    if (event.target.closest("[data-assign-cancel]")) {
+      api.closeDrawer();
+      return;
+    }
+    const save = event.target.closest("[data-assign-save]");
+    if (!save) return;
+    const ids = [...el.querySelectorAll("[data-assign]")].filter((input) => input.checked).map((input) => input.dataset.assign);
+    save.disabled = true;
+    try {
+      await store.setPatternCategoriesFor(pattern.image_id, ids, Number(pattern.revision) || 0);
+      api.closeDrawer();
+      paintResults(ctx?.page, { animate: true });
+      api.toast(ids.length ? `已归入 ${ids.length} 个题材分类。` : "已清除这张原图的全部归类。", "done");
+    } catch (error) {
+      save.disabled = false;
+      if (error?.code === "STALE_REVISION") {
+        try {
+          const fresh = await http.pattern(pattern.image_id);
+          store.replacePattern(fresh);
+          paintResults(ctx?.page, { animate: true });
+        } catch {
+          /* 读取失败时保留抽屉，让用户重试 */
+        }
+        api.toast("这一组的归类已被其他操作更新，已重新读取后再试。", "warn");
+        return;
+      }
+      if (error?.code === "CATEGORY_NOT_FOUND") await store.loadPatternCategories();
+      api.toast(error?.message || "归类保存失败。", "warn");
+    }
+  });
+}
+
+/* ---------- 批量导出 ---------- */
+
+function exportGroups(groups) {
+  return groups.map((group) => ({
+    imageId: group.image_id,
+    name: group.name,
+    current: false,
+    assets: group.assets || [],
+  }));
+}
+
+function openExportFor(groups, scopeNote, api) {
+  if (!groups.length) {
+    api.toast("当前没有可导出的原图组。", "info");
+    return;
+  }
+  openBatchExport({ api, groups: exportGroups(groups), scopeNote });
 }
 
 /* ---------- 深链 ---------- */
@@ -806,13 +1091,14 @@ function stripOpenParam() {
 }
 
 async function openDeepLinkedAsset(page, api, params) {
-  const openId = (params && params.get("open")) || store.library.openId || "";
+  const openId = (params && params.get("open")) || patterns().openId || "";
   if (!openId) return;
-  store.library.openId = null;
+  patterns().openId = "";
   try {
     const asset = await http.asset(openId);
     if (!ctx || ctx.page !== page) return;
-    openAssetDrawer(asset, null, api);
+    const found = findLoadedAsset(openId);
+    openAssetDrawer(asset, null, api, found?.pattern || null);
   } catch (error) {
     if (ctx && ctx.page === page) {
       const missing = error?.status === 404 || error?.status === 422;
@@ -845,42 +1131,45 @@ export default {
     const page = root.querySelector(".lb-page");
     if (!page) return;
     ctx = { page, api, lastError: "" };
-
     paintFilters(page);
     paintStats(page);
     paintResults(page);
 
-    const search = page.querySelector("[data-lb-q]");
-    const sort = page.querySelector("[data-lb-sort]");
-
-    /* 统一事件委托：筛选、视图、加载更多、重试、上传、打开档案 */
-    page.addEventListener("click", (event) => {
+    /* 统一事件委托：筛选、分类、分页、重试、上传、导出、打开档案 */
+    page.addEventListener("click", async (event) => {
       const hit = event.target.closest("[data-open], [data-act]");
       if (!hit || !page.contains(hit)) return;
 
       if (hit.dataset.open) {
-        const asset =
-          rawItems.find((item) => item.asset_id === hit.dataset.open) ||
-          currentList().find((item) => item.asset_id === hit.dataset.open);
-        if (asset) openAssetDrawer(asset, hit, api);
+        const found = findLoadedAsset(hit.dataset.open);
+        if (found) {
+          openAssetDrawer(found.asset, hit, api, found.pattern);
+          return;
+        }
+        try {
+          const asset = await http.asset(hit.dataset.open);
+          openAssetDrawer(asset, hit, api);
+        } catch (error) {
+          api.toast(error?.message || "无法打开这个资产", "warn");
+        }
         return;
       }
 
       switch (hit.dataset.act) {
         case "kind": {
           const filter = KIND_FILTERS.find((item) => item.label === hit.dataset.val) || KIND_FILTERS[0];
-          store.setLibraryQuery({ kinds: filter.kinds.slice() });
+          store.setPatternQuery({ kind: filter.kind });
           paintFilters(page);
-          requestLibrary(page, api);
+          requestPatterns(page, api);
           break;
         }
         case "grade":
-          store.setLibraryQuery({ grade: hit.dataset.val });
+          store.setPatternQuery({ grade: hit.dataset.val });
           paintFilters(page);
           paintResults(page, { animate: true });
           break;
         case "view":
-          store.setLibraryQuery({ view: hit.dataset.val });
+          store.setPatternQuery({ view: hit.dataset.val });
           paintFilters(page);
           paintResults(page, { animate: true });
           break;
@@ -888,24 +1177,143 @@ export default {
           clearFilters(page, api);
           break;
         case "more":
-          requestLibrary(page, api, { append: true });
+          requestPatterns(page, api, { append: true });
           paintMore(page);
           break;
         case "retry":
-          requestLibrary(page, api);
+          requestPatterns(page, api);
           break;
         case "upload":
           triggerUpload(api);
           break;
+        case "cat-filter":
+          store.setPatternQuery({ categoryId: hit.dataset.val || "" });
+          paintFilters(page);
+          requestPatterns(page, api);
+          break;
+        case "cat-new":
+          catForm = { mode: "create", id: "", value: "" };
+          paintCategories(page);
+          focusCategoryInput(page);
+          break;
+        case "cat-manage":
+          catManage = !catManage;
+          if (!catManage) catForm = null;
+          paintCategories(page);
+          break;
+        case "cat-rename":
+          catForm = {
+            mode: "rename",
+            id: hit.dataset.id,
+            value: store.categoryById(hit.dataset.id)?.name || "",
+          };
+          paintCategories(page);
+          focusCategoryInput(page);
+          break;
+        case "cat-cancel":
+          resetCategoryForm();
+          paintCategories(page);
+          break;
+        case "cat-save":
+          saveCategoryForm(page, api);
+          break;
+        case "cat-reload":
+          await store.loadPatternCategories();
+          paintFilters(page);
+          break;
+        case "cat-delete": {
+          const id = hit.dataset.id;
+          if (catDeletePending !== id) {
+            catDeletePending = id;
+            if (catDeleteTimer) clearTimeout(catDeleteTimer);
+            catDeleteTimer = setTimeout(() => {
+              catDeletePending = "";
+              catDeleteTimer = 0;
+              paintCategories(page);
+            }, 4000);
+            paintCategories(page);
+            break;
+          }
+          if (catDeleteTimer) clearTimeout(catDeleteTimer);
+          catDeleteTimer = 0;
+          catDeletePending = "";
+          deleteCategory(page, api, id);
+          break;
+        }
+        case "assign": {
+          const pattern = patterns().items.find((item) => item.image_id === hit.dataset.image);
+          if (pattern) openAssignDrawer(pattern, api);
+          break;
+        }
+        case "pattern-workbench":
+          api.go("workbench", { query: { image: hit.dataset.image, stage: 1 } });
+          break;
+        case "process-batch": {
+          const groups = displayedPatterns(patterns().items, {
+            grade: patterns().grade,
+            sort: patterns().sort,
+          });
+          // 库里的批处理默认勾选当前已载入的组；用户可在浮窗里逐个取消。
+          openRunDialog({
+            groups,
+            preselectedImageIds: groups.map((pattern) => pattern.image_id),
+            sourceLabel: "纹样库 · 批量处理",
+          });
+          break;
+        }
+        case "process-group": {
+          const pattern = patterns().items.find((item) => item.image_id === hit.dataset.image);
+          if (pattern) {
+            openRunDialog({
+              groups: [pattern],
+              preselectedImageIds: [pattern.image_id],
+              sourceLabel: "纹样库 · 处理本组",
+            });
+          }
+          break;
+        }
+        case "pattern-export": {
+          const pattern = patterns().items.find((item) => item.image_id === hit.dataset.image);
+          if (pattern) {
+            openExportFor([pattern], `本组「${pattern.name || "未命名纹样"}」的 ${pattern.assets.length} 个版本`, api);
+          }
+          break;
+        }
+        case "export-loaded": {
+          const groups = displayedPatterns(patterns().items, {
+            grade: patterns().grade,
+            sort: patterns().sort,
+          });
+          openExportFor(
+            groups,
+            `本次已载入且当前筛选可见的 ${groups.length} 个原图组（不含未载入分页）`,
+            api
+          );
+          break;
+        }
         default:
           break;
       }
     });
 
+    page.addEventListener("keydown", (event) => {
+      const input = event.target.closest("[data-cat-input]");
+      if (!input) return;
+      if (event.key === "Enter") {
+        event.preventDefault();
+        saveCategoryForm(page, api);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        resetCategoryForm();
+        paintCategories(page);
+      }
+    });
+
     /* 搜索：中文组字期间不打断候选，停下来 250ms 后再回源 */
+    const search = page.querySelector("[data-lb-q]");
     if (search) {
-      search.addEventListener("input", (event) => {
-        if (event.isComposing || composing) return;
+      search.addEventListener("input", () => {
+        if (composing) return;
         scheduleSearch(page, api, search.value);
       });
       search.addEventListener("compositionstart", () => {
@@ -919,29 +1327,34 @@ export default {
         if (event.key !== "Escape" || !search.value) return;
         event.preventDefault();
         search.value = "";
-        store.setLibraryQuery({ q: "" });
-        requestLibrary(page, api);
+        store.setPatternQuery({ q: "" });
+        requestPatterns(page, api);
         paintFilters(page);
       });
     }
 
-    /* 排序只在已载入项上重排，不发请求 */
+    /* 组内排序与视图只重排已载入项，不发请求 */
+    const sort = page.querySelector("[data-lb-sort]");
     if (sort) {
       sort.addEventListener("change", () => {
-        store.setLibraryQuery({ sort: sort.value });
+        store.setPatternQuery({ sort: sort.value });
         paintResults(page, { animate: true });
       });
     }
 
     (async () => {
-      const loading = requestLibrary(page, api);
+      const loading = requestPatterns(page, api);
       const dataset = store.loadDataset();
+      const categories = store.loadPatternCategories();
       await loading;
       if (!ctx || ctx.page !== page) return;
       paintStats(page);
       await dataset;
       if (!ctx || ctx.page !== page) return;
       paintStats(page);
+      await categories;
+      if (!ctx || ctx.page !== page) return;
+      paintCategories(page);
       await openDeepLinkedAsset(page, api, params);
     })();
   },
@@ -951,7 +1364,14 @@ export default {
       clearTimeout(searchTimer);
       searchTimer = 0;
     }
+    if (catDeleteTimer) {
+      clearTimeout(catDeleteTimer);
+      catDeleteTimer = 0;
+    }
     composing = false;
+    catManage = false;
+    catForm = null;
+    catDeletePending = "";
     ctx = null;
   },
 };

@@ -44,6 +44,7 @@ const { module: formatModule } = await loadRecord("./format.js");
 const { module: dataModule } = await loadRecord("./data.js");
 const { module: settingsModule } = await loadRecord("./views/settings.js");
 const { module: appModule } = await loadRecord("./app.js");
+const { module: batchModule } = await loadRecord("./batch.js");
 const store = storeModule.store;
 
 /* ------------------------------------------------------------------ fetch mock */
@@ -956,6 +957,76 @@ test("八道工序都能渲染，处理工序明确提供本地/云端线稿，�
   }
 });
 
+test("像素上限从 health 读取：本地模型 25MP、矢量颜色 250k，超限提供显式工作副本", () => {
+  const originalWindow = globalThis.window;
+  const originalSession = store.session;
+  const originalHealth = store.health;
+  const originalSeedream = store.seedream;
+  globalThis.window = {
+    matchMedia: () => ({ matches: false }),
+    clearTimeout() {},
+    setTimeout() {
+      return 0;
+    },
+  };
+  try {
+    store.health = {
+      limits: {
+        working_pixels: 1_000_000,
+        color_vector_pixels: 250_000,
+        model_lineart_pixels: 25_000_000,
+        threshold_pixels: 4_000_000,
+        working_copy_pixels: 25_000_000,
+        tile_pixels: 4_000_000,
+      },
+    };
+    store.seedream = { enabled: false, blockers: [] };
+    const normalized = { asset_id: "norm-pixels", kind: "normalized_input", width: 6000, height: 5000 };
+    const lineart = { asset_id: "line-pixels", kind: "lineart", width: 6000, height: 5000 };
+    store.session = {
+      imageId: "image-pixels",
+      image: { image_id: "image-pixels", meta: { source_name: "大图" } },
+      assets: [normalized, lineart],
+      currentAssetId: "norm-pixels",
+      jobs: [],
+      busy: false,
+      activeJob: null,
+      error: "",
+    };
+    const state = (stage) => ({ stage, tile: "2x2", zoom: "fit", brush: 24, compare: false });
+    const params = new URLSearchParams();
+
+    const process = workbench.default.render(state(5), { state: {} }, params);
+    assert.match(process, /25,000,000/);
+    assert.match(process, /本地模型上限 25,000,000 像素/);
+    assert.match(process, /data-act="run-working-copy"[^>]*data-cap="25000000"/);
+
+    store.session.currentAssetId = "line-pixels";
+    const vector = workbench.default.render(state(7), { state: {} }, params);
+    // 单图 /jobs/vectorize 仍按 working_pixels=1M；250k 只作为彩色组合建议提示。
+    assert.match(vector, /彩色建议 ≤ 250,000 像素/);
+    assert.match(vector, /此入口上限 1,000,000 像素/);
+    assert.match(vector, /data-act="run-working-copy"[^>]*data-cap="1000000"/);
+
+    assert.deepEqual(workbench.buildWorkingCopyPayload({ asset_id: "line-pixels" }, 1_000_000), {
+      input_asset_id: "line-pixels",
+      max_pixels: 1_000_000,
+    });
+
+    // health 缺字段时只显示“未知”，不猜上限也不显示假的创建副本按钮。
+    store.health = { limits: {} };
+    store.session.currentAssetId = "norm-pixels";
+    const unknown = workbench.default.render(state(5), { state: {} }, params);
+    assert.match(unknown, /本机服务没有报告本地模型上限/);
+    assert.doesNotMatch(unknown, /data-act="run-working-copy"/);
+  } finally {
+    store.session = originalSession;
+    store.health = originalHealth;
+    store.seedream = originalSeedream;
+    globalThis.window = originalWindow;
+  }
+});
+
 test("LeftRefill 不可用时禁用本地路线并给出通俗原因，未知不当成不可用", () => {
   const originalWindow = globalThis.window;
   const originalSession = store.session;
@@ -1010,6 +1081,8 @@ test("LeftRefill 不可用时禁用本地路线并给出通俗原因，未知不
 });
 
 test("资产独立成列：缩略图排在文档/工序栏与画布之间，工序栏里不再有资产", () => {
+  // 纹样列按原图分组：先清掉前面用例留下的分组索引，只验证当前会话这一组。
+  batchModule.resetBatchState();
   const originalWindow = globalThis.window;
   globalThis.window = {
     matchMedia: () => ({ matches: false }),
@@ -1040,7 +1113,7 @@ test("资产独立成列：缩略图排在文档/工序栏与画布之间，工�
     const html = workbench.default.render(state, { state: {} }, new URLSearchParams());
 
     const railAt = html.indexOf('class="wb-rail"');
-    const assetsAt = html.indexOf('class="wb-assets"');
+    const assetsAt = html.indexOf('class="wb-assets wb-patterns"');
     const mainAt = html.indexOf('class="wb-main"');
     assert.ok(railAt >= 0, "文档与工序栏应保留");
     assert.ok(assetsAt > railAt, "资产列应接在文档/工序栏之后");
@@ -1051,13 +1124,16 @@ test("资产独立成列：缩略图排在文档/工序栏与画布之间，工�
     assert.equal(thumbs.length, 2);
     assert.ok(thumbs.every((index) => index > assetsAt && index < mainAt));
     assert.doesNotMatch(html.slice(railAt, assetsAt), /wb-group|wb-thumb/);
-    assert.match(html.slice(assetsAt, mainAt), /aria-label="图片资产"/);
-    assert.match(html.slice(assetsAt, mainAt), /class="wb-groups"/);
+    assert.match(html.slice(assetsAt, mainAt), /aria-label="纹样"/);
+    assert.match(html.slice(assetsAt, mainAt), /class="wb-groups bp-groups"/);
 
-    // 空会话仍是同一条资产列，只换成空态，不回到工序栏底部。
+    // 空会话仍是同一条纹样列，只换成空态，不回到工序栏底部。
     store.session.assets = [];
+    store.session.imageId = "";
+    store.session.image = null;
+    batchModule.resetBatchState();
     const empty = workbench.default.render(state, { state: {} }, new URLSearchParams());
-    const emptyAssetsAt = empty.indexOf('class="wb-assets"');
+    const emptyAssetsAt = empty.indexOf('class="wb-assets wb-patterns"');
     const emptyMainAt = empty.indexOf('class="wb-main"');
     assert.ok(emptyAssetsAt >= 0 && emptyAssetsAt < emptyMainAt);
     assert.match(empty.slice(emptyAssetsAt, emptyMainAt), /wb-assets-empty/);

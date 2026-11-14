@@ -20,6 +20,27 @@ import { icon } from "../icons.js";
 import { store } from "../store.js";
 import { api as http } from "../api.js";
 import {
+  batchGroups,
+  dismissUploadPanel,
+  ensureBatchIndex,
+  forgetGroupAsset,
+  importFiles,
+  loadPatternPage,
+  openPattern,
+  openPatternAsset,
+  patternColumnHtml,
+  retryFailedImports,
+  togglePatternGroup,
+} from "../batch.js";
+import { openBatchExport } from "./batch-export.js";
+import { openRunDialog } from "./processing-panel.js";
+import {
+  formatPixels,
+  healthPixelLimits,
+  pixelLimitForProcessRoute,
+  pixelLimitForVectorMode,
+} from "../processing.js";
+import {
   dimsOf,
   escapeHtml,
   formatBytes,
@@ -45,8 +66,6 @@ const MIN_SCALE = 0.2;
 const MAX_SCALE = 3;
 const CROP_MIN_PX = 4;
 const MASK_MAX_POINTS = 2048;
-/** 单次打包导出的资产上限；界面勾选与提交使用同一上限。 */
-const EXPORT_LIMIT = 24;
 
 /** 会话底座：原件与规范输入不能从工作台移除。 */
 const SESSION_BASE_KINDS = new Set(["original", "normalized", "normalized_input"]);
@@ -85,8 +104,17 @@ const CLOUD_INPUT_MIN_PIXELS = 262_144;
 const CLOUD_INPUT_MAX_PIXELS = 25_000_000;
 const CLOUD_INPUT_ASPECT_MIN = 1 / 16;
 const CLOUD_INPUT_ASPECT_MAX = 16;
-/** 矢量化输入：只接受流程产出的 PNG / 已接受修复 / 候选合成；未接受候选不在此列。 */
-const VECTOR_INPUT_KINDS = new Set(["lineart", "transparent_png", "accepted_repair", "composed_candidate"]);
+/**
+ * 矢量化输入：流程产出的 PNG、已接受修复、候选合成，以及显式创建的工作副本。
+ * 工作副本用于把大图降到矢量模式的像素上限内；后端 RGB 输入同样接受它。
+ */
+const VECTOR_INPUT_KINDS = new Set([
+  "lineart",
+  "transparent_png",
+  "accepted_repair",
+  "composed_candidate",
+  "working_copy",
+]);
 /** 有预览图的资产类型；ZIP 只给下载链接 */
 const NO_PREVIEW_KINDS = new Set(["zip", "export", "archive"]);
 /** 后端局部修复的输入上限（与 finishing_workbench.MAX_REPAIR_PIXELS 一致）。 */
@@ -302,9 +330,6 @@ function defaultDraft() {
     tileUnitId: "",
     tileUnitTouched: false,
     seamGrid: false,
-    exportIds: [],
-    exportInit: false,
-    licenseAck: false,
   };
 }
 
@@ -319,7 +344,6 @@ const ui = {
   errorDetail: "",
   notice: "",
   sessionError: "",
-  lastExport: null,
   compareX: 55,
 };
 
@@ -360,8 +384,7 @@ let activeJobToken = null;
 let mountedRoot = null;
 /* 候选层请求序号：较旧的异步响应不能覆盖较新的层列表。 */
 let layersRequestSeq = 0;
-/* 折叠的资产分组（key = 工序号）与上一次滚动定位到的资产 */
-const collapsedGroups = new Set();
+/* 上一次滚动定位到的资产 */
 let lastRevealedId = "";
 /* 切换当前资产后由 revealCurrentThumb 决定缩略图区滚动位置，重绘时不再恢复旧值 */
 let filmRestoreSkip = false;
@@ -455,6 +478,8 @@ function healthCapabilitySignature() {
     leftrefill.available ?? null,
     leftrefill.reason || "",
     leftrefill.checked || "",
+    // 像素上限也来自 health：字段变化时重绘，避免继续显示旧 cap。
+    store.health?.limits || null,
   ]);
 }
 
@@ -688,37 +713,6 @@ function tilePreviewLatest() {
   return null;
 }
 
-function exportableAssets() {
-  return (store.session.assets || []).filter((asset) => !NO_PREVIEW_KINDS.has(asset.kind));
-}
-
-function defaultExportIds() {
-  const list = exportableAssets();
-  const ids = [];
-  const current = currentAsset();
-  if (current && !NO_PREVIEW_KINDS.has(current.kind)) ids.push(current.asset_id);
-  const wanted = ["transparent_png", "svg", "cropped", "accepted_repair", "lineart"];
-  for (const kind of wanted) {
-    for (let i = list.length - 1; i >= 0; i -= 1) {
-      if (list[i].kind === kind && !ids.includes(list[i].asset_id)) {
-        ids.push(list[i].asset_id);
-        break;
-      }
-    }
-    if (ids.length >= 4) break;
-  }
-  return ids.slice(0, EXPORT_LIMIT);
-}
-
-function exportSelection() {
-  const valid = new Set(exportableAssets().map((asset) => asset.asset_id));
-  if (!draft.exportInit) {
-    draft.exportIds = defaultExportIds();
-    draft.exportInit = true;
-  }
-  return draft.exportIds.filter((id) => valid.has(id));
-}
-
 function compareInfo(stage) {
   if (stage?.key === "tile") return { ok: false, reason: "平铺视图不支持对比，先切回其它工序。" };
   const current = currentAsset();
@@ -784,9 +778,6 @@ function syncDrafts(state) {
   const imageId = store.session.imageId || "";
   if (imageId !== lastImageId) {
     lastImageId = imageId;
-    draft.exportIds = [];
-    draft.exportInit = false;
-    draft.licenseAck = false;
     draft.tileUnitId = "";
     draft.tileUnitTouched = false;
     draft.seam = "not_reviewed";
@@ -805,7 +796,6 @@ function syncDrafts(state) {
     lastRestoredRepairKey = "";
     repairState.info = null;
     repairState.error = "";
-    ui.lastExport = null;
   }
   if (expectedImage && imageId === expectedImage) ui.sessionError = "";
   if (id !== lastCurrentId) {
@@ -1103,15 +1093,6 @@ const createdMs = (asset) => {
   return Number.isNaN(ms) ? 0 : ms;
 };
 
-/** 生成时间精确到秒：同一分钟里跑出来的多个版本靠它区分。 */
-function clockOf(asset) {
-  const ms = createdMs(asset);
-  if (!ms) return "—";
-  const date = new Date(ms);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-}
-
 function assetStageNo(asset) {
   // 蒙版修正产物即使没有带 job 记录（例如从纹样库重新打开），也归到 06 蒙版。
   if (
@@ -1183,75 +1164,6 @@ function assetParamLine(asset) {
   return bits.slice(0, 3).join(" · ");
 }
 
-/** 缩略图 title：类型 + 版本 + 尺寸 + 生成时刻 + 参数 + 资产 id。 */
-function assetThumbTitle(asset, version, versions = 1) {
-  const parts = [
-    versions > 1 ? `${kindLabel(asset.kind)} · v${version}` : kindLabel(asset.kind),
-    `${dimsOf(asset)} · ${formatTime(asset.created_at, { withDate: true })}`,
-  ];
-  const params = assetParamLine(asset);
-  if (params) parts.push(params);
-  parts.push(shortId(asset.asset_id));
-  return parts.join("\n");
-}
-
-function assetGroupMarkup(group) {
-  const collapsed = collapsedGroups.has(group.key);
-  const currentId = store.session.currentAssetId;
-  const locked = Boolean(ui.running || store.session.activeJob);
-  const headTitle = `${group.stage ? `第 ${group.stage.n} 道 ${group.stage.name}` : "其它资产"} · ${group.count} 项`;
-  /* 组内先按类型（工序内的固定顺序）再按时间倒序：同类型的版本挨在一起，方便对比。 */
-  const ordered = [...group.entries].sort(
-    (a, b) =>
-      (KIND_RANK[a.asset.kind] ?? 90) - (KIND_RANK[b.asset.kind] ?? 90) ||
-      createdMs(b.asset) - createdMs(a.asset)
-  );
-  const cards = ordered
-    .map(({ asset, version, versions, label }) => {
-      const on = asset.asset_id === currentId;
-      const url = assetPreview(asset);
-      const versionText = versions > 1 ? ` v${version}` : "";
-      const removable = !SESSION_BASE_KINDS.has(asset.kind);
-      return `<li class="wb-thumb-item">
-        <button class="wb-thumb" type="button" data-act="asset" data-id="${asset.asset_id}"
-          aria-current="${on ? "true" : "false"}"
-          aria-label="${esc(`${label}${versionText} · ${dimsOf(asset)} · ${clockOf(asset)}${on ? " · 当前资产" : ""}`)}"
-          title="${esc(assetThumbTitle(asset, version, versions))}">
-          <span class="wb-thumb__plate plate plate--grain">
-            ${
-              url
-                ? `<img class="plate__img" src="${url}" alt="" loading="lazy" decoding="async" />`
-                : `<span class="wb-thumb__file" aria-hidden="true">${icon("file")}</span>`
-            }
-            ${versions > 1 ? `<span class="wb-thumb__ver mono">v${version}</span>` : ""}
-            ${on ? `<span class="wb-thumb__now">当前</span>` : ""}
-          </span>
-          <span class="wb-thumb__cap">${esc(label)}</span>
-        </button>
-        ${
-          removable
-            ? `<button class="wb-thumb__del" type="button" data-act="remove-asset" data-id="${asset.asset_id}"
-                ${locked ? "disabled" : ""}
-                aria-label="${esc(`从工作台移除 ${label}${versionText}`)}"
-                title="从工作台移除（纹样库记录保留）">${icon("close")}</button>`
-            : ""
-        }
-      </li>`;
-    })
-    .join("");
-  return `
-  <section class="wb-group" data-group="${esc(group.key)}">
-    <button class="wb-group__head" type="button" data-act="toggle-group" data-group="${esc(group.key)}"
-      aria-expanded="${collapsed ? "false" : "true"}" title="${esc(headTitle)}">
-      <span class="wb-group__no mono">${esc(group.stage ? group.stage.n : "··")}</span>
-      <span class="wb-group__name">${esc(group.label)}</span>
-      <span class="wb-group__count mono">${group.count > 1 ? `${group.count} 项` : ""}</span>
-      <span class="wb-group__chev" aria-hidden="true">${icon("chevron")}</span>
-    </button>
-    <ul class="wb-group__grid"${collapsed ? " hidden" : ""}>${cards}</ul>
-  </section>`;
-}
-
 /** 切到别的资产后把缩略图滚进视野；同一资产不重复滚动，也不在单栏布局里滚动整页。 */
 function revealCurrentThumb(root) {
   const id = store.session.currentAssetId || "";
@@ -1260,14 +1172,14 @@ function revealCurrentThumb(root) {
   filmRestoreSkip = true;
   const card = root?.querySelector(`.wb-thumb[data-id="${id}"]`);
   if (!card) return;
-  // 当前资产落在折叠组里（例如刚跑完的新结果）：展开它，否则结果看不见。
-  const grid = card.closest(".wb-group__grid");
-  if (grid?.hidden) {
-    grid.hidden = false;
-    const group = grid.closest(".wb-group");
-    const head = group?.querySelector(".wb-group__head");
+  // 当前资产落在折叠的原图组里（例如刚跑完的新结果）：展开它，否则结果看不见。
+  const body = card.closest(".bp-group__body");
+  if (body?.hidden) {
+    body.hidden = false;
+    const group = body.closest(".bp-group");
+    const head = group?.querySelector("[data-act='pattern-toggle']");
     if (head) head.setAttribute("aria-expanded", "true");
-    if (group?.dataset.group) collapsedGroups.delete(group.dataset.group);
+    if (group?.dataset.pattern) togglePatternGroup(group.dataset.pattern);
   }
   const scroller = root.querySelector(".wb-groups");
   if (!scroller || scroller.scrollHeight <= scroller.clientHeight) return;
@@ -1356,26 +1268,12 @@ function railHtml(state) {
   </aside>`;
 }
 
-/** 资产单独一列：整列高度都归缩略图，不再被工序轨压到左栏底部。 */
+/**
+ * 纹样单独一列：按原图 image_id 分区，同图的所有处理结果留在同一组。
+ * 分组索引在 batch.js，当前会话之外的组不会并入 store.session。
+ */
 function assetsHtml() {
-  const assets = store.session.assets || [];
-  const assetGroups = groupAssets(assets);
-  return `
-  <aside class="wb-assets" aria-label="图片资产">
-    <header class="wb-rail__head">
-      <span class="label">资产</span>
-      <span class="mono">${assets.length} 项 · ${assetGroups.length} 组</span>
-    </header>
-    ${
-      assets.length
-        ? `<div class="wb-groups">${assetGroups.map((group) => assetGroupMarkup(group)).join("")}</div>`
-        : `<div class="wb-assets-empty">
-             <p>这个会话还没有资产。上传一张原图，或从纹样库挑一件。</p>
-             <button class="btn btn--ghost btn--sm btn--block" type="button" data-act="upload">${icon("upload")}上传纹样</button>
-             <button class="btn btn--quiet btn--sm btn--block" type="button" data-act="library">去纹样库挑一件</button>
-           </div>`
-    }
-  </aside>`;
+  return patternColumnHtml();
 }
 
 /* ------------------------------------------------------------------ 中栏画布 */
@@ -2056,6 +1954,48 @@ function cropPanel(state) {
   )}`;
 }
 
+function pixelsLabel(pixels) {
+  const value = Number(pixels);
+  if (!Number.isFinite(value) || value <= 0) return "尺寸未知";
+  return `${formatPixels(value)} 像素（${(value / 1_000_000).toFixed(1)} MP）`;
+}
+
+/**
+ * 当前路线超过上限时的显式工作副本入口；原图与来源记录保留，不隐式缩放。
+ * cap 来自 health.limits，不在界面写死具体数值。
+ */
+function pixelCapSection(asset, cap, label) {
+  const capValue = Number(cap) > 0 ? Math.floor(Number(cap)) : null;
+  const width = Number(asset?.width);
+  const height = Number(asset?.height);
+  const pixels = width > 0 && height > 0 ? width * height : 0;
+  const over = Boolean(capValue && pixels && pixels > capValue);
+  return sec(
+    "像素上限",
+    capValue ? `${formatPixels(capValue)} 像素` : "未知",
+    `<p class="field__hint">${pixels ? `当前输入 ${esc(pixelsLabel(pixels))}` : "当前输入尺寸未知"}${
+      capValue
+        ? ` · ${esc(label)}上限 ${formatPixels(capValue)} 像素。${
+            over
+              ? "超过上限，需要显式创建工作副本；不会自动缩放原图，也不会按上限静默重采样。"
+              : "当前输入在上限内；处理不会隐式缩放。"
+          }`
+        : ` · 本机服务没有报告${esc(label)}上限；不会隐式缩放。`
+    }</p>
+    ${
+      over
+        ? `<div class="wb-inline">
+             <button class="btn btn--primary btn--sm" type="button" data-act="run-working-copy"
+               data-cap="${capValue}" data-label="${esc(label)}"${ui.running ? " disabled" : ""}>
+               ${icon("crop")}创建工作副本（≤ ${formatPixels(capValue)} 像素）
+             </button>
+             <span class="mono wb-inline__note">保留原图与来源记录</span>
+           </div>`
+        : ""
+    }`
+  );
+}
+
 function processPanel(state) {
   const asset = currentAsset();
   if (!asset) return noAssetPanel();
@@ -2073,14 +2013,25 @@ function processPanel(state) {
   const input = route === "cloud" ? cloudInput : localInput;
   const routeLabel =
     route === "local" ? "本地模型" : route === "cloud" ? "云端模型" : route === "opencv" ? "OpenCV" : "颜色提取";
+  const limits = healthPixelLimits();
+  const routeCap = pixelLimitForProcessRoute(route, limits, draft.extractMode);
+  const capLabel =
+    route === "color" && draft.extractMode === "otsu"
+      ? "Otsu 提取"
+      : route === "color"
+      ? "颜色提取"
+      : routeLabel;
+  const capHint = !routeCap
+    ? ""
+    : `当前${capLabel}路线单张上限 ${formatPixels(routeCap)} 像素。`;
   const routeHint =
     route === "local"
-      ? "本地模型：直接用本机模型生成线稿 PNG，不调用云端，也不会自动矢量化。"
+      ? `本地模型：直接用本机模型生成线稿 PNG，不调用云端，也不会自动矢量化。${capHint}`
       : route === "cloud"
       ? "云端模型：把当前输入上传到云端生成线稿 PNG；每次调用都要分别确认上传与调用，失败不自动重发，也不会自动矢量化。"
       : route === "opencv"
-      ? "OpenCV：本机传统算法生成线稿 PNG，不依赖模型权重，也不调用云端。"
-      : "颜色提取：本机生成前景蒙版、透明 PNG 与外轮廓线稿；蒙版修正后再到 07 矢量化。";
+      ? `OpenCV：本机传统算法生成线稿 PNG，不依赖模型权重，也不调用云端。${capHint}`
+      : `颜色提取：本机生成前景蒙版、透明 PNG 与外轮廓线稿；蒙版修正后再到 07 矢量化。${capHint}`;
   const inputProblem = !input.asset
     ? input.error === "unsupported"
       ? `当前资产是「${kindLabel(asset.kind)}」，不能作为${routeLabel}输入。请从下面明确选择一个支持的输入；未接受的修复候选不能继续使用。`
@@ -2126,6 +2077,7 @@ function processPanel(state) {
           })}`
         )
   }
+  ${pixelCapSection(input.asset, routeCap, capLabel)}
   ${
     route === "local"
       ? `${sec(
@@ -2379,6 +2331,12 @@ function vectorPanel(state) {
       ? `当前资产是「${kindLabel(asset.kind)}」，不能直接矢量化。未接受的修复候选不能作为输入；请从下面选择线稿 PNG、透明 PNG、候选合成或已接受修复。`
       : "先打开一张纹样，或从纹样库打开一个资产。"
     : "";
+  const limits = healthPixelLimits();
+  // 单图 /jobs/vectorize 仍按 working_pixels；彩色 250k 只是组合/批次建议，
+  // 不能把普通单图矢量入口改成硬禁用。
+  const vectorCap = pixelLimitForVectorMode(draft.vectorMode, limits);
+  const colorSuggestion = draft.vectorMode === "color" ? limits.colorVector : null;
+  const vectorCapLabel = "矢量化入口";
   return `
   ${jobBox(stage)}
   ${errorBox()}
@@ -2398,13 +2356,22 @@ function vectorPanel(state) {
           })}`
         )
   }
+  ${pixelCapSection(input.asset, vectorCap, vectorCapLabel)}
   ${sec(
     "矢量参数",
     "vtracer",
     `${segField("vectorMode", "矢量模式", VECTOR_MODES, draft.vectorMode)}
     ${segField("colors", "颜色数", COLOR_OPTIONS.map(([value, text]) => [value, text]), draft.colors)}
     ${segField("detail", "细节", DETAILS, draft.detail)}
-    <p class="field__hint">颜色数只影响 SVG 填充；细节越高路径越多、越接近原图，也更容易碰到本机内存上限。颜色模式建议不超过 25 万像素，单色/轮廓上限 100 万像素。</p>`
+    <p class="field__hint">颜色数只影响 SVG 填充；细节越高路径越多、越接近原图，也更容易碰到本机内存上限。${
+      colorSuggestion
+        ? `彩色建议 ≤ ${formatPixels(colorSuggestion)} 像素（组合/批次副本安全建议）；`
+        : ""
+    }${
+      vectorCap
+        ? `此入口上限 ${formatPixels(vectorCap)} 像素（来自本机健康检查）。`
+        : "本机服务没有报告矢量入口上限；不会隐式缩放。"
+    }超过入口上限时先用上面的显式工作副本，不要直接提交。</p>`
   )}
   ${sec(
     "最新产物",
@@ -2669,53 +2636,14 @@ function repairPanel(state, methodOverride = repairMethod()) {
 }
 
 function exportsSection(state) {
-  const assets = exportableAssets();
-  const selection = exportSelection();
-  const selectedSet = new Set(selection);
-  const zip = ui.lastExport;
+  const groups = batchGroups();
+  const total = groups.reduce((sum, group) => sum + group.assets.length, 0);
   return sec(
     "导出",
-    selection.length ? `${selection.length} 个资产` : "未选",
-    `${
-      assets.length
-        ? `<ul class="wb-export-list">
-            ${assets
-              .map(
-                (asset) => `<li>
-                  <label class="wb-export-row">
-                    <input class="wb-check__input" type="checkbox" data-export="${asset.asset_id}"
-                      ${selectedSet.has(asset.asset_id) ? "checked" : ""} aria-label="${esc(kindLabel(asset.kind))}" />
-                    <span class="wb-check__box" aria-hidden="true">${icon("check")}</span>
-                    <span class="wb-export-row__body">
-                      <span class="wb-export-row__name">${esc(kindLabel(asset.kind))}</span>
-                      <span class="mono wb-export-row__meta">${esc(dimsOf(asset))} · ${esc(shortId(asset.asset_id))}</span>
-                    </span>
-                  </label>
-                </li>`
-              )
-              .join("")}
-          </ul>`
-        : `<p class="field__hint">会话里还没有可导出的资产。</p>`
-    }
-    ${checkRow(
-      "licenseAck",
-      "许可证已确认（勾选后才能导出未登记许可证的资产）",
-      draft.licenseAck,
-      "导出清单会记录这次确认。"
-    )}
-    <div class="wb-inline">
-      <button class="btn btn--primary btn--sm" type="button" data-act="run-export"${
-        selection.length && draft.licenseAck && !ui.running ? "" : " disabled"
-      }>${icon("download")}导出 ZIP</button>
-      <span class="mono wb-inline__note">${selection.length} / ${EXPORT_LIMIT}</span>
-    </div>
-    ${
-      zip
-        ? `<a class="btn btn--paper btn--sm btn--block wb-download" href="${http.assetDownloadUrl(zip.asset_id)}" download>
-            ${icon("download")}下载 ZIP · ${esc(formatBytes(zip.bytes))}
-          </a>`
-        : ""
-    }`
+    `${groups.length} 个原图组 · ${total} 项`,
+    `<p class="field__hint">导出在网页内浮窗完成：按原图分目录打包，可整组选择或按处理类型批选；只打包原始文件、已有 PNG 与已有 SVG，不做格式转换。</p>
+     <button class="btn btn--primary btn--sm btn--block" type="button" data-act="open-export"${total ? "" : " disabled"}>${icon("download")}打开批量导出</button>
+     <p class="field__hint">许可提示与 128 MiB 上限在浮窗内确认；任务完成后 ZIP 出现在浮窗和纹样库中。</p>`
   );
 }
 
@@ -3119,7 +3047,6 @@ function restoreFocus(root) {
   if (memo.field) selector = `[data-field="${memo.field}"]`;
   else if (memo.range) selector = `[data-range="${memo.range}"]`;
   else if (memo.check) selector = `[data-check="${memo.check}"]`;
-  else if (memo.export) selector = `[data-export="${memo.export}"]`;
   else if (memo.seg) selector = `[data-seg="${memo.seg}"][data-val="${memo.val}"]`;
   else if (memo.act) {
     selector = `[data-act="${memo.act}"]`;
@@ -3787,7 +3714,7 @@ function removeSessionAsset(api, assetId) {
   if (!window.confirm(`从工作台移除「${kindLabel(asset.kind)}」？纹样库与任务记录会保留。`)) return;
   const removed = store.removeAsset(assetId);
   if (!removed) return;
-  draft.exportIds = (draft.exportIds || []).filter((id) => id !== assetId);
+  forgetGroupAsset(store.session.imageId || "", assetId);
   if (draft.tileUnitId === assetId) {
     draft.tileUnitId = "";
     draft.tileUnitTouched = false;
@@ -3894,7 +3821,6 @@ function patchCheckbox(root, state, api, key, checked) {
     case "consentCharge":
     case "repairConsentUpload":
     case "repairConsentCharge":
-    case "licenseAck":
     case "acceptFull":
       draft[key] = checked;
       break;
@@ -4127,6 +4053,54 @@ function bindMask(root, state, api) {
 }
 
 /* ------------------------------------------------------------------ 任务动作 */
+
+/** 工作副本请求体只包含输入与显式像素上限，不携带缩放以外的参数。 */
+export function buildWorkingCopyPayload(asset, cap) {
+  return {
+    input_asset_id: asset.asset_id,
+    max_pixels: Math.floor(Number(cap)),
+  };
+}
+
+/**
+ * 显式创建工作副本：只把当前输入缩到当前路线允许的像素上限内。
+ * 原图、来源记录与规范输入都保留；成功后把 working_copy 设为当前资产。
+ */
+async function runWorkingCopy(api, cap, label = "当前路线") {
+  const asset = currentAsset();
+  if (!asset) return;
+  if (!isImageLike(asset)) {
+    api.toast(`当前资产「${kindLabel(asset.kind)}」不能作为工作副本输入。`, "warn");
+    return;
+  }
+  const maxPixels = Math.floor(Number(cap));
+  if (!Number.isFinite(maxPixels) || maxPixels < 10_000) {
+    api.toast("本机服务没有报告可用的像素上限，暂时不能创建工作副本。", "warn");
+    return;
+  }
+  const pixels = Number(asset.width) * Number(asset.height);
+  if (pixels && pixels <= maxPixels) {
+    api.toast("当前输入已经在该路线上限内，不需要创建工作副本。", "info");
+    return;
+  }
+  await startJob(
+    api,
+    () => http.workingCopy(buildWorkingCopyPayload(asset, maxPixels)),
+    (final) => {
+      const produced =
+        (final.result?.assets || []).find((entry) => entry.kind === "working_copy") ||
+        final.result?.assets?.[0] ||
+        null;
+      if (produced) {
+        store.setCurrentAsset(produced.asset_id);
+        ui.notice = `已创建工作副本 ${dimsOf(produced)}（≤ ${formatPixels(maxPixels)} 像素，${label}）；原图与来源记录保留。`;
+        api.toast("工作副本已生成，并设为当前资产。", "done");
+      } else {
+        ui.notice = "工作副本任务完成，但没有返回 working_copy 资产。";
+      }
+    }
+  );
+}
 
 async function runCrop(api) {
   const asset = currentAsset();
@@ -4987,31 +4961,6 @@ async function runTile(api) {
   });
 }
 
-async function runExport(api) {
-  const selection = exportSelection();
-  if (!selection.length) {
-    api.toast("至少勾选一个资产再导出。", "warn");
-    return;
-  }
-  if (!draft.licenseAck) {
-    api.toast("请先勾选「许可证已确认」。", "warn");
-    return;
-  }
-  ui.lastExport = null;
-  const ids = selection.slice(0, EXPORT_LIMIT);
-  const payload = { asset_ids: ids, license_acknowledged: true };
-  await startJob(api, () => http.exportAssets(payload), (final) => {
-    const zip = (final.result?.assets || []).find((entry) => entry.kind === "zip") || null;
-    if (zip) {
-      ui.lastExport = zip;
-      ui.notice = `导出完成：${ids.length} 个资产，ZIP ${formatBytes(zip.bytes)}。`;
-      api.toast("导出完成，可下载 ZIP。", "done");
-    } else {
-      ui.notice = "导出任务完成，但没有返回 ZIP 资产。";
-    }
-  });
-}
-
 /* ------------------------------------------------------------------ 顶层点击 / 输入 */
 
 function handleClick(root, state, api, event) {
@@ -5047,16 +4996,61 @@ function handleClick(root, state, api, event) {
     case "asset":
       switchAsset(api, root, el.dataset.id);
       break;
-    case "toggle-group": {
-      const open = el.getAttribute("aria-expanded") !== "false";
-      const key = el.dataset.group || "";
-      el.setAttribute("aria-expanded", open ? "false" : "true");
-      const grid = el.closest(".wb-group")?.querySelector(".wb-group__grid");
-      if (grid) grid.hidden = open;
-      if (key) {
-        if (open) collapsedGroups.add(key);
-        else collapsedGroups.delete(key);
+    case "pattern-toggle": {
+      const imageId = el.dataset.image || "";
+      const collapsed = togglePatternGroup(imageId);
+      el.setAttribute("aria-expanded", String(!collapsed));
+      const body = el.closest(".bp-group")?.querySelector(".bp-group__body");
+      if (body) body.hidden = collapsed;
+      break;
+    }
+    case "pattern-open": {
+      const imageId = el.dataset.image || "";
+      if (!openPattern(imageId, api, state.stage || 1)) {
+        api.toast("已经是当前原图。", "info");
       }
+      break;
+    }
+    case "pattern-asset":
+      openPatternAsset(el.dataset.image || "", el.dataset.id || "", api, state.stage || 1);
+      break;
+    case "batch-import":
+      root.querySelector("[data-batch-files]")?.click();
+      break;
+    case "batch-more":
+      if (el.disabled) break;
+      el.disabled = true;
+      el.textContent = "载入中…";
+      loadPatternPage({ append: true, onChange: () => repaintIfHere(api) });
+      break;
+    case "batch-dismiss":
+      dismissUploadPanel();
+      repaint(root, api);
+      break;
+    case "batch-retry":
+      retryFailedImports({
+        onChange: () => repaintIfHere(api),
+        toast: (message, kind) => api.toast(message, kind),
+      });
+      break;
+    case "open-export":
+      openBatchExport({
+        api,
+        groups: batchGroups(),
+        defaultImageId: store.session.imageId || "",
+        currentAssetId: store.session.currentAssetId || "",
+        scopeNote: `本次已载入 ${batchGroups().length} 个原图组`,
+      });
+      break;
+    case "process-batch": {
+      const groups = batchGroups();
+      const imageId = store.session.imageId || "";
+      openRunDialog({
+        groups,
+        preselectedImageIds: imageId ? [imageId] : [],
+        preferredInputs: imageId ? { [imageId]: store.session.currentAssetId || "" } : {},
+        sourceLabel: "工作台 · 批量处理",
+      });
       break;
     }
     case "prev-asset":
@@ -5102,7 +5096,7 @@ function handleClick(root, state, api, event) {
       break;
     case "go-export":
       patchStage(api, root, { stage: 8 });
-      api.toast("在 08 勾选要导出的资产，并勾选许可证确认。", "info");
+      api.toast("在 08 打开批量导出浮窗：按原图分目录，整组或按类型选择。", "info");
       break;
     case "go-vector":
       patchStage(api, root, { stage: 7 });
@@ -5137,6 +5131,9 @@ function handleClick(root, state, api, event) {
       break;
     case "apply-crop":
       runCrop(api);
+      break;
+    case "run-working-copy":
+      runWorkingCopy(api, Number(el.dataset.cap), el.dataset.label || "当前路线");
       break;
     case "run-color":
     case "run-extract":
@@ -5186,9 +5183,6 @@ function handleClick(root, state, api, event) {
       break;
     case "save-seam":
       saveSeam(api);
-      break;
-    case "run-export":
-      runExport(api);
       break;
     case "cancel":
       cancelActive(api);
@@ -5304,26 +5298,20 @@ function handleInput(root, state, api, event) {
 
 function handleChange(root, state, api, event) {
   const input = event.target;
-  if (input.matches("[data-check]")) {
-    patchCheckbox(root, state, api, input.dataset.check, input.checked);
+  if (input.matches("[data-batch-files]")) {
+    const files = [...(input.files || [])];
+    // 清空 input，允许再次选择同一批文件；是否重复提交由 batch.js 判断。
+    input.value = "";
+    if (files.length) {
+      importFiles(files, {
+        onChange: () => repaintIfHere(api),
+        toast: (message, kind) => api.toast(message, kind),
+      });
+    }
     return;
   }
-  if (input.matches("[data-export]")) {
-    const id = input.dataset.export;
-    const selection = new Set(exportSelection());
-    if (input.checked) {
-      if (selection.size >= EXPORT_LIMIT) {
-        input.checked = false;
-        api.toast(`一次最多打包导出 ${EXPORT_LIMIT} 个资产，请先取消其中一项。`, "warn");
-        return;
-      }
-      selection.add(id);
-    } else {
-      selection.delete(id);
-    }
-    draft.exportIds = [...selection];
-    draft.exportInit = true;
-    repaint(root, api);
+  if (input.matches("[data-check]")) {
+    patchCheckbox(root, state, api, input.dataset.check, input.checked);
     return;
   }
   const select = input.closest("[data-select]");
@@ -5430,6 +5418,8 @@ export default {
     bindCrop(wb, state, api);
     bindMask(wb, state, api);
     revealCurrentThumb(wb);
+    // 首次进入时把最近的原图组读进索引；只读排序，不切换会话。
+    ensureBatchIndex({ onChange: () => repaintIfHere(api) });
 
     // 键盘 C 与点击“对比”走同一套可用性检查（app.js 只派发事件）。
     compareKeyHandler = () => {

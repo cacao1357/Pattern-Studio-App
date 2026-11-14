@@ -135,9 +135,8 @@
   color: var(--text-3);
 }
 
-/* 八道工序轨道 */
+/* 八道工序轨道：一步一块淡色底，数字列旁不再画贯穿竖线 */
 .wb-steps {
-  position: relative;
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
@@ -151,15 +150,6 @@
   min-height: 38px;
   max-height: 64px;
 }
-.wb-steps::before {
-  content: "";
-  position: absolute;
-  top: 8px;
-  bottom: 8px;
-  left: 23px;
-  width: 1px;
-  background: var(--line-1);
-}
 .wb-step {
   position: relative;
   display: grid;
@@ -172,12 +162,14 @@
   border-radius: var(--r-sm);
   text-align: left;
   color: var(--text-3);
+  /* 淡淡色块：一步就是一块可点的面，不再是裸文字 */
+  background: color-mix(in srgb, var(--text-1) 4%, transparent);
   transition: background var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out),
     transform var(--dur-2) var(--ease-emphasis);
 }
-.wb-step:hover {
+.wb-step:not([data-state="current"]):hover {
   color: var(--text-1);
-  background: color-mix(in srgb, var(--text-1) 5%, transparent);
+  background: color-mix(in srgb, var(--text-1) 9%, transparent);
   transform: translateX(2px);
 }
 .wb-step:active {
@@ -231,6 +223,15 @@
   width: 2px;
   border-radius: 2px;
   background: var(--cinnabar);
+}
+/* 当前工序悬停：在朱色底上再深一档，仍明显区别于其他步骤 */
+.wb-step[data-state="current"]:hover {
+  background: color-mix(in srgb, var(--cinnabar) 26%, transparent);
+}
+/* 键盘焦点沿用 base.css 的 --ring-focus（深底 + 朱线双环），在色块上依旧清晰 */
+.wb-step:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
 }
 
 /* 资产列：文档/工序之后的独立一列，整列高度归缩略图，滚动只发生在这里 */
@@ -1571,9 +1572,6 @@
     gap: 6px;
     overflow-x: auto;
     padding-bottom: 4px;
-  }
-  .wb-steps::before {
-    display: none;
   }
   .wb-steps li {
     display: block;
