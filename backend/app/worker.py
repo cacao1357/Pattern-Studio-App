@@ -140,9 +140,11 @@ def child_main(root, job_id, token, parent_pid, memory_mib=LOCAL_MEMORY_MIB):
 
 
 class LocalWorker:
-    def __init__(self, store, *, timeout_seconds=90, provider_settings=None):
+    def __init__(self, store, *, timeout_seconds=90, provider_settings=None, batch_coordinator=None):
         self.store, self.timeout_seconds = store, timeout_seconds
         self.provider_settings = provider_settings
+        self.batch_coordinator = batch_coordinator
+        self.batch_error = None
         self.stop_event = threading.Event()
         self.thread = threading.Thread(target=self._loop, name="pattern-studio-local-worker", daemon=True)
         self.last_heartbeat = time.time()
@@ -159,7 +161,7 @@ class LocalWorker:
     def status(self):
         return {"alive": self.thread.is_alive() and time.time() - self.last_heartbeat < 15,
                 "heartbeat_age_seconds": round(time.time() - self.last_heartbeat, 2),
-                "active_job_id": self.active_job_id, "error": self.last_error,
+                "active_job_id": self.active_job_id, "error": self.last_error, "batch_error": self.batch_error,
                 "timeout_seconds": self.timeout_seconds, "provider_timeout_seconds": max(180, self.timeout_seconds),
                 "memory_limit_mib": LOCAL_MEMORY_MIB, "lineart_model_memory_limit_mib": LINEART_MODEL_MEMORY_MIB,
                 "leftrefill_memory_limit_mib": LEFTREFILL_MEMORY_MIB, "leftrefill_timeout_seconds": max(180, self.timeout_seconds),
@@ -172,6 +174,14 @@ class LocalWorker:
             self.last_heartbeat = time.time()
             try:
                 workflows.advance()
+                if self.batch_coordinator is not None:
+                    try:
+                        self.batch_coordinator.advance()
+                        self.batch_error = None
+                    except Exception:
+                        # A batch coordination failure must not block the queue
+                        # needed to complete already submitted or independent jobs.
+                        self.batch_error = "BATCH_COORDINATOR_UNAVAILABLE"
                 claimed = self.store.claim()
                 self.last_error = None
                 if claimed:

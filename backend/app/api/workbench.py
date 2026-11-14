@@ -41,6 +41,9 @@ def mount_workbench(app, current_store, current_service, current_worker):
             "capabilities": {"lineart_model": model_capability(), "leftrefill_model": repair_model_capability()},
             "limits": {"upload_bytes": DEFAULT_LIMITS.max_upload_bytes, "decode_pixels": DEFAULT_LIMITS.max_decode_pixels,
                        "working_pixels": DEFAULT_LIMITS.max_vector_pixels, "color_vector_pixels": DEFAULT_LIMITS.max_color_vector_pixels,
+                       "model_lineart_pixels": DEFAULT_LIMITS.max_model_lineart_pixels,
+                       "threshold_pixels": DEFAULT_LIMITS.max_threshold_pixels,
+                       "working_copy_pixels": DEFAULT_LIMITS.max_model_lineart_pixels,
                        "tile_pixels": DEFAULT_LIMITS.max_tile_pixels,
                        "provisional": True}}, status_code=200 if ready else 503)
 

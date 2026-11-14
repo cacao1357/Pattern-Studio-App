@@ -565,7 +565,7 @@ class WorkbenchStore(Store):
             raise ServiceError("JOB_NOT_FOUND", "Local job not found", 404)
         return self._job(row)
 
-    def cancel_job(self, job_id):
+    def cancel_job(self, job_id, *, allow_queued_provider=False):
         """Atomically stop a queued/running local task before any later publication."""
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -579,7 +579,7 @@ class WorkbenchStore(Store):
             can_call_provider = row["kind"] in EXTERNAL_CALL_JOBS or (
                 row["kind"] == "repair" and parameters.get("method", "cloud") != "leftrefill" and not parameters.get("provider_call_id")
             )
-            if can_call_provider:
+            if can_call_provider and not (allow_queued_provider and row["state"] == "queued"):
                 raise ServiceError("CANCEL_REQUIRES_RECONCILIATION",
                     "This task may have an external call in progress. Reconcile its provider status; cancellation is unavailable.", 409)
             result = json.loads(row["result_json"])

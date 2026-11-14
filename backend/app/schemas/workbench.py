@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
 
-from app.schemas.contracts import BoundingBox, VectorOptions
+from app.schemas.contracts import BoundingBox, DEFAULT_LIMITS, VectorOptions
 
 
 class StrictModel(BaseModel):
@@ -33,7 +33,7 @@ class PrepareRequest(InputRequest):
 
 
 class WorkingCopyRequest(InputRequest):
-    max_pixels: int = Field(ge=10_000, le=1_000_000, strict=True)
+    max_pixels: int = Field(ge=10_000, le=DEFAULT_LIMITS.max_model_lineart_pixels, strict=True)
 
 
 class EnhanceOptions(StrictModel):
@@ -119,8 +119,9 @@ class PipelineRequest(InputRequest):
 
 
 class ExportRequest(StrictModel):
-    asset_ids: list[UUID] = Field(min_length=1, max_length=24)
+    asset_ids: list[UUID] = Field(min_length=1, max_length=500)
     license_acknowledged: bool = Field(default=False, strict=True)
+    layout: Literal["flat", "by_image"] = "flat"
 
     @model_validator(mode="after")
     def unique_versions(self):

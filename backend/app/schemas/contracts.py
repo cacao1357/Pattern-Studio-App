@@ -60,6 +60,8 @@ class ResourceLimits:
     max_upload_bytes: int = 20 * 1024 * 1024
     max_decode_pixels: int = 25_000_000
     max_vector_pixels: int = 1_000_000
+    max_model_lineart_pixels: int = 25_000_000
+    max_threshold_pixels: int = 4_000_000
     max_color_vector_pixels: int = 250_000
     max_svg_bytes: int = 10 * 1024 * 1024
     max_svg_paths: int = 50_000

@@ -3,7 +3,8 @@
 from io import BytesIO
 import json
 import math
-from uuid import uuid4
+import re
+from uuid import UUID, uuid4
 import zipfile
 
 from PIL import Image, ImageEnhance, ImageFilter
@@ -30,6 +31,22 @@ REQUESTS = {"crop": CropRequest, "prepare": PrepareRequest, "working-copy": Work
             "vectorize": VectorRequest, "pipeline": PipelineRequest,
             "export": ExportRequest}
 MAX_EXPORT_BYTES = 128 * 1024 * 1024
+
+
+def _export_archive_name(metadata, asset_id, suffix, layout):
+    """Build archive paths only from server-issued IDs and a bounded kind name."""
+    if layout == "flat":
+        return asset_id + suffix
+    if layout != "by_image":
+        raise ServiceError("EXPORT_LAYOUT_INVALID", "Choose a supported export layout", 422)
+    try:
+        image_id = str(UUID(str(metadata.get("image_id", ""))))
+    except (ValueError, TypeError, AttributeError):
+        # Legacy/orphan assets remain isolated instead of being guessed into a
+        # different source image's directory.
+        image_id = "unlinked-" + str(UUID(str(asset_id)))
+    kind = re.sub(r"[^A-Za-z0-9_-]", "_", str(metadata.get("kind", "asset")))[:48] or "asset"
+    return f"images/{image_id}/{kind}-{asset_id}{suffix}"
 
 
 class LocalWorkbench:
@@ -145,6 +162,11 @@ class LocalWorkbench:
                 values.pop("enhance")
                 values["vector"]["mode"] = "monochrome"
         if kind == "export":
+            export_layout = values.pop("layout", "flat")
+            # Keep the historical request hash and stored parameters for old
+            # clients (and explicit flat requests) byte-for-byte compatible.
+            if export_layout != "flat":
+                values["layout"] = export_layout
             total = 0
             unconfirmed = []
             for asset_id in values["asset_ids"]:
@@ -180,8 +202,12 @@ class LocalWorkbench:
                     if options.mode == "grabcut" and options.bbox.as_tuple() == (0, 0, *size):
                         raise ServiceError("GRABCUT_NEEDS_BACKGROUND", "Leave background outside the GrabCut rectangle", 422)
             working = kind == "pipeline" and payload.working_max_pixels is not None
-            if kind not in {"crop", "working-copy"} and size[0] * size[1] > DEFAULT_LIMITS.max_vector_pixels and not working:
-                raise ServiceError("WORKING_COPY_REQUIRED", "Create an explicit working copy of at most 1,000,000 pixels before local processing", 413)
+            pixel_limit = (DEFAULT_LIMITS.max_model_lineart_pixels
+                           if kind == "lineart" and payload.method == "model" else
+                           DEFAULT_LIMITS.max_threshold_pixels if kind == "extract" and payload.mode == "otsu"
+                           else DEFAULT_LIMITS.max_vector_pixels)
+            if kind not in {"crop", "working-copy"} and size[0] * size[1] > pixel_limit and not working:
+                raise ServiceError("WORKING_COPY_REQUIRED", f"Create an explicit working copy of at most {pixel_limit:,} pixels before this processing step", 413)
         return self.store.submit(kind, input_id, values, key, retry_of=retry_of)
 
     def retry(self, job_id, key):
@@ -296,24 +322,33 @@ def execute_local(store: WorkbenchStore, job_id, token):
         store.step(job_id, token, "export", "running")
         selected, content = [], []
         total = 0
+        layout = params.get("layout", "flat")
+        suffixes = {}
         for asset_id in params["asset_ids"]:
-            metadata, data = store.read_asset(asset_id)
-            _, path = store.get_asset(asset_id)
+            metadata, path = store.get_asset(asset_id)
             if path.suffix == ".zip":
                 raise ServiceError("NESTED_EXPORT", "Nested ZIP exports are not supported")
-            total += len(data)
+            total += metadata["bytes"]
             if total > MAX_EXPORT_BYTES:
                 raise ServiceError("EXPORT_SIZE_LIMIT", "Selected versions exceed the export limit")
-            selected.append({**metadata, "archive_name": asset_id + path.suffix})
-            content.append((asset_id + path.suffix, data))
+            suffixes[asset_id] = path.suffix
+        actual_total = 0
+        for asset_id in params["asset_ids"]:
+            metadata, data = store.read_asset(asset_id)
+            actual_total += len(data)
+            if actual_total > MAX_EXPORT_BYTES:
+                raise ServiceError("EXPORT_SIZE_LIMIT", "Selected versions exceed the export limit")
+            archive_name = _export_archive_name(metadata, asset_id, suffixes[asset_id], layout)
+            selected.append({**metadata, "archive_name": archive_name})
+            content.append((archive_name, data))
         # Reference complete lineage without silently adding other files to the ZIP.
         ancestors, pending = {}, [p["asset_id"] for a in selected for p in a.get("parents", [])]
         while pending:
             parent = pending.pop()
             if parent in ancestors or parent in params["asset_ids"]:
                 continue
-            if len(ancestors) >= 100:
-                raise ServiceError("EXPORT_LINEAGE_LIMIT", "Export a shorter lineage of explicit versions")
+            if len(ancestors) >= 10_000:
+                raise ServiceError("EXPORT_LINEAGE_LIMIT", "Selected versions have too much lineage metadata to include safely")
             metadata, _ = store.get_asset(parent)
             ancestors[parent] = metadata
             pending.extend(p["asset_id"] for p in metadata.get("parents", []))

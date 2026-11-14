@@ -25,6 +25,9 @@ from app.api.assisted import mount_assisted
 from app.api.datasets import mount_datasets
 from app.api.finishing import mount_finishing
 from app.api.svg_edit import mount_svg_edit
+from app.api.pattern_library import mount_pattern_library
+from app.api.batch_workbench import mount_batch_workbench
+from app.services.batch_workbench import BatchWorkbench
 from app.services.finishing_workbench import FinishingWorkbench
 from app.services.assisted_workbench import AssistedWorkbench
 from app.services.local_workbench import LocalWorkbench
@@ -96,7 +99,7 @@ class LocalApiBoundary:
         if scope.get("method") not in {"GET", "HEAD", "OPTIONS"} and headers.get(b"x-pattern-studio") != b"local":
             return await JSONResponse({"error": {"code": "LOCAL_REQUEST_HEADER_REQUIRED", "message": "Use the workbench or supply X-Pattern-Studio: local"}}, 403)(scope, receive, send)
         path = scope.get("path")
-        limit = DEFAULT_LIMITS.max_upload_bytes if path == "/api/v1/seedream/inputs" else DEFAULT_LIMITS.max_upload_bytes + 64 * 1024 if path == "/api/v1/images" else 128 * 1024 if path == "/api/v1/jobs/refine-mask" else 16 * 1024
+        limit = DEFAULT_LIMITS.max_upload_bytes if path == "/api/v1/seedream/inputs" else DEFAULT_LIMITS.max_upload_bytes + 64 * 1024 if path == "/api/v1/images" else 128 * 1024 if path in {"/api/v1/jobs/refine-mask", "/api/v1/exports"} else 16 * 1024
         length = headers.get(b"content-length")
         if length is not None and (len(length) > 10 or not length.isdigit() or int(length) > limit):
             return await JSONResponse({"error": {"code": "BODY_TOO_LARGE", "message": "Request body exceeds the endpoint limit"}}, 413)(scope, receive, send)
@@ -154,6 +157,7 @@ def create_app(settings: Settings | None = None, *, transport: httpx.BaseTranspo
     local_service = None
     assisted_service = None
     worker = None
+    batch_service = None
 
     def current_store() -> Store:
         if store is None:
@@ -181,9 +185,14 @@ def create_app(settings: Settings | None = None, *, transport: httpx.BaseTranspo
             raise ServiceError("API_NOT_STARTED", "The assisted workbench has not started", 503)
         return AssistedWorkbench(current_store(), runtime_settings.current(), current_local_service())
 
+    def current_batch_service():
+        if batch_service is None:
+            raise ServiceError("API_NOT_STARTED", "The batch workbench has not started", 503)
+        return batch_service
+
     @asynccontextmanager
     async def lifespan(app):
-        nonlocal store, service, local_service, assisted_service, worker
+        nonlocal store, service, local_service, assisted_service, worker, batch_service
         settings.storage_root.mkdir(parents=True, exist_ok=True)
         with exclusive_process(settings.storage_root):
             store = WorkbenchStore(settings.storage_root)
@@ -192,13 +201,15 @@ def create_app(settings: Settings | None = None, *, transport: httpx.BaseTranspo
             assisted_service = AssistedWorkbench(store, settings, local_service)
             store.recover_interrupted_calls()
             store.recover_jobs()
-            worker = LocalWorker(store, provider_settings=runtime_settings.current)
+            batch_service = BatchWorkbench(store, local_service, assisted=current_assisted_service)
+            worker = LocalWorker(store, provider_settings=runtime_settings.current, batch_coordinator=batch_service)
             worker.start()
             try:
                 yield
             finally:
                 worker.stop()
                 worker = None
+                batch_service = None
                 local_service = None
                 assisted_service = None
                 service = None
@@ -245,6 +256,8 @@ def create_app(settings: Settings | None = None, *, transport: httpx.BaseTranspo
         return JSONResponse({"error": {"code": "HTTP_ERROR", "message": "This method or resource is unavailable"}}, error.status_code)
 
     mount_workbench(app, current_store, current_local_service, current_worker)
+    mount_pattern_library(app, current_store)
+    mount_batch_workbench(app, current_batch_service)
     mount_frontend(app)
     mount_svg_edit(app, current_store)
     mount_datasets(app, current_store)
@@ -305,7 +318,7 @@ def create_app(settings: Settings | None = None, *, transport: httpx.BaseTranspo
             "schema": {"type": "string", "minLength": 16, "maxLength": 128, "pattern": "^[A-Za-z0-9_-]+$"},
             "description": "Reuse the same key only for identical input and parameters; a conflict returns 409.",
         }
-        keyed_paths = {"/api/v1/images", "/api/v1/pipelines", "/api/v1/exports", "/api/v1/feedback", "/api/v1/seedream/validations", "/api/v1/pipelines/ai"}
+        keyed_paths = {"/api/v1/images", "/api/v1/pipelines", "/api/v1/exports", "/api/v1/feedback", "/api/v1/seedream/validations", "/api/v1/pipelines/ai", "/api/v1/processing-batches"}
         for path, methods in schema["paths"].items():
             if "post" in methods and (path in keyed_paths or path.startswith("/api/v1/jobs/") or path.endswith(("/continue", "/decision", "/rerun"))):
                 parameter = {"$ref": "#/components/parameters/IdempotencyKey"}
