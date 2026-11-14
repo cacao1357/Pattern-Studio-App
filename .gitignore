@@ -19,6 +19,7 @@ storage/
 !/model/leftrefill/requirements.txt
 !/model/leftrefill/LICENSE
 !/model/leftrefill/NOTICE
+!/model/leftrefill/BASE_MODEL_LICENSE
 _qa/
 node_modules/
 frontend/dist/
@@ -45,3 +46,6 @@ Thumbs.db
 # Superseded frontend drafts kept only on this machine, not part of the repo
 /frontend/next/
 /frontend/next-v2-backup-20261110/
+
+# Downloaded LeftRefill base-model release archives
+/leftrefill-downloads/
