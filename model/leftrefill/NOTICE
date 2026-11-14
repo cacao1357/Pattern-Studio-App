@@ -1,0 +1,17 @@
+LeftRefill
+Filling Right Canvas based on Left Reference through Generalized Text-to-Image Diffusion Model
+CVPR 2024
+Upstream source: https://github.com/ewrfcas/LeftRefill
+Source revision: 893c3220ffefba7158c1b5c688d344a8a0e3ff80
+Upstream source license: Apache License 2.0, reproduced in LICENSE.
+
+2026-11-14 Pattern Studio delivery changes
+Diffusers inference adaptation and textile-specific 50-token prompt tuning.
+The prompt tensor is copied exactly into safetensors from the local step-1108
+checkpoint. Source and delivered SHA-256 digests are in inference.json.
+
+The Stable Diffusion 2 inpainting base is a separate dependency governed by
+its original model license and access terms. The upstream LeftRefill code
+license does not replace those terms. Training images are not distributed
+with this delivery. Dataset provenance does not establish redistribution
+rights for the datasets or warrant clearance for every downstream use.
