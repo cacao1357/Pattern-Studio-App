@@ -49,7 +49,7 @@ def _pixel_rectangles(mask: np.ndarray) -> str:
                     for x, end, top, bottom in sorted(rectangles))
 
 
-def validate_svg(svg: str, size: tuple[int, int], *, limits: ResourceLimits = DEFAULT_LIMITS) -> dict:
+def validate_svg(svg: str, size: tuple[int, int], *, limits: ResourceLimits = DEFAULT_LIMITS, allow_empty: bool = False) -> dict:
     if len(svg.encode("utf-8")) > limits.max_svg_bytes:
         raise ProcessingError("SVG_SIZE_LIMIT", "SVG exceeds the byte limit")
     if "<!DOCTYPE" in svg.upper() or "<!ENTITY" in svg.upper():
@@ -83,7 +83,7 @@ def validate_svg(svg: str, size: tuple[int, int], *, limits: ResourceLimits = DE
             if not re.fullmatch(r"[MmZzLlHhVvCcSsQqTtAa0-9.eE+,\s-]+", d) or not re.search(r"[LlHhVvCcSsQqTtAa]", d):
                 raise ProcessingError("EMPTY_SVG", "SVG contains an empty or invalid path")
             paths.append(element)
-    if not paths:
+    if not paths and not allow_empty:
         raise ProcessingError("EMPTY_SVG", "SVG must contain drawn paths")
     if len(paths) > limits.max_svg_paths:
         raise ProcessingError("SVG_PATH_LIMIT", "SVG exceeds the path limit; reduce detail or work size")

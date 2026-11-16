@@ -1,5 +1,28 @@
 # A 实施与交接记录
 
+## 2026-11-16 中期报告对应的系统改进
+
+本轮用户确认兼顾效果与演示完整性，仅改系统，沿用现有模型及矢量生成算法。SVG 视觉独立图形选择、移动、删除、撤销重做、保存新版本、按图历史重开及同坐标透明叠加已实现，契约见 [SVG 编辑与核验](svg-editing-contract.md)。原图、既有结果及未跟踪中期报告保留，未提交、推送或合并。
+
+后端新增组件归属和受控编辑服务、GET svg-elements 与 edit-svg 本地任务，复用原有存储、来源链、幂等、历史和 ZIP。曲线仅采样用于归属分析，保存保留原命令与精度；同源同变换的组件合并绘制以保留抗锯齿结果。人工几何编辑明确重置 geometry_verified=false，记录 manual_geometry_edit=true。过于复杂或无法安全拆分的重叠 evenodd 子路径明确拒绝，不改原文件。新增 svg.path 7.0 与 shapely 2.1.2；现有依赖未替换，pip check 通过。
+
+前端由 Harness Relay / DSH `wb/deepseek-v4.1-flash` 实现，runId `4b81c080-21c9-4e9f-89c7-160a6e1371dd`，sessionId `session-de9cf941-16c3-4020-b0ff-9cc6aa9a17ca`，已读取终态结果并独立审查。Codex 负责后端、接口、精度、绘制一致性和最终浏览器验收；原生辅助 Agent 完成后端只读审查、依赖诊断及隔离浏览器入口。独立审查发现的几何已验证标记继承问题已修复。
+
+实际验证：
+
+- 新增后端 SVG 编辑回归 9 项通过；既有矢量、按图历史、本地修复回归 40 项通过。前端完整模块测试 167 项通过；最终精度与提示调整后，编辑、叠加、引导和集成 88 项定向复测通过。
+- `node scripts/validate_system_editing.mjs D:/CondaEnvs/pattern-studio/python.exe`：独立临时 API/Chrome 验证复合路径两图形一孔洞、真实指针选择/拖动、孔洞空白不误选、删除、撤销重做、不可变保存、来源继承、刷新重开，以及 fit/100%/200% 叠加画布一致。11 项检查通过，无浏览器错误、外网流量、修复任务或云端调用。
+- 三张交付电子纹样 GT 经现有黑白矢量化后，组件数分别 558、455、45；实际前端绘制层重组与原 SVG 的 Chrome 栅格结果逐像素一致。这只验证编辑拆分/绘制未改变既有结果，不代表模型在文物照片上的准确率。报告与截图在被忽略的 `storage/validation/system-improvements-20261116/`。
+- Python 复现：设置 `PYTHONPATH=backend` 后运行 `python -B -m pytest backend/tests/test_svg_elements.py tests/test_vector_c.py backend/tests/test_image_history.py backend/tests/test_local_repair.py -q`；前端使用 `node --test frontend/tests/*.test.mjs`。本轮没有以训练或付费调用替代系统测试。
+
+本地修复环境与验证（2026-11-16 续）：成员 Release 的七个 SD2 基础模型文件已下载至被忽略的 `model/leftrefill/base/` 并逐文件校验通过，许可与来源说明保留，下载压缩包已清理。用户明确同意补齐现有 Conda `D:/CondaEnvs/pattern-studio` 环境并接受 huggingface-hub 2.4.0→0.36.2；已安装 diffusers 0.35.2、transformers 4.49.0、accelerate 1.4.0 及解析出的依赖。PyTorch 2.9.1+cu128、NumPy 2.4.6、Pillow 13.0.0 保持不变，修复类导入与 pip check 通过。
+
+首次真实 worker 在加载 UNet 时触及 6144 MiB 内存保护；受限诊断将提交额度设为 10240 MiB 后约 11 秒完成同一模型推理，进程提交峰值约 8.6 GiB、驻留峰值约 3.7 GiB，PyTorch 显存分配峰值约 3061 MiB、保留峰值 3734 MiB。只将 LEFTREFILL_MEMORY_MIB 调为 10240，其他任务额度、串行运行、180 秒超时和模型算法保持不变；没有关闭资源保护或修改系统页文件。
+
+新增显式 GPU 验证入口 `python -B scripts/validate_local_repair.py --output storage/validation/local-repair-NEW`（新输出目录），使用临时 API 存储及合成重复圆纹，运行真实受限子进程；验证候选/合成结果蒙版外逐像素不变、蒙版内存在变化、AI/未核验标记及参考图来源、waiting_user→accepted、云调用数为零。最终证据在忽略目录 `storage/validation/local-repair-20261116-final/`；最初超限和 10 GiB 诊断记录另存于 `storage/validation/local-repair-20261116/`。安装后相关回归 49 项通过，额度调整后本地修复 19 项通过。真实文物素材质量尚未验收，合成样本推理成功不代表质量达标。未提交、推送、修改模型或发起付费调用。
+
+范围收尾核对：已确认的 SVG 图形编辑、保存重开/来源追溯、同坐标叠加、修复条件引导和现有模型本地接入均有实现与验证证据。本次核对仅修正一处引导与实际请求不符的问题：前端当前提交修复框，并不自动传入发现的损伤蒙版，提示改为如实说明；不新增蒙版选择功能。引导及既有集成定向测试 64 项通过，差异格式检查通过。尚未完成的验收是报告所述真实典型文物案例的保真、孔洞/细线及修复合理性的人工核对；不据此自动启动模型优化、数据集整理或新增格式。多格式范围保持现有 PNG/SVG，未新增 DXF/PDF。Git 提交、推送及合并未获本次授权，不计作遗漏开发项。
+
 ## 2026-11-14 批量工作台改进
 
 已本地整合批量导入、按原图分组、多分类、批量导出浮窗、可保存预设与持久批次。用户最终选择仅提高本地线稿和已验证 Otsu 上限，不增加 SVG 试验档；原图与工作副本来源保留。接口、测试和 DSH 追溯见[前端接入第 15 节](frontend-integration.md#15-2026-11-14-批量纹样导出与处理浮窗)与[上限实测](local-processing-limits.md)。本批已拆成后端 `2f9ab95`、前端 `f0a4dbb` 和文档提交，推送到 `origin/zgx`，未合并 `main`；未发起付费调用。

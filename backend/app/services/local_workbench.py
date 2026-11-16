@@ -214,6 +214,11 @@ class LocalWorkbench:
         old = self.store.get_job(job_id)
         if old["state"] != "failed":
             raise ServiceError("RETRY_NOT_ALLOWED", "Only a failed local job can be retried as a new version", 409)
+        if old["kind"] == "edit-svg":
+            from app.schemas.svg_edit import EditSvgRequest
+            from app.services.svg_edit import submit_edit
+            request = EditSvgRequest.model_validate({"input_asset_id": old["input_asset_id"], **old["parameters"]})
+            return submit_edit(self.store, request, key, retry_of=job_id)
         if old["kind"] == "recolor-svg":
             from app.schemas.svg_edit import RecolorRequest
             from app.services.svg_edit import submit_recolor
@@ -315,6 +320,9 @@ def execute_local(store: WorkbenchStore, job_id, token):
     if kind in {"compose-layers", "refine-mask"}:
         from app.services.assisted_workbench import execute_assisted
         return execute_assisted(store, job, token)
+    if kind == "edit-svg":
+        from app.services.svg_edit import execute_edit
+        return execute_edit(store, job, token)
     if kind == "recolor-svg":
         from app.services.svg_edit import execute_recolor
         return execute_recolor(store, job, token)

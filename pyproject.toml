@@ -18,6 +18,8 @@ dependencies = [
   "uvicorn==0.54.0",
   "python-dotenv==1.2.4",
   "python-multipart==0.0.32",
+  "svg.path==7.0",
+  "shapely==2.1.2",
 ]
 
 [tool.setuptools.packages.find]
