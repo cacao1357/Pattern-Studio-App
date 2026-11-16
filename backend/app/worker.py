@@ -15,7 +15,9 @@ from app.storage import ServiceError
 _MEMORY_HANDLE = None
 LOCAL_MEMORY_MIB = 6144
 LINEART_MODEL_MEMORY_MIB = 6144
-LEFTREFILL_MEMORY_MIB = 6144
+# Windows CUDA/model loading reached ~8.6 GiB committed memory in the bounded
+# smoke check (RSS peak ~3.7 GiB). Keep this separate from lighter local tasks.
+LEFTREFILL_MEMORY_MIB = 10240
 
 
 def calls_provider(job):

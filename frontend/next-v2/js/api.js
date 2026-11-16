@@ -76,6 +76,11 @@ const CODE_MESSAGES = {
   SEAM_OBSERVATION_CONFLICT: "接缝记录已被更新，请重新读取资产后再保存。",
   SEAM_OBSERVATION_NOT_TILE: "这个资产不是平铺结果，不能记录接缝。",
   TILE_NOT_READY: "平铺结果尚未生成完成。",
+  SVG_INPUT_REQUIRED: "当前资产不是可编辑的 SVG；请先完成矢量化，或从历史版本重开一个 SVG。",
+  SVG_EDIT_UNSUPPORTED: "这个 SVG 存在无法安全拆分的重叠或复杂结构；原文件保留，可使用外部矢量编辑器处理。",
+  SVG_EDIT_COMPLEXITY: "SVG 超出安全编辑的复杂度限制；请减少单次改动，或使用外部矢量编辑器处理复杂图形，原文件保留。",
+  SVG_ELEMENT_NOT_FOUND: "有图形在当前 SVG 版本里不存在（可能来自旧草稿）；请重新读取后再编辑。",
+  SVG_EDIT_SOURCE_MISMATCH: "编辑草稿与所选 SVG 版本不匹配；请重开所选版本，草稿不会自动覆盖原文件。",
   LINEART_MODEL_UNAVAILABLE: "模型线稿不可用：模型权重/配置缺失、校验未通过，或运行依赖不可用（torch、图像分割与骨干模型库）；可改用 OpenCV 路线，或按 README 检查模型环境。",
   LINEART_MODEL_GPU_OOM: "显存不足，释放竞争 GPU 任务后重试。",
   LEFTREFILL_MODEL_UNAVAILABLE: "本地修复模型不可用：缺少基础网络、模型文件或运行依赖；不会自动改用云端。请按 README 检查本地模型环境。",
@@ -297,6 +302,7 @@ export const api = {
   setPatternCategories: (imageId, payload) =>
     request(`/patterns/${enc(imageId)}/categories`, { method: "PUT", json: payload }),
   asset: (assetId, options) => request(`/assets/${enc(assetId)}`, options),
+  svgElements: (assetId, options) => request(`/assets/${enc(assetId)}/svg-elements`, options),
   assetPreviewUrl: (assetId, stamp = "") =>
     `${BASE}/assets/${enc(assetId)}/preview${stamp ? `?v=${enc(stamp)}` : ""}`,
   assetDownloadUrl: (assetId) => `${BASE}/assets/${enc(assetId)}/download`,
@@ -335,6 +341,7 @@ export const api = {
       headers: { "Idempotency-Key": idempotencyKey() },
     }),
   vectorize: (payload) => api.submitJob("vectorize", payload),
+  editSvg: (payload) => api.submitJob("edit-svg", payload),
   pipeline: (payload) =>
     request("/pipelines", { method: "POST", json: payload, headers: { "Idempotency-Key": idempotencyKey() } }),
   pipelineInfo: (pipelineId, options) => request(`/pipelines/${enc(pipelineId)}`, options),

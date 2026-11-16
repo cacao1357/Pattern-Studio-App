@@ -39,3 +39,30 @@ def execute_recolor(store, job, token):
             "algorithm_version": "safe-svg-palette-v1",
             "generated_by_job_id": job["job_id"], "parents": [{"asset_id": source["asset_id"], "role": "palette_source"}],
             "parameters": {"algorithm": "safe-svg-palette-v1", "mapping": job["parameters"]["mapping"], **metadata}}}])
+
+
+def submit_edit(store, payload, key, *, retry_of=None):
+    from app.services.svg_elements import read_elements, apply_edits
+    description = read_elements(store, payload.input_asset_id)
+    apply_edits(description, payload.edits, payload.source_sha256)
+    parameters = {"source_sha256": payload.source_sha256,
+                  "edits": [edit.model_dump() for edit in payload.edits]}
+    return store.submit("edit-svg", str(payload.input_asset_id), parameters, key, retry_of=retry_of)
+
+
+def execute_edit(store, job, token):
+    from app.schemas.svg_edit import ElementEdit
+    from app.services.svg_elements import read_elements, apply_edits, VERSION
+    store.step(job["job_id"], token, "edit-svg", "running")
+    source, _ = store.read_asset(job["input_asset_id"])
+    params = job["parameters"]
+    description = read_elements(store, job["input_asset_id"])
+    svg, metadata = apply_edits(description, [ElementEdit.model_validate(e) for e in params["edits"]], params["source_sha256"])
+    inherited = {key: value for key, value in source.items()
+                 if key not in {"asset_id", "sha256", "bytes", "created_at", "parents", "parameters"}}
+    store.publish(job["job_id"], token, "edit-svg", [{"data": svg.encode("utf-8"), "suffix": ".svg",
+        "metadata": {**inherited, "kind": "svg", "source_asset_id": source["asset_id"],
+            "algorithm_version": VERSION, "generated_by_job_id": job["job_id"],
+            "geometry_verified": False, "manual_geometry_edit": True,
+            "parents": [{"asset_id": source["asset_id"], "role": "svg_edit_source"}],
+            "parameters": {"algorithm": VERSION, **params, **metadata}}}])

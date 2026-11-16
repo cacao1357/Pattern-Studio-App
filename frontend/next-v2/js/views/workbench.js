@@ -19,6 +19,27 @@ import { STAGES } from "../data.js";
 import { icon } from "../icons.js";
 import { store } from "../store.js";
 import { api as http } from "../api.js";
+import { pickOverlayReference, samePixelSize } from "../compare.js";
+import {
+  buildEditSvgPayload,
+  changeCount as svgChangeCount,
+  currentSvgDraft,
+  discardAllSvgDrafts,
+  discardSvgDraft,
+  editsSignature,
+  ensureAssetSourceChain,
+  markSvgSaved,
+  mountSvgEditor,
+  setSvgEditingBusy,
+  suspendSvgEditor,
+  svgActionsHtml,
+  svgCaption,
+  svgHasUnsaved,
+  svgPanelHtml,
+  svgPlate,
+  svgStatus,
+  validateSvgSave,
+} from "../svg-edit.js";
 import {
   addWorkbenchItems,
   batchGroups,
@@ -226,6 +247,7 @@ const JOB_STEP_LABELS = {
   "cloud-lineart": "云端线稿",
   cloud_lineart: "云端线稿",
   vectorize: "矢量化",
+  "edit-svg": "SVG 图形编辑",
   export: "导出",
   "tile-preview": "平铺预览",
   tile_preview: "平铺预览",
@@ -254,6 +276,11 @@ const ERROR_TEXT = {
   GRABCUT_NEEDS_BACKGROUND: "GrabCut 需要把背景留在框外：请先在 02 缩小选区。",
   INVALID_FOREGROUND_MASK: "蒙版不是二值，或与源图尺寸/坐标不一致。",
   MASK_SOURCE_MISMATCH: "蒙版的尺寸、坐标空间或源图记录不一致。",
+  SVG_INPUT_REQUIRED: "当前资产不是可编辑的 SVG；请先完成矢量化，或从历史版本重开一个 SVG。",
+  SVG_EDIT_UNSUPPORTED: "这个 SVG 存在无法安全拆分的重叠或复杂结构；原文件保留，可使用外部矢量编辑器处理。",
+  SVG_EDIT_COMPLEXITY: "SVG 超出安全编辑的复杂度限制；请减少单次改动，或使用外部矢量编辑器处理复杂图形，原文件保留。",
+  SVG_ELEMENT_NOT_FOUND: "有图形在当前 SVG 版本里不存在（可能来自旧草稿）；请重新读取后再编辑。",
+  SVG_EDIT_SOURCE_MISMATCH: "编辑草稿与所选 SVG 版本不匹配；请重开所选版本，草稿不会自动覆盖原文件。",
   FOREGROUND_MASK_REQUIRED: "这一步需要透明 PNG 和它的前景蒙版记录。",
   BRUSH_OUT_OF_BOUNDS: "画笔点位超出了源图范围，请重画。",
   TILE_UNIT_REQUIRED: "请选择裁切、透明 PNG、线稿 PNG 或已接受的修复图作为平铺单元。",
@@ -289,6 +316,8 @@ const ERROR_TEXT = {
   LEFTREFILL_GPU_OOM: "本地修复显存不足，请关闭其他占用显卡的程序后重试。",
   LEFTREFILL_INFERENCE_FAILED: "本地修复推理失败，没有生成候选；不会自动改用云端。请检查模型文件或稍后重试。",
   LEFTREFILL_INPUT_SIZE: "本地修复目标必须是 512 × 512；请先在 02 裁切出 512 × 512 图块，不会自动缩放。",
+  REPAIR_RESTORE_INVALID: "无法核实裁切图的来源坐标，请从完整原图重新裁切后修复。",
+  REPAIR_RESTORE_UNSUPPORTED: "这张裁切图经过旋转或缩放，暂不能准确回填；请从完整画布重新裁切后修复。",
   LEFTREFILL_REFERENCE_INVALID: "参考图不可用：需要一张不超过 1,048,576 像素的已保存光栅图，请重新选择。",
   LEFTREFILL_EMPTY_MASK: "修复框内没有可修复的内容（损伤蒙版为空）；请调整修复区域后重试。",
   LOCAL_REQUEST_HEADER_REQUIRED: "请求缺少本机写标记，请刷新页面后重试。",
@@ -351,6 +380,10 @@ const ui = {
   notice: "",
   sessionError: "",
   compareX: 55,
+  /** split：滑动分割；overlay：同坐标透明叠加（只在直接来源可对齐时可用）。 */
+  compareMode: "split",
+  /** 叠加底图的不透明度（%）；两种对照共用同一缩放与坐标。 */
+  overlayOpacity: 55,
   /** 工作台纹样列的多选集合；只在当前页面存活，不写入浏览器存储。 */
   patternSelected: new Set(),
 };
@@ -607,6 +640,177 @@ function currentDims(asset = currentAsset()) {
   return { width: Number(asset.width), height: Number(asset.height) };
 }
 
+/**
+ * 同坐标损伤蒙版：优先接受 input 资产自身 parent 登记的 damage_mask，
+ * 其次接受与目标同坐标空间的 damage_mask。只用于界面说明，不改变后端选择。
+ */
+export function matchingDamageMasks(assets, inputAsset) {
+  if (!inputAsset) return [];
+  const parents = Array.isArray(inputAsset.parents) ? inputAsset.parents : [];
+  const parentIds = new Set(
+    parents.filter((parent) => parent?.role === "damage_mask" && parent.asset_id).map((parent) => parent.asset_id)
+  );
+  const space = String(inputAsset.coordinate_space_id || "");
+  return (assets || []).filter((asset) => {
+    if (!asset || asset.kind !== "damage_mask" || !asset.asset_id) return false;
+    if (parentIds.has(asset.asset_id)) return true;
+    if (asset.source_asset_id && asset.source_asset_id === inputAsset.asset_id) return true;
+    return Boolean(space && asset.coordinate_space_id === space);
+  });
+}
+
+/**
+ * 本地 LeftRefill 的显式条件清单：目标 512×512、显式参考图、正面积修复框、
+ * 损伤蒙版记录与模型前置检查。当前界面提交修复框，不自动选用蒙版。
+ */
+export function leftRefillConditions({
+  capability,
+  input,
+  referenceId,
+  references,
+  box,
+  inputAsset,
+  assets,
+} = {}) {
+  const cap = capability || {};
+  const rows = [];
+  const target = inputAsset || input?.asset || null;
+  if (cap.available === true) {
+    rows.push({ key: "capability", label: "本地模型", state: "ok", detail: "前置检查通过（文件与依赖存在），但这只表示可以尝试，不保证本次推理成功。" });
+  } else if (cap.available === false) {
+    rows.push({
+      key: "capability",
+      label: "本地模型",
+      state: "blocked",
+      detail: `前置检查未通过：${leftrefillReasonText(cap.reason)} 不会自动改用云端。`,
+    });
+  } else {
+    rows.push({
+      key: "capability",
+      label: "本地模型",
+      state: "warn",
+      detail: "健康检查没有返回明确能力；可以尝试本地推理，但失败不会自动改用云端。",
+    });
+  }
+
+  if (!input?.asset) {
+    const detail =
+      input?.error === "size"
+        ? `目标必须是 512 × 512；当前输入 ${Number(input.width)} × ${Number(input.height)}。请先在 02 裁切，不会自动缩放。`
+        : input?.error === "missing"
+        ? "先打开一张纹样，或从纹样库打开一个资产。"
+        : "当前资产不能作为本地输入；请选择裁切图、透明 PNG 等已保存光栅。";
+    rows.push({ key: "target", label: "目标 512 × 512", state: "blocked", detail });
+  } else {
+    rows.push({
+      key: "target",
+      label: "目标 512 × 512",
+      state: "ok",
+      detail: `${kindLabel(input.asset.kind)} ${dimsOf(input.asset)} · #${shortId(input.asset.asset_id)}，已保存光栅。`,
+    });
+  }
+
+  const reference = referenceId && Array.isArray(references)
+    ? references.find((asset) => asset.asset_id === referenceId) || null
+    : null;
+  if (!referenceId) {
+    rows.push({
+      key: "reference",
+      label: "参考图",
+      state: "blocked",
+      detail: "必须显式选择一张已保存光栅作参考，不会自动使用当前资产。",
+    });
+  } else if (Array.isArray(references) && !reference) {
+    rows.push({
+      key: "reference",
+      label: "参考图",
+      state: "blocked",
+      detail: "之前选择的参考图已不在当前工作台或超过 1,048,576 像素，请重新选择。",
+    });
+  } else if (reference) {
+    const pixels = Number(reference.width || 0) * Number(reference.height || 0);
+    rows.push({
+      key: "reference",
+      label: "参考图",
+      state: "ok",
+      detail: `${kindLabel(reference.kind)} ${dimsOf(reference)} · ${pixels.toLocaleString("zh-CN")} 像素 · #${shortId(
+        reference.asset_id
+      )}；推理时显式缩放到 512 × 512 并记录变换。`,
+    });
+  } else {
+    rows.push({ key: "reference", label: "参考图", state: "ok", detail: `已选择参考图 #${shortId(referenceId)}。` });
+  }
+
+  const dims = target ? currentDims(target) : null;
+  if (!box || Number(box.width) <= 0 || Number(box.height) <= 0) {
+    rows.push({ key: "box", label: "修复区域", state: "blocked", detail: "请设置正面积的修复框。" });
+  } else if (dims && (box.left < 0 || box.top < 0 || box.left + box.width > dims.width || box.top + box.height > dims.height)) {
+    rows.push({
+      key: "box",
+      label: "修复区域",
+      state: "warn",
+      detail: `修复框超出目标 ${dimsOf(target)}；提交时会裁剪到目标像素范围内。`,
+    });
+  } else {
+    rows.push({
+      key: "box",
+      label: "修复区域",
+      state: "ok",
+      detail: `${Math.round(box.width)} × ${Math.round(box.height)} px · 原点 (${Math.round(
+        box.left
+      )}, ${Math.round(box.top)})；框外像素保持不变。`,
+    });
+  }
+
+  if (target && Array.isArray(assets)) {
+    const masks = matchingDamageMasks(assets, target);
+    rows.push(
+      masks.length
+        ? {
+            key: "damage_mask",
+            label: "缺损蒙版",
+            state: "info",
+            detail: `找到 ${masks.length} 张相关损伤蒙版记录（#${masks.map((mask) => shortId(mask.asset_id)).join("、#")}）；当前界面不会自动选用这些蒙版，这次仍按修复框推断缺损区域，框内非缺损像素也会进入修复范围。`,
+          }
+        : {
+            key: "damage_mask",
+            label: "缺损蒙版",
+            state: "info",
+            detail: "没有找到同坐标损伤蒙版；这次按修复框推断缺损区域，框内非缺损像素也会进入修复范围。",
+          }
+    );
+  }
+
+  rows.push({
+    key: "reality",
+    label: "结果核验",
+    state: "info",
+    detail: "前置条件通过、模型能发现区域，都不等于真实推理成功；生成后仍需接受或拒绝并人工核对。",
+  });
+  return rows;
+}
+
+export function repairConditionSummary(rows) {
+  const blocked = (rows || []).filter((row) => row.state === "blocked").length;
+  const warn = (rows || []).filter((row) => row.state === "warn").length;
+  if (blocked) return `还缺 ${blocked} 个必要条件；满足后才能提交本地修复。`;
+  if (warn) return `条件基本满足，但有 ${warn} 项需要留意。`;
+  return "条件已满足；可以提交本地修复。";
+}
+
+function repairChecklist(rows) {
+  if (!rows?.length) return "";
+  return `<ul class="wb-checklist">${rows
+    .map(
+      (row) =>
+        `<li class="wb-checklist__item" data-state="${esc(row.state)}">
+          <span class="wb-checklist__dot" aria-hidden="true"></span>
+          <span class="wb-checklist__body"><strong>${esc(row.label)}</strong><span>${esc(row.detail)}</span></span>
+        </li>`
+    )
+    .join("")}</ul>`;
+}
+
 function mediaStyle(asset) {
   const width = Math.max(1, Number(asset?.width) || 1);
   const height = Math.max(1, Number(asset?.height) || 1);
@@ -729,11 +933,24 @@ function compareInfo(stage) {
     return { ok: false, reason: "当前就是原件或规范输入，没有可对比的另一个版本。" };
   }
   if (!assetPreview(current)) return { ok: false, reason: "当前资产没有可预览的图片（ZIP 包请下载）。" };
-  const original = (store.session.assets || []).find(
-    (asset) => asset.kind === "original" || asset.kind === "normalized_input"
-  );
-  if (!original) return { ok: false, reason: "这张纹样没有留下原件记录，无法对比。" };
-  return { ok: true, current, original };
+  const assets = store.session.assets || [];
+  // 叠加只接受“直接同坐标”的光栅来源；裁切/工作副本会建立新坐标空间，不能拿原图冒充对齐。
+  const overlay = pickOverlayReference(current, assets, store.session.image);
+  const original =
+    overlay.ok
+      ? overlay.reference
+      : assets.find((asset) => asset.kind === "original" || asset.kind === "normalized_input") || null;
+  if (!original) {
+    return { ok: false, reason: overlay.reason || "这张纹样没有留下可对比的来源记录。" };
+  }
+  return {
+    ok: true,
+    current,
+    original,
+    overlay,
+    sameSize: samePixelSize(original, current),
+    originalIsDirect: overlay.ok,
+  };
 }
 
 /* ------------------------------------------------------------------ 草稿同步 */
@@ -1371,15 +1588,34 @@ function repairOverlay(asset) {
 }
 
 function compareHtml(info) {
+  const unsaved = info.current?.kind === "svg" && svgChangeCount(currentSvgDraft()) > 0;
+  const currentLabel = `${unsaved ? "已保存版本（未包含草稿改动） · " : "当前 · "}${kindLabel(info.current.kind)}`;
+  const overlayOn = ui.compareMode === "overlay" && info.overlay?.ok;
+  if (overlayOn) {
+    const opacity = clamp(Number(ui.overlayOpacity) || 55, 10, 90);
+    return `
+  <div class="wb-compare wb-compare--overlay" data-compare data-compare-mode="overlay"
+    style="--wb-overlay:${(opacity / 100).toFixed(2)}">
+    <img class="wb-compare__img" src="${assetPreview(info.current)}" alt="当前资产 ${esc(
+      kindLabel(info.current.kind)
+    )}" draggable="false" />
+    <img class="wb-compare__overlay" src="${assetPreview(info.overlay.reference)}" alt="叠加底图 ${esc(
+      kindLabel(info.overlay.reference.kind)
+    )}" draggable="false" />
+    <span class="wb-compare__tag wb-compare__tag--a">叠加 · ${esc(kindLabel(info.overlay.reference.kind))}</span>
+    <span class="wb-compare__tag wb-compare__tag--b">${esc(currentLabel)}</span>
+    <span class="wb-compare__coord mono">${info.overlay.spaceUnverified ? "来源尺寸一致 · 坐标待核实" : "同坐标"} · 缩放联动</span>
+  </div>`;
+  }
   const pos = clamp(Number(ui.compareX) || 55, 4, 96);
   return `
-  <div class="wb-compare" data-compare style="--wb-pos:${pos}%">
+  <div class="wb-compare" data-compare data-compare-mode="split" style="--wb-pos:${pos}%">
     <img class="wb-compare__img" src="${assetPreview(info.current)}" alt="当前资产 ${esc(kindLabel(info.current.kind))}" draggable="false" />
     <div class="wb-compare__orig">
       <img src="${assetPreview(info.original)}" alt="${esc(kindLabel(info.original.kind))}" draggable="false" />
     </div>
     <span class="wb-compare__tag wb-compare__tag--a">${esc(kindLabel(info.original.kind))}</span>
-    <span class="wb-compare__tag wb-compare__tag--b">${esc(kindLabel(info.current.kind))}</span>
+    <span class="wb-compare__tag wb-compare__tag--b">${esc(currentLabel)}</span>
     <span class="wb-compare__divider" aria-hidden="true"></span>
     <button class="wb-compare__handle" type="button" role="slider" data-cmp-handle
       aria-label="对比分割线" aria-orientation="horizontal"
@@ -1491,6 +1727,27 @@ function plateContent(stage, state, params) {
     const info = compareInfo(stage);
     if (info.ok) return `<div class="wb-plate plate plate--grain" data-plate>${compareHtml(info)}</div>`;
   }
+  // 07 的 SVG 直接渲染受控 path：选择、拖动、删除都在这一层完成，不再只是预览图。
+  if (stage.key === "vector" && asset.kind === "svg") {
+    const view = svgPlate(asset);
+    if (view) {
+      const inner =
+        view.kind === "editor"
+          ? view.inner
+          : view.kind === "loading"
+          ? `<div class="wb-svg-edit__state">${loadingBox()}<p class="field__hint">读取后可按视觉独立图形编辑。</p></div>`
+          : `<div class="wb-svg-edit__state">${noteBox(esc(view.message), "error")}
+             <button class="btn btn--ghost btn--sm" type="button" data-svg-act="reload">${icon("history")}重新读取图形</button>
+           </div>`;
+      return `<div class="wb-plate plate plate--grain" data-plate>${mediaFrame(
+        view.width,
+        view.height,
+        view.kind === "editor" ? "" : assetPreview(asset),
+        inner,
+        "wb-media--svg-edit"
+      )}</div>`;
+    }
+  }
   let inner = "";
   if (stage.key === "crop") inner = cropOverlay(asset);
   if (stage.key === "mask") {
@@ -1528,7 +1785,19 @@ function captionFor(stage, state) {
   if (!asset) return ui.sessionError || "上传一张纹样开始";
   if (state.compare) {
     const info = compareInfo(stage);
-    if (info.ok) return `对比：左${kindLabel(info.original.kind)} / 右${kindLabel(info.current.kind)} · 拖动分割线或用方向键微调`;
+    if (info.ok) {
+      if (ui.compareMode === "overlay" && info.overlay?.ok) {
+        return `叠加核对：${kindLabel(info.overlay.reference.kind)} ${dimsOf(
+          info.overlay.reference
+        )} → ${kindLabel(info.current.kind)} ${dimsOf(info.current)} · 同坐标 · 缩放 ${zoomLabel(
+          zoomMode(state)
+        )} · 两者共用同一缩放与坐标${info.overlay.spaceUnverified ? "（坐标空间未记录，仅按尺寸核对）" : ""}`;
+      }
+      const mismatch = info.sameSize ? "" : " · 两图尺寸不同，仅作预览，不代表同坐标对齐";
+      return `对比：左${kindLabel(info.original.kind)} / 右${kindLabel(info.current.kind)}${mismatch} · 拖动分割线或用方向键微调 · 缩放 ${zoomLabel(
+        zoomMode(state)
+      )}`;
+    }
   }
   switch (stage.key) {
     case "source": {
@@ -1599,11 +1868,12 @@ function captionFor(stage, state) {
       return `源图 ${dimsOf(asset)} · ${draft.maskMode === "add" ? "补前景" : "擦除"} · 半径 ${brushRadius()} px · ${points} 个点`;
     }
     case "vector": {
+      if (asset.kind === "svg") return svgCaption(asset, { zoomLabel: zoomLabel(zoomMode(state)) });
       const input = vectorInput(store.session.assets, asset);
       if (!input.asset) return "先选择线稿 PNG、透明 PNG、候选合成或已接受修复";
       return `输入 ${kindLabel(input.asset.kind)} ${dimsOf(input.asset)} · ${vectorModeLabel(draft.vectorMode)} · ${
         draft.vectorMode === "monochrome" ? "单色" : `${draft.colors} 色`
-      } · 细节${detailLabel(draft.detail)}`;
+      } · 细节${detailLabel(draft.detail)}${vectorModeCaveat(draft.vectorMode) ? " · 轮廓模式：微小结构可能丢失" : ""}`;
     }
     case "tile": {
       const unit = tileUnit();
@@ -1688,6 +1958,7 @@ function statusFor(stage, state) {
         : "缺少源图或蒙版记录，无法提交";
     }
     case "vector": {
+      if (asset.kind === "svg") return svgStatus(asset);
       const input = vectorInput(store.session.assets, asset);
       if (done) return "矢量化完成 · 当前 SVG";
       if (!input.asset) return "先选择线稿或透明 PNG；未接受的修复候选不能作为输入";
@@ -1734,6 +2005,11 @@ function statusShort(stage, state) {
     case "mask":
       return done ? "蒙版修正完成" : maskState.strokes.length ? `${maskState.strokes.length} 笔未提交` : "还没有笔迹";
     case "vector":
+      if (currentAsset()?.kind === "svg") {
+        const svgDraft = currentSvgDraft();
+        if (!svgDraft) return "正在读取 SVG 图形";
+        return svgChangeCount(svgDraft) ? `${svgChangeCount(svgDraft)} 处未保存` : "SVG 未改动";
+      }
       return done ? "矢量化完成" : "未矢量化";
     case "tile": {
       const unit = tileUnit();
@@ -1753,6 +2029,8 @@ function mainHtml(stage, state) {
   const zoom = zoomMode(state);
   const compare = compareInfo(stage);
   const compareOn = stage.key !== "tile" && Boolean(state.compare) && compare.ok;
+  const compareMode = ui.compareMode === "overlay" && compare.overlay?.ok ? "overlay" : "split";
+  const overlayOpacity = clamp(Number(ui.overlayOpacity) || 55, 10, 90);
   const caption = captionFor(stage, state);
   return `
   <section class="wb-main" aria-label="画布与纸本图版">
@@ -1792,12 +2070,35 @@ function mainHtml(stage, state) {
           title="${esc(compare.ok ? "对比原件与当前资产（C）" : compare.reason)}">
           ${icon("compare")}<span>对比</span>
         </button>
+        ${
+          compareOn
+            ? `<div class="seg wb-compare-mode" role="group" aria-label="对比方式">
+                <button class="seg__btn" type="button" data-act="compare-mode" data-val="split"
+                  aria-pressed="${compareMode === "split"}">滑动</button>
+                <button class="seg__btn" type="button" data-act="compare-mode" data-val="overlay"
+                  aria-pressed="${compareMode === "overlay"}"
+                  ${compare.overlay?.ok ? "" : 'disabled aria-disabled="true"'}
+                  title="${esc(compare.overlay?.ok ? "同坐标透明叠加，缩放与坐标共用" : compare.overlay?.reason || "没有可叠加的直接来源")}">叠加</button>
+              </div>`
+            : ""
+        }
       </div>
     </header>
 
     <div class="wb-main__caption">
       <span class="mono wb-caption__tag">图版 ${stage.n}</span>
       <span class="wb-caption__text" data-live="caption" title="${esc(caption)}">${esc(caption)}</span>
+      ${
+        compareOn && compareMode === "overlay"
+          ? `<label class="wb-overlay-opacity mono" title="只改变叠加底图的不透明度；缩放与坐标仍然共用">
+              <span>叠加强度</span>
+              <input class="range" type="range" min="10" max="90" step="5" value="${overlayOpacity}"
+                data-cmp-opacity aria-label="叠加底图不透明度"
+                style="--range-fill:${(((overlayOpacity - 10) / 80) * 100).toFixed(1)}%" />
+              <output class="mono">${overlayOpacity}%</output>
+            </label>`
+          : ""
+      }
       <span class="mono wb-caption__zoom" data-live="zoom">${zoomLabel(zoom)}</span>
     </div>
 
@@ -1825,6 +2126,14 @@ function mainHtml(stage, state) {
 const extractModeLabel = (mode) => (EXTRACT_MODES.find(([value]) => value === mode) || ["", mode])[1];
 const detailLabel = (detail) => (DETAILS.find(([value]) => value === detail) || ["", detail])[1];
 const vectorModeLabel = (mode) => (VECTOR_MODES.find(([value]) => value === mode) || ["", mode])[1];
+/**
+ * 轮廓模式的已知限制：只提示，不改变提取或矢量算法。
+ * 微小的孔洞、断笔与接近像素级的细线可能在轮廓化时被合并或丢失。
+ */
+export function vectorModeCaveat(mode) {
+  if (mode !== "contour") return "";
+  return "轮廓模式只保留外轮廓与细线：微小孔洞、断笔和接近像素级的细节可能被合并或丢失。要保留这些结构，请改用彩色模式并提高细节等级；本提示不改变算法。";
+}
 const repairIntentLabel = (intent) => (REPAIR_INTENTS.find(([value]) => value === intent) || ["", intent])[1];
 
 function draftSeam() {
@@ -2345,10 +2654,28 @@ function vectorPanel(state) {
   const vectorCap = pixelLimitForVectorMode(draft.vectorMode, limits);
   const colorSuggestion = draft.vectorMode === "color" ? limits.colorVector : null;
   const vectorCapLabel = "矢量化入口";
+  if (asset.kind === "svg") {
+    return `
+  ${jobBox(stage)}
+  ${errorBox()}
+  ${noticeBox()}
+  ${svgPanelHtml(asset)}
+  ${sec(
+    "重新矢量化（可选）",
+    "当前是 SVG",
+    `<p class="field__hint">当前 SVG 可以直接编辑并保存新版本。若要重新描图，请从左侧资产轨选择线稿 PNG、透明 PNG 或已接受修复，再回到这里调整颜色与细节；不会自动重新矢量化。</p>
+     ${
+       input.candidates.length
+         ? assetChoices(input.candidates, { currentId: store.session.currentAssetId })
+         : `<p class="field__hint">当前工作台没有可用作矢量化输入的 PNG。</p>`
+     }`
+  )}`;
+  }
   return `
   ${jobBox(stage)}
   ${errorBox()}
   ${noticeBox()}
+  ${asset.kind === "svg" ? svgPanelHtml(asset) : ""}
   ${
     input.asset
       ? sec(
@@ -2371,6 +2698,7 @@ function vectorPanel(state) {
     `${segField("vectorMode", "矢量模式", VECTOR_MODES, draft.vectorMode)}
     ${segField("colors", "颜色数", COLOR_OPTIONS.map(([value, text]) => [value, text]), draft.colors)}
     ${segField("detail", "细节", DETAILS, draft.detail)}
+    ${vectorModeCaveat(draft.vectorMode) ? noteBox(vectorModeCaveat(draft.vectorMode)) : ""}
     <p class="field__hint">颜色数只影响 SVG 填充；细节越高路径越多、越接近原图，也更容易碰到本机内存上限。${
       colorSuggestion
         ? `彩色建议 ≤ ${formatPixels(colorSuggestion)} 像素（组合/批次副本安全建议）；`
@@ -2419,6 +2747,7 @@ export function repairCandidateList(info, method = repairMethodOf(info)) {
   if (!rows.length) return `<p class="field__hint">这次修复没有返回候选资产。</p>`;
   const decided = Boolean(info.decision);
   return `
+  ${method === "leftrefill" ? '<p class="field__hint">先检查局部修复效果；输入来自原尺寸裁切时，接受后会按裁切坐标回填完整画布，并切换到整图结果。</p>' : ""}
   <ul class="wb-cands">
     ${rows
       .map((row) => {
@@ -2480,6 +2809,18 @@ function repairPanel(state, methodOverride = repairMethod()) {
     : "";
   const references = leftRefillReferenceAssets(store.session.assets);
   const reference = selectedLeftRefillReference();
+  const localConditions =
+    method === "leftrefill"
+      ? leftRefillConditions({
+          capability: cap,
+          input: localInput,
+          referenceId: String(draft.repairReferenceId || ""),
+          references,
+          box,
+          inputAsset: localInput.asset,
+          assets: store.session.assets,
+        })
+      : [];
   const referenceOptions = [
     ["", "请选择已保存的参考图"],
     ...references.map((entry) => [entry.asset_id, `${kindLabel(entry.kind)} · ${dimsOf(entry)} · #${shortId(entry.asset_id)}`]),
@@ -2577,7 +2918,9 @@ function repairPanel(state, methodOverride = repairMethod()) {
           ? sec(
               "目标输入",
               `512 × 512 · ${esc(kindLabel(localInput.asset.kind))}`,
-              `<p class="field__hint">本地目标固定 512 × 512；不会缩放原图或当前资产。要换输入，直接在左栏资产轨切换。</p>`
+              `<p class="field__hint">本地目标固定 512 × 512；当前 ${esc(
+                dimsOf(localInput.asset)
+              )} · #${esc(shortId(localInput.asset.asset_id))}。不会缩放原图或当前资产。要换输入，直接在左栏资产轨切换。</p>`
             )
           : sec(
               "可用输入",
@@ -2599,9 +2942,21 @@ function repairPanel(state, methodOverride = repairMethod()) {
               ? noteBox("之前选择的参考图已不在当前工作台或超过像素上限，请重新选择。", "error")
               : ""
           }
-          <p class="field__hint">必须明确选一张已保存参考图，不会自动使用当前资产。推理时参考图会显式缩放到 512 × 512 并记录该变换；它只引导生成，不构成保真保证，也不会上传或计费。</p>`
+          <p class="field__hint">${
+            reference
+              ? `当前参考：${kindLabel(reference.kind)} ${dimsOf(reference)} · ${(
+                  Number(reference.width || 0) * Number(reference.height || 0)
+                ).toLocaleString("zh-CN")} 像素 · #${shortId(reference.asset_id)}。`
+              : ""
+          }必须明确选一张已保存参考图，不会自动使用当前资产。推理时参考图会显式缩放到 512 × 512 并记录该变换；它只引导生成，不构成保真保证，也不会上传或计费。</p>`
         )}
         ${boxSection("框外原始像素保持不变；已有落在框内的同坐标二值损伤蒙版时后端优先使用，否则按此框处理。")}
+        ${sec(
+          "本地条件核验",
+          repairConditionSummary(localConditions),
+          `${repairChecklist(localConditions)}
+           <p class="field__hint">这些是本次本地修复的显式前置条件；缺哪一项会在上方写明。条件满足不代表推理一定成功，失败也不会自动改用云端。</p>`
+        )}
         ${sec(
           "本地参数",
           "不上传 · 不计费",
@@ -2876,6 +3231,7 @@ function stageActions(stage, state) {
         ${primaryButton("run-mask", "提交蒙版修正", "mask", disabled(Boolean(error)))}${goVector}`;
     }
     case "vector": {
+      if (asset?.kind === "svg") return svgActionsHtml(asset, { busy });
       const input = vectorInput(store.session.assets, asset);
       return primaryButton("run-vectorize", "矢量化当前 PNG", "spark", disabled(!input.asset));
     }
@@ -3158,6 +3514,8 @@ async function startJob(api, submit, onSuccess) {
   const root = document.querySelector(".wb");
   activeJobToken = token;
   ui.running = true;
+  // 任务从页面提交到 activeJob 写入之间也要立刻锁住 SVG 编辑入口。
+  setSvgEditingBusy(true);
   ui.job = null;
   ui.jobId = "";
   ui.jobStage = Number(api.state.stage) || 1;
@@ -3188,6 +3546,7 @@ async function startJob(api, submit, onSuccess) {
     // 旧会话任务结束时也要清掉它留下的 busy；如果新会话已有新任务，
     // activeJobToken 已换成新令牌，这里不会误清。
     ui.running = false;
+    setSvgEditingBusy(false);
     ui.jobId = "";
     if (!owned()) {
       ui.job = null;
@@ -3690,8 +4049,17 @@ function stageClick(root, api, el) {
   patchStage(api, root, { stage: n, ...(target.key === "tile" ? { compare: false } : {}) });
 }
 
+function confirmSvgDraftBeforeSwitch(label = "切换") {
+  if (!svgHasUnsaved(store.session.currentAssetId)) return true;
+  if (typeof window === "undefined" || typeof window.confirm !== "function") return true;
+  return window.confirm(
+    `当前 SVG 还有未保存的编辑草稿；${label}后草稿会保留在本次页面，可切回继续编辑。继续？`
+  );
+}
+
 function switchAsset(api, root, assetId) {
   if (!assetId || store.session.currentAssetId === assetId) return;
+  if (!confirmSvgDraftBeforeSwitch("切换资产")) return;
   store.setCurrentAsset(assetId);
   api.syncUrl?.();
 }
@@ -3702,6 +4070,7 @@ function cycleAsset(root, api, delta) {
   const index = assets.findIndex((asset) => asset.asset_id === store.session.currentAssetId);
   const next = assets[(index + delta + assets.length) % assets.length];
   if (!next || next.asset_id === store.session.currentAssetId) return;
+  if (!confirmSvgDraftBeforeSwitch("切换资产")) return;
   store.setCurrentAsset(next.asset_id);
   api.syncUrl?.();
   api.toast(`${delta < 0 ? "上一个" : "下一个"}资产：${kindLabel(next.kind)} ${shortId(next.asset_id)}`, "info");
@@ -3719,7 +4088,16 @@ function removeSessionAsset(api, assetId) {
     api.toast("任务进行中，完成或取消后再移除。", "warn");
     return;
   }
+  if (
+    svgHasUnsaved(assetId) &&
+    typeof window !== "undefined" &&
+    typeof window.confirm === "function" &&
+    !window.confirm("这个 SVG 还有未保存的编辑草稿；从工作台移除会丢弃草稿，原文件不受影响。继续？")
+  ) {
+    return;
+  }
   if (!window.confirm(`从工作台移除「${kindLabel(asset.kind)}」？纹样库与任务记录会保留。`)) return;
+  discardSvgDraft(assetId);
   const removed = store.removeAsset(assetId);
   if (!removed) return;
   forgetGroupAsset(store.session.imageId || "", assetId);
@@ -3898,6 +4276,7 @@ async function deleteSelectedPatterns(api) {
   deletingPattern = "";
   if (!batchGroups().length) reloadBatchIndex({ onChange: () => repaintIfHere(api) });
   if (wasCurrent) {
+    discardAllSvgDrafts();
     api.resetTarget?.();
     api.set({ targetError: null, stage: 1, compare: false });
     api.go("workbench");
@@ -3939,6 +4318,7 @@ function deletePattern(api, imageId, name) {
       if (!batchGroups().length) reloadBatchIndex({ onChange: () => repaintIfHere(api) });
       const removed = Number(result?.assets) || count;
       if (wasCurrent) {
+        discardAllSvgDrafts();
         api.resetTarget?.();
         api.set({ targetError: null, stage: 1, compare: false });
         api.go("workbench");
@@ -3980,7 +4360,17 @@ function clearWorkbench(api) {
     api.toast("任务进行中，完成或取消后再清空。", "warn");
     return;
   }
-  if (!window.confirm("清空当前工作台？纹样库与任务记录会保留。")) return;
+  const dirty = svgHasUnsaved();
+  if (
+    !window.confirm(
+      dirty
+        ? "清空当前工作台？当前还有未保存的 SVG 编辑草稿，清空会丢弃这些草稿（已保存的文件不受影响）。纹样库与任务记录会保留。"
+        : "清空当前工作台？纹样库与任务记录会保留。"
+    )
+  ) {
+    return;
+  }
+  if (dirty) discardAllSvgDrafts();
   store.resetSession();
   // 会话已清空，URL 目标不再“已载入”；否则再次打开同一资产链接会直接跳过加载。
   api.resetTarget?.();
@@ -4720,6 +5110,50 @@ async function runCloudLineart(api) {
   });
 }
 
+/**
+ * 保存 SVG 图形编辑：只提交实际变化的元素，经现有任务条轮询；
+ * 成功后切到新 SVG 版本，原文件与旧版本保留，可随时从历史重开。
+ */
+async function runSvgSave(api) {
+  const draft = currentSvgDraft();
+  if (!draft) {
+    api.toast("还没有读取到可编辑的 SVG 图形。", "warn");
+    return;
+  }
+  const problem = validateSvgSave(draft);
+  if (problem) {
+    api.toast(problem, "warn");
+    return;
+  }
+  const payload = buildEditSvgPayload(draft);
+  if (!payload.edits.length) {
+    api.toast("还没有改动，不需要保存。", "info");
+    return;
+  }
+  const inputAssetId = draft.assetId;
+  // 提交时冻结改动快照：保存成功只清空这份快照，保存期间新发生的改动不会被静默丢掉。
+  const submittedSignature = editsSignature(draft);
+  await startJob(api, () => http.editSvg(payload), (final) => {
+    const produced = (final.result?.assets || []).find((entry) => entry.kind === "svg") || null;
+    if (!produced) {
+      ui.notice = "SVG 编辑任务完成，但没有返回新的 SVG 版本；原文件保持不变。";
+      api.toast("没有返回新的 SVG 版本。", "warn");
+      return;
+    }
+    const savedClean = markSvgSaved(inputAssetId, produced, submittedSignature);
+    if (!savedClean) {
+      ui.notice = `新版本 ${shortId(
+        produced.asset_id
+      )} 已保存；但保存期间草稿又有变化，当前仍停在输入版本，未保存改动已保留，请确认后再保存。`;
+      api.toast("新版本已保存，但当前草稿仍有未提交改动。", "warn");
+      return;
+    }
+    store.setCurrentAsset(produced.asset_id);
+    ui.notice = `已保存 SVG 新版本 ${shortId(produced.asset_id)}：原文件不变，旧版本可在历史版本里重开。`;
+    api.toast("SVG 新版本已保存。", "done");
+  });
+}
+
 /** 矢量化：只接受线稿/透明 PNG/候选合成/已接受修复，未接受候选不在可用输入里。 */
 async function runVectorize(api) {
   const asset = currentAsset();
@@ -5060,7 +5494,9 @@ async function adoptRepairAsset(api, info, token) {
   if (!store.isSessionCurrent(token)) return result;
   if (result.status === "adopted" || result.status === "already_present") {
     if (result.asset) store.setCurrentAsset(result.asset.asset_id);
-    ui.notice = "已接受这次修复，修复结果已加入会话资产，可用于平铺与导出。";
+    ui.notice = result.asset?.restoration
+      ? `已接受修复并回填完整画布（${result.asset.width} × ${result.asset.height}），已切换到整图，可继续处理与导出。`
+      : "已接受这次修复，修复结果已加入会话资产，可用于平铺与导出。";
     api.toast("已接受修复，已加入会话资产。", "done");
   } else if (result.status === "fetch_failed") {
     // 接受记录已在服务端，但资产还没读进会话：不能声称已可用。
@@ -5268,12 +5704,19 @@ function handleClick(root, state, api, event) {
     }
     case "pattern-open": {
       const imageId = el.dataset.image || "";
+      if (imageId && imageId === store.session.imageId) {
+        api.toast("已经是当前原图。", "info");
+        break;
+      }
+      if (!confirmSvgDraftBeforeSwitch("打开其它纹样")) break;
       if (!openPattern(imageId, api, state.stage || 1)) {
         api.toast("已经是当前原图。", "info");
       }
       break;
     }
     case "pattern-asset":
+      if (el.dataset.id && el.dataset.id === store.session.currentAssetId) break;
+      if (!confirmSvgDraftBeforeSwitch("打开其它纹样版本")) break;
       openPatternAsset(el.dataset.image || "", el.dataset.id || "", api, state.stage || 1);
       break;
     case "batch-import":
@@ -5331,8 +5774,37 @@ function handleClick(root, state, api, event) {
         break;
       }
       const next = !state.compare;
+      if (next && ui.compareMode === "overlay" && !info.overlay?.ok) ui.compareMode = "split";
       patchStage(api, root, { compare: next });
-      api.toast(next ? "对比已开：左原件 / 右当前资产" : "对比已关", "info");
+      api.toast(
+        next
+          ? ui.compareMode === "overlay"
+            ? "叠加已开：直接来源与当前资产同坐标、同缩放"
+            : "对比已开：左来源 / 右当前资产"
+          : "对比已关",
+        "info"
+      );
+      break;
+    }
+    case "compare-mode": {
+      const info = compareInfo(stage);
+      if (!info.ok) {
+        api.toast(info.reason, "warn");
+        break;
+      }
+      const value = el.dataset.val === "overlay" ? "overlay" : "split";
+      if (value === "overlay" && !info.overlay?.ok) {
+        api.toast(info.overlay?.reason || "没有可叠加的同坐标直接来源。", "warn");
+        break;
+      }
+      ui.compareMode = value;
+      patchStage(api, root, { compare: true });
+      api.toast(
+        value === "overlay"
+          ? `已切到透明叠加：${kindLabel(info.overlay.reference.kind)} 与当前资产同坐标，缩放与坐标共用`
+          : "已切到滑动对比",
+        "info"
+      );
       break;
     }
     case "panel-toggle": {
@@ -5518,6 +5990,16 @@ function setRepairFromField(key, value) {
 
 function handleInput(root, state, api, event) {
   const input = event.target;
+  if (input.matches("[data-cmp-opacity]")) {
+    const value = clamp(Number(input.value) || 55, 10, 90);
+    ui.overlayOpacity = value;
+    const compare = root.querySelector("[data-compare]");
+    if (compare) compare.style.setProperty("--wb-overlay", (value / 100).toFixed(2));
+    const out = input.closest(".wb-overlay-opacity")?.querySelector("output");
+    if (out) out.textContent = `${value}%`;
+    input.style.setProperty("--range-fill", `${(((value - 10) / 80) * 100).toFixed(1)}%`);
+    return;
+  }
   if (input.matches("[data-range]")) {
     const key = input.dataset.range;
     const value = Number(input.value);
@@ -5691,6 +6173,12 @@ export default {
     bindCompare(wb, api);
     bindCrop(wb, state, api);
     bindMask(wb, state, api);
+    mountSvgEditor(wb, api, {
+      repaint: () => repaintIfHere(api),
+      save: () => runSvgSave(api),
+    });
+    const sourceAsset = currentAsset();
+    if (sourceAsset) ensureAssetSourceChain(sourceAsset);
     revealCurrentThumb(wb);
     syncPatternSelectionDom(wb);
     // 首次进入时把用户选入工作台的原图组读进索引；只读排序，不切换会话。
@@ -5705,8 +6193,16 @@ export default {
         return;
       }
       const next = !state.compare;
+      if (next && ui.compareMode === "overlay" && !info.overlay?.ok) ui.compareMode = "split";
       patchStage(api, wb, { compare: next });
-      api.toast(next ? "对比已开：左原件 / 右当前资产" : "对比已关", "info");
+      api.toast(
+        next
+          ? ui.compareMode === "overlay"
+            ? "叠加已开：直接来源与当前资产同坐标、同缩放"
+            : "对比已开：左来源 / 右当前资产"
+          : "对比已关",
+        "info"
+      );
     };
     document.addEventListener("ps:toggle-compare", compareKeyHandler);
 
@@ -5778,6 +6274,7 @@ export default {
   unmount() {
     // unmount 在每次局部重绘前也会调用；只有真的离开工作台才清理选择与浮窗。
     const leaving = typeof location === "undefined" || !(location.hash || "").includes("#/workbench");
+    suspendSvgEditor({ leaving });
     if (leaving) {
       closePatternPicker();
       ui.patternSelected.clear();

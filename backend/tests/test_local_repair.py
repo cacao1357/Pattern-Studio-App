@@ -236,3 +236,126 @@ def test_capability_does_not_import_ml_or_hash_weights(tmp_path, monkeypatch):
         return original_import(name, *args, **kwargs)
     monkeypatch.setattr(builtins, "__import__", guard)
     assert local_repair.model_capability() == {"available": True, "reason": None, "checked": "prerequisites_only"}
+
+
+@pytest.mark.parametrize("selected_kind", ["candidate_asset", "composited_asset"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_accept_crop_restores_full_canvas_and_exports_exact_rgba(studio, monkeypatch, selected_kind, nested):
+    from zipfile import ZipFile
+    store, client, post, _, payload = studio
+    # Nonuniform RGBA (including invisible RGB) detects misplaced patches and alpha blending.
+    y, x = np.indices((720, 900))
+    pixels = np.stack((x % 256, y % 256, (x + y) % 256, (x * 3 + y) % 256), axis=2).astype(np.uint8)
+    upload = post("/images", files={"file": ("canvas.png", png_bytes(Image.fromarray(pixels)), "image/png")})
+    root_id = upload.json()["normalized"]["asset_id"]
+    root_meta, root_data = store.read_asset(root_id)
+    original = np.asarray(Image.open(BytesIO(root_data)).convert("RGBA"))
+
+    def run(path, values):
+        submitted = post(path, json=values)
+        assert submitted.status_code == 202, submitted.text
+        job, token = store.claim()
+        assert job["job_id"] == submitted.json()["job_id"]
+        execute_local(store, job["job_id"], token)
+        store.finish_job(job["job_id"], token)
+        return store.get_job(job["job_id"])
+
+    parent_id = root_id
+    if nested:
+        parent_id = run("/jobs/crop", {"input_asset_id": root_id,
+            "bbox": {"left": 40, "top": 30, "right": 840, "bottom": 690}})["result"]["assets"][0]["asset_id"]
+    crop = run("/jobs/crop", {"input_asset_id": parent_id,
+        "bbox": {"left": 80, "top": 70, "right": 592, "bottom": 582}})["result"]["assets"][0]
+    mask = np.zeros((512, 512), np.uint8)
+    mask[120:135, 125:140] = 255
+    mask[125:130, 130:135] = 0  # preserve a hole within the repair box
+    damage = store.put_asset(png_bytes(Image.fromarray(mask)), ".png", {
+        "kind": "damage_mask", "width": 512, "height": 512,
+        "source_asset_id": crop["asset_id"], "coordinate_space_id": crop["coordinate_space_id"],
+        "damage_source": "annotated"})
+    monkeypatch.setattr(local_repair, "generate", lambda *args: Image.new("RGB", (512, 512), "red"))
+    job = run("/jobs/repair", {**payload, "input_asset_id": crop["asset_id"],
+                              "damage_mask_asset_id": damage["asset_id"], "feather_px": 8})
+    repair = client.get(f"/api/v1/repairs/{job['job_id']}").json()
+    selected_id = repair[selected_kind]["asset_id"]
+    _, patch_data = store.read_asset(selected_id)
+    patch = np.asarray(Image.open(BytesIO(patch_data)).convert("RGBA"))
+    values = {"revision": 1, "action": "accept", "selected_asset_id": selected_id}
+    key = uuid4().hex
+    decision = post(f"/repairs/{job['job_id']}/decision", json=values, headers={"Idempotency-Key": key})
+    assert decision.status_code == 200, decision.text
+    accepted_id = decision.json()["decision"]["accepted_asset_id"]
+    assert post(f"/repairs/{job['job_id']}/decision", json=values,
+                headers={"Idempotency-Key": key}).json()["decision"]["accepted_asset_id"] == accepted_id
+    saved, data = store.read_asset(accepted_id)
+    assert (saved["width"], saved["height"], saved["coordinate_space_id"]) == (900, 720, root_meta["coordinate_space_id"])
+    left, top = (120, 100) if nested else (80, 70)
+    assert saved["restoration"]["offset"] == {"left": left, "top": top}
+    assert saved["restoration"]["canvas_asset_id"] == root_id
+    expected = original.copy()
+    area = expected[top:top + 512, left:left + 512]
+    area[mask > 0] = patch[mask > 0]
+    np.testing.assert_array_equal(np.asarray(Image.open(BytesIO(data)).convert("RGBA")), expected)
+    assert store.read_asset(root_id)[1] == root_data
+    history = client.get(f"/api/v1/images/{saved['image_id']}/history?collection=assets").json()
+    assert any(asset["asset_id"] == accepted_id for asset in history["items"])
+    exported = run("/exports", {"asset_ids": [accepted_id], "license_acknowledged": True})
+    _, zipped = store.read_asset(exported["result"]["assets"][0]["asset_id"])
+    with ZipFile(BytesIO(zipped)) as archive:
+        png = next(name for name in archive.namelist() if name.endswith(".png"))
+        np.testing.assert_array_equal(np.asarray(Image.open(BytesIO(archive.read(png))).convert("RGBA")), expected)
+    assert client.get("/api/v1/seedream/status").json()["budget"]["call_count"] == 0
+
+
+@pytest.mark.parametrize("invalid", ["coordinates", "resize", "resize_without_crop", "cycle"])
+def test_invalid_crop_lineage_fails_before_model_execution(studio, invalid):
+    from app.services.local_workbench import _output
+    store, client, post, upload, payload = studio
+    root_id = upload((700, 700))
+    source, _ = store.get_asset(root_id)
+    crop_id = str(uuid4())
+    output = _output(Image.new("RGBA", (512, 512)), "cropped", source, "test", asset_id=crop_id,
+                     space=str(uuid4()), extra={"transform": {"operation": "crop",
+                     "bbox": {"left": 50, "top": 60, "right": 562, "bottom": 572},
+                     "input_size": [700, 700], "output_size": [512, 512]}})
+    if invalid == "coordinates":
+        output["metadata"]["transform"]["bbox"]["right"] = 561
+    if invalid == "cycle":
+        output["metadata"]["source_asset_id"] = crop_id
+    # Register malformed historical assets to exercise validation, without touching real storage.
+    staged = store._stage([output])
+    with store.connection() as db:
+        store._register(db, staged)
+    input_id = crop_id
+    if invalid in {"resize", "resize_without_crop"}:
+        crop, _ = store.get_asset(crop_id if invalid == "resize" else root_id)
+        working = store.put_asset(png_bytes(Image.new("RGBA", (512, 512))), ".png", {
+            **crop, "width": 512, "height": 512, "kind": "working_copy",
+            "source_asset_id": crop["asset_id"], "coordinate_space_id": str(uuid4())})
+        input_id = working["asset_id"]
+    response = post("/jobs/repair", json={**payload, "input_asset_id": input_id})
+    assert response.status_code == 422, response.text
+    assert response.json()["error"]["code"] == ("REPAIR_RESTORE_UNSUPPORTED" if invalid.startswith("resize") else "REPAIR_RESTORE_INVALID")
+    assert client.get("/api/v1/jobs").json()["items"] == []
+
+
+@pytest.mark.parametrize("kind", ["transparent_png", "composed_candidate", "prepared", "working_copy"])
+def test_full_native_canvas_derivatives_remain_valid_repair_inputs(studio, monkeypatch, kind):
+    store, client, post, _, payload = studio
+    source, _ = store.get_asset(payload["input_asset_id"])
+    derived = store.put_asset(png_bytes(Image.new("RGBA", (512, 512), "blue")), ".png", {
+        **source, "kind": kind, "source_asset_id": source["asset_id"],
+        "coordinate_space_id": str(uuid4()) if kind in {"prepared", "working_copy"} else source["coordinate_space_id"]})
+    monkeypatch.setattr(local_repair, "generate", lambda *args: Image.new("RGB", (512, 512), "red"))
+    response = post("/jobs/repair", json={**payload, "input_asset_id": derived["asset_id"]})
+    assert response.status_code == 202, response.text
+    job, token = store.claim()
+    execute_local(store, job["job_id"], token)
+    store.finish_job(job["job_id"], token)
+    repair = client.get(f"/api/v1/repairs/{job['job_id']}").json()
+    accepted = post(f"/repairs/{job['job_id']}/decision", json={"revision": 1,
+        "action": "accept", "selected_asset_id": repair["composited_asset"]["asset_id"]})
+    assert accepted.status_code == 200, accepted.text
+    saved, _ = store.get_asset(accepted.json()["decision"]["accepted_asset_id"])
+    assert (saved["width"], saved["height"], saved["coordinate_space_id"]) == (512, 512, derived["coordinate_space_id"])
+    assert "restoration" not in saved

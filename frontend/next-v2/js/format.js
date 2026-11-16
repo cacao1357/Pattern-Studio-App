@@ -130,6 +130,7 @@ const JOB_STAGE = {
   "cloud-lineart": 5,
   "refine-mask": 6,
   vectorize: 7,
+  "edit-svg": 7,
   "tile-preview": 8,
   export: 8,
 };
@@ -257,6 +258,7 @@ export function jobKindLabel(kind) {
     lineart: "线稿",
     "cloud-lineart": "云端线稿",
     vectorize: "矢量化",
+    "edit-svg": "SVG 图形编辑",
     pipeline: "一键处理",
     "refine-mask": "蒙版修正",
     "repair-candidate": "修复候选",
