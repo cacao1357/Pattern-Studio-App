@@ -4,7 +4,7 @@
 
 用户反馈裁切修复只得到局部图，本次补齐 A 负责的接受结果与整图集成，不修改成员模型或生成算法。新增 `services/repair_restore.py`，按原尺寸裁切链累计坐标，在接受本地候选时仅回填编辑蒙版内像素，保留完整画布的其余 RGBA；接受资产使用完整尺寸与坐标系，记录来源与局部框，现有前端采纳后自动切到整图。支持连续裁切，来源含旋转/缩放或无效坐标时在提交前明确拒绝，不消耗推理；外部裁切且未上传完整原图的输入无法回填。候选预览保持局部图，原图与旧结果不覆盖。
 
-验证：`PYTHONPATH=backend` 下运行 `python -B -m pytest backend/tests/test_local_repair.py backend/tests/test_image_history.py -q`，31 项通过；前端集成与引导定向 64 项通过。新增覆盖候选/合成两种接受、连续裁切、透明 RGBA/蒙版孔洞/羽化、重复接受幂等、按图历史、整图 ZIP 导出及非法来源提前拒绝。Codex 原生辅助 Agent 独立只读审查发现的无裁切缩小工作副本边界已修复并回归。真实受限 GPU 验证 `python -B scripts/validate_local_repair.py --output storage/validation/local-repair-backfill-20261116` 成功，约 14.48 秒，512×512 图块接受后生成 768×640 整图，回填逐像素符合预期、区外变化 0、云调用 0；产物与报告在上述忽略目录。合成样本用于流程验证，不代表真实文物素材修复质量通过。提交、推送及合入状态以 Git / PR 记录为准。
+验证：`PYTHONPATH=backend` 下运行 `python -B -m pytest backend/tests/test_local_repair.py backend/tests/test_image_history.py -q`，35 项通过；合入前在隔离导出目录连同 SVG 图形与矢量模块共 61 项通过，前端全部模块 167 项通过。新增覆盖候选/合成两种接受、连续裁切、透明 RGBA/蒙版孔洞/羽化、重复接受幂等、按图历史、整图 ZIP 导出及非法来源提前拒绝。Codex 原生辅助 Agent 独立只读审查发现的无裁切缩小工作副本边界，以及完整尺寸透明/合成/预处理/工作副本的输入兼容性，均已修复并回归。真实受限 GPU 验证 `python -B scripts/validate_local_repair.py --output storage/validation/local-repair-backfill-20261116` 成功，约 14.48 秒，512×512 图块接受后生成 768×640 整图，回填逐像素符合预期、区外变化 0、云调用 0；产物与报告在上述忽略目录。合成样本用于流程验证，不代表真实文物素材修复质量通过。提交、推送及合入状态以 Git / PR 记录为准。
 
 ## 2026-11-16 中期报告对应的系统改进
 

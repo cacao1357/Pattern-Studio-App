@@ -39,11 +39,13 @@ def restoration_plan(store, source):
               any(current.get(key) != parent.get(key) for key in ("width", "height", "coordinate_space_id"))):
             unsupported = True
         current = parent
+    # A complete native-size canvas needs no backfill, even when it is a
+    # transparent, composed or rotated derivative. A reduced working copy does.
+    if not crops and (source["width"], source["height"]) == (current["width"], current["height"]):
+        return None
     if unsupported:
         raise ServiceError("REPAIR_RESTORE_UNSUPPORTED",
                            "Repair backfill requires native crops without rotation or resizing; crop the full canvas again", 422)
-    if not crops:
-        return None
     return {"algorithm": "native-crop-repair-backfill-v1", "canvas_asset_id": current["asset_id"],
             "patch_input_asset_id": source["asset_id"], "crop_asset_ids": crops,
             "offset": {"left": left, "top": top},

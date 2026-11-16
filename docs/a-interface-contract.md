@@ -92,7 +92,7 @@
 - 缺损蒙版优先使用与输入同坐标且落在 bbox 内的既有二值 damage_mask；否则使用用户框选矩形。保护框外原始 RGBA 像素，生成候选需人工接受后才能作为后续输入。
 - 本地候选已按精确缺损蒙版保护输入，可直接走既有接受/拒绝，不要求「接受全图变化」；旧云端全图候选仍要求此确认。羽化合成也保留精确蒙版外像素。
 - 本地修复输入来自原尺寸裁切时，候选预览仍为局部图；接受任一候选后，沿可验证的裁切来源链累计偏移，仅将编辑蒙版内的已修复像素回填完整画布，生成原画布尺寸的 `accepted_repair`。支持连续裁切及同坐标增强，保留原图、局部候选和历史；前端读取接受资产后自动切换到整图，后续处理与 PNG/ZIP 导出复用该整图。`restoration` 记录算法 `native-crop-repair-backfill-v1`、画布/图块来源、裁切链、偏移及输入输出尺寸；整图使用画布坐标系和映射后的 bbox，局部框及坐标系另存 `repair_patch_bbox`、`repair_patch_coordinate_space_id`。
-- 回填以规范化原图或已接受修复画布为边界，不跨越旋转/缩放变换；来源中含这些变换（包括未裁切的缩小工作副本）时，提交本地任务前返回 `REPAIR_RESTORE_UNSUPPORTED`；缺失或不一致的裁切记录返回 `REPAIR_RESTORE_INVALID`，不猜测坐标、不重新推理。直接上传的 512×512 输入保持原有接受行为。上传前在外部裁切的图片没有仓库内来源链，无法自动找回外部原图；历史已接受记录不会原地改写。
+- 回填以规范化原图或已接受修复画布为边界，不跨越旋转/缩放变换；裁切来源中含这些变换，或输入是未裁切的缩小工作副本时，提交本地任务前返回 `REPAIR_RESTORE_UNSUPPORTED`；缺失或不一致的裁切记录返回 `REPAIR_RESTORE_INVALID`，不猜测坐标、不重新推理。直接上传的 512×512 输入，以及无裁切且保持根画布完整尺寸的透明图、合成图、预处理图和工作副本，保持原有接受行为。上传前在外部裁切的图片没有仓库内来源链，无法自动找回外部原图；历史已接受记录不会原地改写。
 - `/health` 新增 `capabilities.leftrefill_model`，字段为 `available`、`reason`、`checked: "prerequisites_only"`；不回传路径、不加载模型、不初始化 CUDA。原因含 `base_model_missing`、`model_files_missing`、`dependencies_missing`、`model_config_invalid`、`model_check_failed`。就绪仅表示先决条件可发现，不保证推理成功。
 - 基础模型目录通过进程环境 `PATTERN_STUDIO_LEFTREFILL_BASE_MODEL` 指定；未指定时使用 `model/leftrefill/base/`。不从网络自动下载、不自动安装依赖。GPU/依赖/完整性失败给出本地错误，不调用云端。
 - 本地修复任务仍为 `repair`，`parameters.method` 区分来源，保留候选、蒙版、合成结果及参考来源。失败重试走既有任务重试接口，仅重新执行本地步骤。旧记录没有 method 时按 cloud 处理。

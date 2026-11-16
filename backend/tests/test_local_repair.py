@@ -337,3 +337,25 @@ def test_invalid_crop_lineage_fails_before_model_execution(studio, invalid):
     assert response.status_code == 422, response.text
     assert response.json()["error"]["code"] == ("REPAIR_RESTORE_UNSUPPORTED" if invalid.startswith("resize") else "REPAIR_RESTORE_INVALID")
     assert client.get("/api/v1/jobs").json()["items"] == []
+
+
+@pytest.mark.parametrize("kind", ["transparent_png", "composed_candidate", "prepared", "working_copy"])
+def test_full_native_canvas_derivatives_remain_valid_repair_inputs(studio, monkeypatch, kind):
+    store, client, post, _, payload = studio
+    source, _ = store.get_asset(payload["input_asset_id"])
+    derived = store.put_asset(png_bytes(Image.new("RGBA", (512, 512), "blue")), ".png", {
+        **source, "kind": kind, "source_asset_id": source["asset_id"],
+        "coordinate_space_id": str(uuid4()) if kind in {"prepared", "working_copy"} else source["coordinate_space_id"]})
+    monkeypatch.setattr(local_repair, "generate", lambda *args: Image.new("RGB", (512, 512), "red"))
+    response = post("/jobs/repair", json={**payload, "input_asset_id": derived["asset_id"]})
+    assert response.status_code == 202, response.text
+    job, token = store.claim()
+    execute_local(store, job["job_id"], token)
+    store.finish_job(job["job_id"], token)
+    repair = client.get(f"/api/v1/repairs/{job['job_id']}").json()
+    accepted = post(f"/repairs/{job['job_id']}/decision", json={"revision": 1,
+        "action": "accept", "selected_asset_id": repair["composited_asset"]["asset_id"]})
+    assert accepted.status_code == 200, accepted.text
+    saved, _ = store.get_asset(accepted.json()["decision"]["accepted_asset_id"])
+    assert (saved["width"], saved["height"], saved["coordinate_space_id"]) == (512, 512, derived["coordinate_space_id"])
+    assert "restoration" not in saved
