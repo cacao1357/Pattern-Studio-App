@@ -316,6 +316,8 @@ const ERROR_TEXT = {
   LEFTREFILL_GPU_OOM: "本地修复显存不足，请关闭其他占用显卡的程序后重试。",
   LEFTREFILL_INFERENCE_FAILED: "本地修复推理失败，没有生成候选；不会自动改用云端。请检查模型文件或稍后重试。",
   LEFTREFILL_INPUT_SIZE: "本地修复目标必须是 512 × 512；请先在 02 裁切出 512 × 512 图块，不会自动缩放。",
+  REPAIR_RESTORE_INVALID: "无法核实裁切图的来源坐标，请从完整原图重新裁切后修复。",
+  REPAIR_RESTORE_UNSUPPORTED: "这张裁切图经过旋转或缩放，暂不能准确回填；请从完整画布重新裁切后修复。",
   LEFTREFILL_REFERENCE_INVALID: "参考图不可用：需要一张不超过 1,048,576 像素的已保存光栅图，请重新选择。",
   LEFTREFILL_EMPTY_MASK: "修复框内没有可修复的内容（损伤蒙版为空）；请调整修复区域后重试。",
   LOCAL_REQUEST_HEADER_REQUIRED: "请求缺少本机写标记，请刷新页面后重试。",
@@ -2745,6 +2747,7 @@ export function repairCandidateList(info, method = repairMethodOf(info)) {
   if (!rows.length) return `<p class="field__hint">这次修复没有返回候选资产。</p>`;
   const decided = Boolean(info.decision);
   return `
+  ${method === "leftrefill" ? '<p class="field__hint">先检查局部修复效果；输入来自原尺寸裁切时，接受后会按裁切坐标回填完整画布，并切换到整图结果。</p>' : ""}
   <ul class="wb-cands">
     ${rows
       .map((row) => {
@@ -5491,7 +5494,9 @@ async function adoptRepairAsset(api, info, token) {
   if (!store.isSessionCurrent(token)) return result;
   if (result.status === "adopted" || result.status === "already_present") {
     if (result.asset) store.setCurrentAsset(result.asset.asset_id);
-    ui.notice = "已接受这次修复，修复结果已加入会话资产，可用于平铺与导出。";
+    ui.notice = result.asset?.restoration
+      ? `已接受修复并回填完整画布（${result.asset.width} × ${result.asset.height}），已切换到整图，可继续处理与导出。`
+      : "已接受这次修复，修复结果已加入会话资产，可用于平铺与导出。";
     api.toast("已接受修复，已加入会话资产。", "done");
   } else if (result.status === "fetch_failed") {
     // 接受记录已在服务端，但资产还没读进会话：不能声称已可用。

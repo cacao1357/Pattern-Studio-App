@@ -44,6 +44,9 @@ def main():
     ImageDraw.Draw(target).rectangle((224, 224, 287, 287), fill="ivory")
     target.save(args.output / "target.png")
     reference.save(args.output / "reference.png")
+    canvas = Image.new("RGB", (768, 640), "darkslateblue")
+    canvas.paste(target, (128, 64))
+    canvas.save(args.output / "canvas.png")
     started = time.monotonic()
     report = {"capability": capability, "sample": "synthetic tiled circles, not a quality benchmark",
               "model_or_algorithm_changed": False}
@@ -66,7 +69,15 @@ def main():
                     return post("/images", files={"file": ("synthetic.png", png_bytes(image),
                                                             "image/png")})["normalized"]["asset_id"]
 
-                target_id, reference_id = upload(target), upload(reference)
+                canvas_id, reference_id = upload(canvas), upload(reference)
+                crop = post("/jobs/crop", json={"input_asset_id": canvas_id,
+                    "bbox": {"left": 128, "top": 64, "right": 640, "bottom": 576}})
+                crop_job, token = store.claim()
+                assert crop_job["job_id"] == crop["job_id"]
+                from app.services.local_workbench import execute_local
+                execute_local(store, crop_job["job_id"], token)
+                store.finish_job(crop_job["job_id"], token)
+                target_id = store.get_job(crop_job["job_id"])["result"]["assets"][0]["asset_id"]
                 job = post("/jobs/repair", json={"method": "leftrefill", "input_asset_id": target_id,
                            "reference_asset_id": reference_id, "bbox": box, "seed": 23407})
                 assert not calls_provider(job)
@@ -96,11 +107,21 @@ def main():
                 accepted = post(f"/repairs/{job['job_id']}/decision", json={"revision": 1,
                     "action": "accept", "selected_asset_id": repair["composited_asset"]["asset_id"]})
                 assert accepted["state"] == "accepted"
+                saved, accepted_data = store.read_asset(accepted["decision"]["accepted_asset_id"])
+                assert (saved["width"], saved["height"]) == canvas.size
+                assert saved["restoration"]["canvas_asset_id"] == canvas_id
+                full = np.asarray(Image.open(BytesIO(accepted_data)).convert("RGBA"))
+                expected = np.asarray(canvas.convert("RGBA")).copy()
+                expected[64 + 224:64 + 288, 128 + 224:128 + 288] = pixels[224:288, 224:288]
+                np.testing.assert_array_equal(full, expected)
+                (args.output / "accepted_full.png").write_bytes(accepted_data)
                 budget = client.get("/api/v1/seedream/status").json()["budget"]
                 assert budget["call_count"] == 0, budget
                 report.update(review_before_accept="waiting_user", decision="accepted",
                               outside_changed_pixels=0, inside_changed_pixels=inside_changed,
-                              cloud_call_count=0, metrics=repair["metrics"])
+                              cloud_call_count=0, metrics=repair["metrics"],
+                              accepted_full_size=[saved["width"], saved["height"]],
+                              backfill_pixel_exact=True)
     (args.output / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps(report, indent=2), flush=True)
 

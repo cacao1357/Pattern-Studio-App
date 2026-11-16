@@ -67,6 +67,8 @@ class FinishingWorkbench:
         if values.get("method") == "leftrefill":
             if (source["width"], source["height"]) != (512, 512):
                 raise ServiceError("LEFTREFILL_INPUT_SIZE", "Create an explicit 512x512 crop before local repair", 422)
+            from app.services.repair_restore import restoration_plan
+            restoration_plan(self.store, source)
             reference, _ = self.store.get_asset(values["reference_asset_id"])
             if (reference["kind"] not in PROVIDER_INPUT_KINDS or
                     reference["width"] * reference["height"] > MAX_REPAIR_PIXELS):
@@ -167,6 +169,25 @@ class FinishingWorkbench:
                 "source_note": source.get("source_note", ""), "source_evidence_status": source.get("source_evidence_status", "not_reviewed"),
                 "ai_inferred": True, "geometry_verified": False, "parents": references, "needs_user_review": False,
                 "repair_choice": "full_candidate" if full else "local_composite", "entire_image_may_change": full}}
+            if repair["parameters"].get("method") == "leftrefill":
+                from app.services.repair_restore import restore_accepted_patch
+                restored = restore_accepted_patch(self.store, source, selected, repair["edit_mask"])
+                if restored:
+                    canvas, accepted["data"], plan = restored
+                    metadata = accepted["metadata"]
+                    metadata.update({
+                        "width": canvas["width"], "height": canvas["height"],
+                        "coordinate_space_id": canvas["coordinate_space_id"],
+                        "original_width": canvas.get("original_width", canvas["width"]),
+                        "original_height": canvas.get("original_height", canvas["height"]),
+                        "original_asset_id": canvas.get("original_asset_id"),
+                        "restoration": plan, "repair_patch_bbox": metadata["bbox"],
+                        "repair_patch_coordinate_space_id": source["coordinate_space_id"],
+                        "bbox": {key: value + plan["offset"]["left" if key in {"left", "right"} else "top"]
+                                 for key, value in metadata["bbox"].items()},
+                        "algorithm_version": plan["algorithm"],
+                        "parents": references + [{"asset_id": canvas["asset_id"], "role": "restoration_canvas"}],
+                    })
         self.store.decide_repair(job_id, values, key, accepted)
         return self.get_repair(job_id)
 

@@ -502,7 +502,8 @@ test("接受修复：按 accepted_asset_id 读取并加入会话，重复调用�
   const pendingAccepted = deferred();
   setHandler(withImage((call) => {
     if (call.path === "/api/v1/assets/accepted-1") {
-      return json({ asset_id: "accepted-1", kind: "accepted_repair", width: 64, height: 64 });
+      return json({ asset_id: "accepted-1", kind: "accepted_repair", width: 900, height: 720,
+        restoration: { canvas_asset_id: "full-canvas", offset: { left: 80, top: 70 } } });
     }
     if (call.path === "/api/v1/assets/accepted-2") {
       return json({ error: { code: "NOT_FOUND", message: "gone" } }, 404);
@@ -523,6 +524,8 @@ test("接受修复：按 accepted_asset_id 读取并加入会话，重复调用�
   assert.ok(store.session.assets.some((asset) => asset.asset_id === "accepted-1"));
   store.setCurrentAsset("accepted-1");
   assert.equal(store.currentAsset().kind, "accepted_repair");
+  assert.deepEqual([store.currentAsset().width, store.currentAsset().height], [900, 720]);
+  assert.equal(store.currentAsset().restoration.canvas_asset_id, "full-canvas");
 
   const getCount = countCalls("/api/v1/assets/accepted-1");
   const again = await store.adoptAcceptedRepair(
