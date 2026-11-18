@@ -21,7 +21,7 @@
   },
   "base_model": {
     "family": "Stable Diffusion 2 inpainting",
-    "distribution": "External offline Diffusers conversion used during training",
+    "distribution": "GitHub Release of the exact offline Diffusers conversion used during training",
     "text_encoder_layers": 23,
     "files": {
       "scheduler/scheduler_config.json": "7a8564e9760e67ab1bea23709a1f24f4008c88535f149d0ef637e3d51556189d",
@@ -31,6 +31,27 @@
       "unet/diffusion_pytorch_model.fp16.safetensors": "29a698f37775d5904a958c9cebed98184483dfb441729a8e5f98dd5b65df70c8",
       "vae/config.json": "754a44e01ee811076bc6c0edfeb2afdd59fb5bcb64d3c8a6b0923e29d0fd304b",
       "vae/diffusion_pytorch_model.fp16.safetensors": "3e4c08995484ee61270175e9e7a072b66a6e4eeb5f0c266667fe1f45b90daf9a"
+    },
+    "release": {
+      "tag": "leftrefill-textile-step1108",
+      "url": "https://github.com/cacao1357/Pattern-Studio-App/releases/tag/leftrefill-textile-step1108",
+      "checksum_url": "https://github.com/cacao1357/Pattern-Studio-App/releases/download/leftrefill-textile-step1108/SHA256SUMS",
+      "license": "CreativeML Open RAIL++-M",
+      "assets": [
+        {
+          "name": "leftrefill-sd2-unet.zip",
+          "size": 1731935096,
+          "sha256": "15429c5019eab9de0caf5010d8b3ab81c6939e1bb7d0ad971134f3df5ee08965",
+          "url": "https://github.com/cacao1357/Pattern-Studio-App/releases/download/leftrefill-textile-step1108/leftrefill-sd2-unet.zip"
+        },
+        {
+          "name": "leftrefill-sd2-components.zip",
+          "size": 848188933,
+          "sha256": "dee10b0f06d0eba702532be7d69e1023c3c5743fae6b77f9368b7c86fb252ba6",
+          "url": "https://github.com/cacao1357/Pattern-Studio-App/releases/download/leftrefill-textile-step1108/leftrefill-sd2-components.zip"
+        }
+      ],
+      "extracted_directory": "leftrefill-sd2"
     }
   },
   "inference": {
