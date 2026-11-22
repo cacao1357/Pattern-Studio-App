@@ -59,7 +59,7 @@
 
 ## 批量导出
 
-继续使用 `POST /api/v1/exports`，请求含显式 `asset_ids`（1..500 个不同资产）、`license_acknowledged` 和可选 `layout`。`layout: "flat"` 为兼容默认；`layout: "by_image"` 在 ZIP 中按 `images/{image_id}/{kind}-{asset_id}.{原后缀}` 分目录。不猜测孤立旧资产的原图归属，独立放入对应 `unlinked` 目录。`manifest.json` 中的 `archive_name` 对应实际文件名并保留来源链。
+使用 `POST /api/v1/exports`，请求含 `asset_ids`（1..500 个不同资产）和可选 `layout`。省略布局时使用 `flat`。`by_image` 在 ZIP 中按 `images/{image_id}/{kind}-{asset_id}.{原后缀}` 分目录。孤立旧资产放入对应的 `unlinked` 目录。`manifest.json` 保留实际文件名、来源链和已登记许可。旧客户端可继续传入 `license_acknowledged`。
 
 只打包所选的现有原始文件、PNG 或 SVG，不自动生成缺失格式，不加入未选择的祖先文件，不嵌套 ZIP。单次最多 500 个版本、总输入 128 MiB。界面要求用户显式确认许可后提交，后端继续检查未确认授权的文件。前端“全选”必须标明作用于当前已载入的纹样，按处理类型及整组选择均转成显式资产列表。
 

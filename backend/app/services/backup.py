@@ -27,6 +27,7 @@ SOURCE_TYPES = {
     "scripts": {".py", ".ps1", ".mjs"}, "docs": {".md"},
     "samples": {".md", ".csv", ".json", ".jsonl"},
 }
+LOCAL_ONLY_DIRS = {"docs/local", "frontend/next", "frontend/next-v2-backup-20261110"}
 REQUIRED = {"pyproject.toml", ".env.example", "backend/app/main.py", "scripts/serve_api.py", DATABASE}
 TABLES = {"assets", "provider_calls", "images", "local_jobs", "local_keys", "asset_relations",
           "local_pipelines", "feedback", "consents", "ai_flows", "repair_decisions"}
@@ -64,6 +65,8 @@ def _allowed_source(name):
     relative = _relative(name)
     if len(relative.parts) == 1:
         return name in ROOT_FILES
+    if name == "frontend/assets/pattern-studio/crane-line-blue.png":
+        return True
     return (relative.parts[0] in SOURCE_TYPES
             and relative.suffix in SOURCE_TYPES[relative.parts[0]]
             and not any(p.startswith(".") or p in {"node_modules", "__pycache__", "dist", "build"}
@@ -290,7 +293,8 @@ def create_backup(project, destination, *, storage_root=None):
                         raise BackupError("Cannot read all selected project source files") from error
                     for current, directories, filenames in os.walk(base, followlinks=False, onerror=unreadable):
                         directories[:] = [d for d in directories if not d.startswith(".")
-                                          and d not in {"node_modules", "__pycache__", "dist", "build"}]
+                                          and d not in {"node_modules", "__pycache__", "dist", "build"}
+                                          and (Path(current) / d).relative_to(project).as_posix() not in LOCAL_ONLY_DIRS]
                         for directory in directories:
                             _resolve(Path(current) / directory)
                         for filename in filenames:
@@ -306,7 +310,8 @@ def create_backup(project, destination, *, storage_root=None):
                     "source_project": str(project), "source_storage": str(storage),
                     "environment": _environment(project), "files": files, "database_summary": summary,
                     "excluded": [".env and credentials", "OS locks and SQLite sidecars", "unregistered assets",
-                                 "storage/samples development originals", "validation reports", "caches and dependencies"],
+                                 "storage/samples development originals", "validation reports", "caches and dependencies",
+                                 *sorted(LOCAL_ONLY_DIRS)],
                     "permissions": "Local operational backup only; no new display or training permission"}
         (temporary / MANIFEST).write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         verify_backup(temporary)

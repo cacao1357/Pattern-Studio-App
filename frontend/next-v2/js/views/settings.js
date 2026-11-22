@@ -111,6 +111,15 @@ export function keepOnlySettingsUpdate(record) {
 }
 
 /**
+ * 云端计费是两项历史字段：paid_calls_enabled 与 pricing_confirmed。
+ * 旧记录可能只开了其中一项；合并后的开关只在两项都为 true 时才算已启用，
+ * 不一致时显示关闭，保存其他设置时保留原值。
+ */
+export function billingEnabled(record) {
+  return record?.paid_calls_enabled === true && record?.pricing_confirmed === true;
+}
+
+/**
  * 保存条状态：除了字段改动，密钥存储迁移也会让「保存设置」可用。
  * `migrationDone` 用于保存后页面仍报告 private_file 的平台（非 Windows），
  * 避免按钮一直停在“待更新”。
@@ -204,10 +213,10 @@ function blockersHtml(record) {
   <div class="st-blockers st-blockers--warn" data-blockers aria-live="polite">
     <p class="st-blockers__title">${icon("alert")}当前云端不可用</p>
     <ul class="st-blockers__list">
-      ${codes
+      ${[...new Set(codes.map(blockerLabel))]
         .map(
-          (code) =>
-            `<li><span class="chip chip--gold">${esc(blockerLabel(code))}</span></li>`
+          (label) =>
+            `<li><span class="chip chip--gold">${esc(label)}</span></li>`
         )
         .join("")}
     </ul>
@@ -251,20 +260,11 @@ function cloudSection(record) {
 
       <div class="st-toggle">
         <div class="st-toggle__text">
-          <p class="st-toggle__label" id="st-paid-label">允许云端调用</p>
-          <p class="st-toggle__hint">关闭后云端调用会被拒绝。</p>
+          <p class="st-toggle__label" id="st-billing-label">允许云端计费调用</p>
+          <p class="st-toggle__hint">提交云端任务时上传所选纹样，按次计费。</p>
         </div>
-        <button class="switch" type="button" role="switch" data-cfg="paid_calls_enabled"
-          aria-checked="${record.paid_calls_enabled}" aria-labelledby="st-paid-label"></button>
-      </div>
-
-      <div class="st-toggle">
-        <div class="st-toggle__text">
-          <p class="st-toggle__label" id="st-pricing-label">已确认价格</p>
-          <p class="st-toggle__hint">表示你已了解服务商价格；未确认时云端调用会被拒绝。</p>
-        </div>
-        <button class="switch" type="button" role="switch" data-cfg="pricing_confirmed"
-          aria-checked="${record.pricing_confirmed}" aria-labelledby="st-pricing-label"></button>
+        <button class="switch" type="button" role="switch" data-cfg="billing_enabled"
+          aria-checked="${billingEnabled(record)}" aria-labelledby="st-billing-label"></button>
       </div>
 
       <div data-blockers-wrap>${blockersHtml(record)}</div>
@@ -381,7 +381,7 @@ function aboutSection(record) {
         <div><dt>数据位置</dt><dd>本机 <span class="mono">storage/api/</span></dd></div>
         <div><dt>密钥</dt><dd>只显示「已配置 / 未配置」 · 不回显内容</dd></div>
         <div><dt>密钥存储</dt><dd>${esc(apiKeyStorageText(record))}</dd></div>
-        <div><dt>云端</dt><dd>默认关闭 · 每次调用都需确认</dd></div>
+        <div><dt>云端</dt><dd>默认关闭 · 每次调用单独发起并按次计费</dd></div>
       </dl>
       <p class="field__hint">
         当前配置修订 <span class="mono" data-revision>${revLabel(record)}</span>。
@@ -407,8 +407,7 @@ function currentForm(page) {
   return {
     model: raw("model").trim(),
     baseUrl: raw("base_url").trim(),
-    paid: switchValue(page, "paid_calls_enabled"),
-    pricing: switchValue(page, "pricing_confirmed"),
+    billing: switchValue(page, "billing_enabled"),
     keyValue: raw("api_key").trim(),
     keyAction: pendingClear ? "clear" : "keep",
   };
@@ -418,8 +417,7 @@ function snapshotOf(record) {
   return {
     model: String(record?.model || ""),
     baseUrl: String(record?.base_url || ""),
-    paid: Boolean(record?.paid_calls_enabled),
-    pricing: Boolean(record?.pricing_confirmed),
+    billing: billingEnabled(record),
     keyAction: "keep",
   };
 }
@@ -430,8 +428,7 @@ function changedFields(page) {
   const keys = [];
   if (now.model !== baseline.model) keys.push("model");
   if (now.baseUrl !== baseline.baseUrl) keys.push("base_url");
-  if (now.paid !== baseline.paid) keys.push("paid_calls_enabled");
-  if (now.pricing !== baseline.pricing) keys.push("pricing_confirmed");
+  if (now.billing !== baseline.billing) keys.push("billing_enabled");
   if (now.keyValue || now.keyAction !== baseline.keyAction) keys.push("api_key");
   return { now, keys };
 }
@@ -610,8 +607,10 @@ async function saveForm(page, api) {
     if (!now.baseUrl) problems.push("接口地址不能为空。");
     else payload.base_url = now.baseUrl;
   }
-  if (keys.includes("paid_calls_enabled")) payload.paid_calls_enabled = now.paid;
-  if (keys.includes("pricing_confirmed")) payload.pricing_confirmed = now.pricing;
+  if (keys.includes("billing_enabled")) {
+    payload.paid_calls_enabled = now.billing;
+    payload.pricing_confirmed = now.billing;
+  }
   if (keys.includes("api_key")) {
     if (now.keyValue) {
       if (!/^[\x21-\x7E]+$/.test(now.keyValue)) {
@@ -672,6 +671,7 @@ function afterSave(page, record, api) {
   else delete page.dataset.storageSaved;
   paintKeyState(page);
   paintBlockers(page);
+  setSwitch(page, "billing_enabled", baseline.billing);
   paintRevision(page);
   paintSaveState(page);
   flashSaved(page);
@@ -704,8 +704,7 @@ function resetForm(page, api) {
   put("model", baseline.model);
   put("base_url", baseline.baseUrl);
   put("api_key", "");
-  setSwitch(page, "paid_calls_enabled", baseline.paid);
-  setSwitch(page, "pricing_confirmed", baseline.pricing);
+  setSwitch(page, "billing_enabled", baseline.billing);
   page.dataset.saved = "false";
   paintKeyState(page);
   paintSaveState(page);

@@ -184,6 +184,74 @@ try {
     await waitFor(currentStage, "saved pattern can be opened again");
     assert.equal(errors.length, 0, JSON.stringify(errors));
     check("workbench prompts on return and reload, restores the asset and stage, and keeps every library version after starting fresh");
+    await waitFor(`import('/js/store.js').then(({store})=>store.session.currentAssetId===${JSON.stringify(info.input_asset_id)})`, "original session restored");
+    const latestImage = await evaluate(`(async () => {
+      const {api} = await import('/js/api.js');
+      const {store} = await import('/js/store.js');
+      const canvas = document.createElement('canvas');
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      const other = await api.uploadImage(new File([blob], 'newer-library-pattern.png', {type:'image/png'}));
+      await store.loadRecent();
+      return [other.image_id, store.recentAssets[0]?.image_id];
+    })()`);
+    assert.ok(latestImage[0] && latestImage[0] !== group.image_id);
+    assert.equal(latestImage[1], latestImage[0]);
+    await evaluate("location.hash='#/library'");
+    const editSource = `[data-act="pattern-meta"][data-image="${group.image_id}"]`;
+    await waitFor(`document.querySelector(${JSON.stringify(editSource)})`, "active pattern in library");
+    await evaluate(`document.querySelector(${JSON.stringify(editSource)}).click()`);
+    await fill("pm-source-name", "修复工序资料回归");
+    await evaluate("document.querySelector('[data-pm-save]').click()");
+    await waitFor("!document.querySelector('[data-pm-save]') && document.querySelector('.lb-page').textContent.includes('修复工序资料回归')", "updated source in library");
+    await waitFor("import('/js/store.js').then(({store})=>store.session.image?.meta?.source_name==='修复工序资料回归')", "library edit updates the open document");
+    await evaluate("location.hash='#/home'");
+    await waitFor("document.querySelector('[data-resume]')", "home resume available");
+    await evaluate("document.querySelector('[data-resume]').click()");
+    await waitFor("document.querySelector('.wb')", "home resume opens workbench");
+    const resumed = await evaluate(`import('/js/store.js').then(({store})=>({
+      asset:store.session.currentAssetId, stage:document.querySelector('.wb').dataset.stage,
+      drawer:!!document.querySelector('#drawer')
+    }))`);
+    assert.deepEqual(resumed, {asset:info.input_asset_id, stage:"repair", drawer:false});
+    assert.equal(await evaluate("document.querySelector('.wb-doc__name').textContent"), "修复工序资料回归");
+    check("home resumes the active version and stage after a different pattern enters the library");
+    const attempts = await evaluate(`(async () => {
+      const {store} = await import('/js/store.js');
+      store.datasetLoadedAt = 0;
+      const originalFetch = window.fetch;
+      let count = 0;
+      window.fetch = (...args) => {
+        if (String(args[0]).includes('/datasets/audit') && ++count <= 4) {
+          return Promise.resolve(Response.json({}, {status:503}));
+        }
+        return originalFetch(...args);
+      };
+      try {
+        location.hash = '#/home';
+        await new Promise(resolve => setTimeout(resolve, 850));
+        return count;
+      } finally {
+        window.fetch = originalFetch;
+      }
+    })()`);
+    assert.equal(attempts, 1, "one failed home data request must not trigger a render/reload loop");
+    await evaluate("location.hash='#/library'");
+    const openGroup = `[data-act="pattern-workbench"][data-image="${group.image_id}"]`;
+    await waitFor(`document.querySelector(${JSON.stringify(openGroup)})`, "library navigation after home data error");
+    await evaluate(`(() => {
+      const originalFetch = window.fetch;
+      window.fetch = (...args) => {
+        if (!String(args[0]).endsWith('/workbench/items') || args[1]?.method !== 'POST') return originalFetch(...args);
+        window.fetch = originalFetch;
+        return Promise.resolve(Response.json({error:{code:'WORKBENCH_LIMIT'}}, {status:409}));
+      };
+      document.querySelector(${JSON.stringify(openGroup)}).click();
+    })()`);
+    await waitFor("document.querySelector('.wb') && document.querySelector('#toasts').textContent.includes('500')", "library opens with a visible warning when membership fails");
+    await evaluate("location.hash='#/home'");
+    await waitFor("import('/js/store.js').then(({store})=>store.datasetLoadedAt>0)", "home data recovers on next visit");
+    check("home recovers after a failed request and library membership errors remain visible");
+    assert.equal(errors.length, 0, JSON.stringify(errors));
     await call("Browser.close",{},false);
   } else {
   if (batchOnly) {
@@ -196,9 +264,9 @@ try {
       for(let i=0;i<3;i++){
         const canvas=document.createElement('canvas');canvas.width=64;canvas.height=64;
         const c=canvas.getContext('2d');c.fillStyle='white';c.fillRect(0,0,64,64);
-        c.strokeStyle='black';c.lineWidth=4;c.strokeRect(8+i,8,45-i,45);
+        c.strokeStyle='black';c.lineWidth=4;c.strokeRect(8,8,45,45);
         const blob=await new Promise(r=>canvas.toBlob(r,'image/png'));
-        files.push(new File([blob],'batch-smoke-'+i+'.png',{type:'image/png',lastModified:100+i}));
+        files.push(new File([blob],'batch-smoke-'+i+'-'+'a'.repeat(80)+'.png',{type:'image/png',lastModified:100+i}));
       }
       files.push(new File(['invalid'],'unsupported.txt',{type:'text/plain'}));
       return importFiles(files,{onChange:()=>app.render()});
@@ -211,12 +279,27 @@ try {
     assert.equal(await evaluate("getComputedStyle(document.querySelector('.wb-steps'),'::before').content"), "none");
     assert.notEqual(await evaluate("getComputedStyle(document.querySelector('.wb-step')).backgroundColor"), "rgba(0, 0, 0, 0)");
     check("batch import preserves three originals, reports unsupported file and renders separate pattern groups");
+    await evaluate("[...document.querySelectorAll('[data-pattern]')].find(e=>e.textContent.includes('batch-smoke-0')).querySelector('[data-act=pattern-open]').click()");
+    await waitFor("document.querySelector('.wb-doc__name')?.textContent.includes('batch-smoke-0') && document.querySelector('.bp-dupes__list li')", "long document and duplicate names");
     await writeFile(path.join(output,"batch-workbench.png"),Buffer.from((await call("Page.captureScreenshot",{format:"png"})).data,"base64"));
 
     const batchLayoutFailures = [];
     for (const [width,height] of [[1440,900],[1080,720],[390,844]]) {
       await call("Emulation.setDeviceMetricsOverride",{width,height,deviceScaleFactor:1,mobile:width<820});
       await new Promise(r=>setTimeout(r,200));
+      const overflowingNames=await evaluate(`(() => {
+        const fields = [...document.querySelectorAll('.wb-doc__name,.bp-dupes__list li span')];
+        return fields.filter(el => {
+          const box = el.getBoundingClientRect();
+          if (!box.width) return false;
+          const panel = el.closest('.wb-doc,.bp-import').getBoundingClientRect();
+          const range = document.createRange(); range.selectNodeContents(el);
+          const visibleTextEnd = getComputedStyle(el).overflowX === 'visible'
+            ? range.getBoundingClientRect().right : box.right;
+          return box.left < panel.left - 1 || Math.max(box.right, visibleTextEnd) > panel.right + 1;
+        }).map(el => el.textContent);
+      })()`);
+      assert.deepEqual(overflowingNames, [], 'long document and duplicate names fit their panels at '+width);
       const geometry=await evaluate(`(()=>{
         const scroller=document.querySelector('.wb-groups');
         const first=scroller.querySelector('[data-pattern]');
@@ -238,7 +321,7 @@ try {
     assert.equal(exportChoice.stats.count, groupIds.length);
     await evaluate("document.querySelector('[data-bx-zoom]').click()");
     await waitFor("Boolean(document.querySelector('[data-bx-zoom-close]'))", "export enlarged preview");
-    await evaluate("document.querySelector('[data-bx-zoom-close]').click();document.querySelector('[data-bx-license]').click();document.querySelector('[data-bx-submit]').click()");
+    await evaluate("document.querySelector('[data-bx-zoom-close]').click();document.querySelector('[data-bx-submit]').click()");
     await waitFor("Boolean(document.querySelector('[data-bx-download]'))", "real batch ZIP",30000);
     assert.ok(await evaluate("fetch(document.querySelector('[data-bx-download]').href).then(async r=>r.ok&&(await r.blob()).size>0)"));
     await writeFile(path.join(output,"batch-export.png"),Buffer.from((await call("Page.captureScreenshot",{format:"png"})).data,"base64"));
@@ -490,6 +573,17 @@ try {
       await waitFor('window.__previousTestDocument!==true && document.readyState==="complete"','new test document loaded');
     };
     const stageKeys=['source','crop','repair','candidate','process','mask','vector','tile'];
+    async function checkActionLabels(stage, width) {
+      const overflow = await evaluate(`[...document.querySelectorAll('.wb-panel__actions button')].filter(button => {
+        const bounds = button.getBoundingClientRect();
+        const content = document.createRange();
+        content.selectNodeContents(button);
+        return [...content.getClientRects()].some(rect =>
+          rect.left < bounds.left - 1 || rect.right > bounds.right + 1 ||
+          rect.top < bounds.top - 1 || rect.bottom > bounds.bottom + 1);
+      }).map(button => button.textContent.trim())`);
+      assert.deepEqual(overflow, [], stage + ' action labels must fit their buttons at ' + width + 'px');
+    }
     async function checkCoordinateRows(prefix, width) {
       await evaluate(`(() => {
         const toggle = document.querySelector('[data-act=panel-toggle][aria-expanded=false]');
@@ -525,9 +619,22 @@ try {
         if(stage===3) {
           await waitFor(`import('/js/store.js').then(({store}) => store.session.currentAssetId === ${JSON.stringify(info.input_asset_id)} && !!document.querySelector('[data-act=skip-repair]:not(:disabled)'))`, 'skip repair available on loaded pattern');
           await waitFor("import('/js/store.js').then(({store}) => store.leftrefillModel.available !== null)", 'local repair capability');
+          // Exercise the paid label without enabling billing or submitting a job to the fixture.
+          await evaluate("import('/js/store.js').then(({store}) => { store.seedream = {...store.seedream, enabled:true}; store.notify('seedream'); })");
+          await evaluate("document.querySelector('[data-seg=repairMethod][data-val=cloud]').click()");
+          await waitFor("document.querySelector('.wb-panel__actions [data-act=run-repair]')?.textContent.includes('按次计费')", 'cloud repair action');
+          await checkActionLabels('cloud repair', width);
+          await waitFor(`(() => {
+            const button = document.querySelector('.wb-panel__actions [data-act=run-repair]');
+            button.scrollIntoView({block:'center', behavior:'instant'});
+            const box = button.getBoundingClientRect();
+            const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+            return button.contains(hit);
+          })()`, 'cloud repair button reachable at ' + width + 'px');
           if (await evaluate("import('/js/store.js').then(({store}) => store.leftrefillModel.available)")) {
             await evaluate("document.querySelector('[data-seg=repairMethod][data-val=leftrefill]').click()");
             await checkCoordinateRows('repair', width);
+            await checkActionLabels('local repair', width);
           }
           await evaluate("document.querySelector('[data-act=skip-repair]').click()");
           await waitFor("document.querySelector('.wb-panel [data-act=go-process]:not(:disabled)') && document.querySelector('.wb-panel [data-act=skip-repair]')?.textContent.includes('继续修复')", 'repair skipped without generation');
@@ -538,6 +645,7 @@ try {
           await waitFor("document.querySelector('[data-act=run-cloud-lineart]')?.disabled===true",'disabled cloud route leaves local available');
           await writeFile(path.join(output,'cloud-route-'+width+'.png'),Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
         }
+        await checkActionLabels(stageKeys[stage-1], width);
       }
       check('home/library/tasks/settings/notes and eight stages fit, with aligned coordinate fields at '+width+'px');
     }
@@ -588,6 +696,30 @@ try {
       }
       if(width===1920 || width===1440 || width===390) await writeFile(path.join(output,'asset-column-'+width+'.png'),Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
       check('independent asset column, selection and responsive layout at '+width+'x'+height);
+    }
+    if (!layoutOnly) {
+      const settingsUrl = '/api/v1/settings';
+      const current = () => evaluate(`fetch('${settingsUrl}').then(r=>r.json())`);
+      const initial = await current();
+      // A historical partial opt-in must survive an unrelated save.
+      assert.equal(await evaluate(`fetch('${settingsUrl}',{method:'PUT',headers:{'Content-Type':'application/json','X-Pattern-Studio':'local'},
+        body:JSON.stringify({revision:${initial.revision},paid_calls_enabled:false,pricing_confirmed:true})}).then(r=>r.ok)`), true);
+      await navigatePage(info.url+'/#/settings');
+      const billing = '[data-cfg=billing_enabled]';
+      await waitFor(`document.querySelector('${billing}')?.getAttribute('aria-checked')==='false'`, 'partial billing opt-in stays off');
+      await fill('st-cloud-model','ep-20261122123456-test');
+      await evaluate("document.querySelector('[data-act=save]').click()");
+      await waitFor(`fetch('${settingsUrl}').then(r=>r.json()).then(s=>s.model==='ep-20261122123456-test')`, 'unrelated setting saved');
+      const after = await current();
+      assert.deepEqual([after.paid_calls_enabled, after.pricing_confirmed], [false,true]);
+      for (const enabled of [true,false]) {
+        await waitFor("document.querySelector('.st-page[data-saved=true]:not([data-saving])') && document.querySelector('[data-act=save]').disabled", 'billing form ready');
+        await evaluate(`document.querySelector('${billing}').click()`);
+        assert.equal(await evaluate("document.querySelector('[data-act=save]').disabled"),false);
+        await evaluate("document.querySelector('[data-act=save]').click()");
+        await waitFor(`fetch('${settingsUrl}').then(r=>r.json()).then(s=>s.paid_calls_enabled===${enabled} && s.pricing_confirmed===${enabled})`, 'billing choice saved: '+enabled);
+      }
+      check('one billing switch updates both flags only on explicit change');
     }
   }
   // Newly merged repair entry must reflect actual local prerequisites and must

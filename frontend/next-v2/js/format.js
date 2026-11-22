@@ -241,8 +241,8 @@ export function jobStateLabel(state) {
 export function blockerLabel(code) {
   const map = {
     API_KEY_MISSING: "未填写 API Key",
-    PAID_CALLS_DISABLED: "云端调用未开启",
-    PRICING_NOT_CONFIRMED: "价格未确认",
+    PAID_CALLS_DISABLED: "未开启云端计费调用",
+    PRICING_NOT_CONFIRMED: "未开启云端计费调用",
   };
   return map[code] || code;
 }

@@ -66,6 +66,8 @@
   line-height: 1.35;
   letter-spacing: 0.01em;
   color: var(--text-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .wb-doc__id {
   margin-top: 3px;
@@ -73,6 +75,8 @@
   font-size: var(--text-min);
   letter-spacing: 0.06em;
   color: var(--text-3);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .wb-doc__meta {
   display: grid;
@@ -1113,12 +1117,18 @@
 }
 .wb-panel__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .wb-panel__actions .btn {
-  flex: 1 1 0;
+  flex: 1 1 auto;
   min-width: 0;
-  padding-inline: 8px;
+  max-width: 100%;
+  height: auto;
+  min-height: var(--btn-h);
+  padding: 5px 8px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* 参数小节 */
@@ -1707,7 +1717,6 @@
     display: none;
   }
   .wb-panel__actions .btn {
-    flex: 1 1 auto;
     padding-inline: 10px;
   }
 }
@@ -1731,12 +1740,6 @@
   }
   .wb-toggle {
     padding-inline: 10px;
-  }
-  .wb-panel__actions {
-    flex-wrap: wrap;
-  }
-  .wb-panel__actions .btn {
-    flex: 1 1 130px;
   }
 }
 

@@ -256,6 +256,12 @@ try {
     "redo selected component move");
   check("undo and redo restore the selected component's movement");
 
+  await evaluate("document.querySelector('.wb-thumb:not([aria-current=true])').click()");
+  await waitFor(`import('/js/store.js').then(m=>m.store.session.currentAssetId!==${JSON.stringify(info.svg_asset_id)})`, "switch away from an edited SVG");
+  await evaluate(`document.querySelector('.wb-thumb[data-id="${info.svg_asset_id}"]').click()`);
+  await waitFor(`document.querySelector('[data-svg-element="${primaryId}"]')?.getAttribute('transform')===${JSON.stringify(movedTo)}`, "return to the edited SVG");
+  check("switching versions keeps the unsaved SVG edit without a confirmation dialog");
+
   const secondaryPoint = await componentPoint(secondaryId);
   await clickAt(secondaryPoint.x, secondaryPoint.y);
   await waitFor(`document.querySelector('[data-svg-element="${secondaryId}"]')?.classList.contains('is-selected')`, "select second component");

@@ -231,6 +231,33 @@ test("自动轮询只刷新进行中任务，不丢已加载的后续分页", as
   }
 });
 
+test("任务详情根据运行阶段和修复来源提供可执行的操作", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const [kind, state, parameters, retry, cancel] of [
+      ["cloud-lineart", "queued", {}, false, true],
+      ["decompose-layers", "running", {}, false, false],
+      ["cloud-lineart", "failed", {}, false, false],
+      ["repair", "failed", {}, false, false],
+      ["repair", "failed", { method: "leftrefill" }, true, false],
+      ["repair", "running", { provider_call_id: "archived" }, false, true],
+    ]) {
+      const job = { ...baseJob, kind, state, parameters };
+      globalThis.fetch = async () => jsonResponse({ items: [job], next_cursor: null });
+      const view = mountTasksView();
+      try {
+        await waitFor(() => view.detail.innerHTML.includes('data-tk-act="open"'));
+        assert.equal(view.detail.innerHTML.includes('data-tk-act="retry"'), retry, kind + " " + state);
+        assert.equal(view.detail.innerHTML.includes('data-tk-act="cancel"'), cancel, kind + " " + state);
+      } finally {
+        view.restore();
+      }
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("筛选排除当前任务时，详情跟随可见任务或清空", async () => {
   const originalFetch = globalThis.fetch;
   const jobOk = {

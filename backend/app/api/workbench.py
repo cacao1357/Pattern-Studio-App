@@ -150,8 +150,8 @@ def mount_workbench(app, current_store, current_service, current_worker):
 
     @app.post("/api/v1/jobs/{job_id}/cancel")
     def cancel_job(job_id: UUID):
-        """Cancel queued/running local work; external-call tasks require reconciliation."""
-        return current_store().cancel_job(str(job_id))
+        """Cancel queued work, including provider work before a call starts."""
+        return current_store().cancel_job(str(job_id), allow_queued_provider=True)
 
     @app.get("/api/v1/pipelines/{pipeline_id}")
     def get_pipeline(pipeline_id: UUID):

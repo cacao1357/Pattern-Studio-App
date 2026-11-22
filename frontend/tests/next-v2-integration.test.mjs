@@ -1738,6 +1738,14 @@ test("设置密钥存储文案如实区分 DPAPI / 私有文件 / 未保存，�
   }
 });
 
+test("云端计费开关只在两项历史设置都开启时显示开启", () => {
+  for (const paid of [false, true]) {
+    for (const pricing of [false, true]) {
+      assert.equal(settingsModule.billingEnabled({ paid_calls_enabled: paid, pricing_confirmed: pricing }), paid && pricing);
+    }
+  }
+});
+
 test("已配置密钥但存储为 not_saved/private_file 时，无需改动或重输密钥也可显式保存迁移", () => {
   const base = { revision: 7, api_key_configured: true, api_key_storage: "not_saved" };
   assert.equal(settingsModule.keyStorageNeedsRewrite(base), true);
@@ -2061,13 +2069,13 @@ test("本地 LeftRefill 候选走原有接受/拒绝，不按全图候选处理"
   assert.doesNotMatch(decided, /data-act="accept-repair"/);
   assert.doesNotMatch(decided, /data-act="reject-repair"/);
 
-  assert.deepEqual(workbench.buildRepairDecisionPayload(info, "accept", "cand-1", false, true), {
+  assert.deepEqual(workbench.buildRepairDecisionPayload(info, "accept", "cand-1", false), {
     revision: 3,
     action: "accept",
     selected_asset_id: "cand-1",
     accept_full_image_changes: false,
   });
-  assert.deepEqual(workbench.buildRepairDecisionPayload(info, "accept", "cand-1", true, true), {
+  assert.deepEqual(workbench.buildRepairDecisionPayload(info, "accept", "cand-1", true), {
     revision: 3,
     action: "accept",
     selected_asset_id: "cand-1",

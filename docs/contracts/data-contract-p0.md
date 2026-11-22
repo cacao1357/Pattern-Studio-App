@@ -66,8 +66,7 @@ B: 其余
 - 上传表单可选：`source_type, source_name, source_url, license, collected_at, batch_id`。
 - 空值默认“未确认”；`source_url` 只接受 http(s)，不抓取。
 - `provenance_status = declared` 当任一来源字段被实际填写（授权不是“未确认”）。
-- 导出 ZIP 时，未确认授权的版本需要一次显式 `license_acknowledged: true`；
-  本地处理、预览、下载不受影响。
+- 本地 ZIP 可直接导出，清单保留每个版本已登记的许可。兼容旧客户端的可选字段 `license_acknowledged`，省略时清单记为 `false`。
 
 ## 6. API 变化
 
@@ -94,7 +93,6 @@ GET /api/v1/images/{image_id}       # 读取记录，供“使用已有版本”
 错误码：
 
 - `INVALID_PROVENANCE` 422
-- `LICENSE_REVIEW_REQUIRED` 409
 
 ## 7. 导出清单 v2
 
@@ -116,7 +114,7 @@ GET /api/v1/images/{image_id}       # 读取记录，供“使用已有版本”
   "selected_assets": ["每个版本带 image_id/content_id/grade/split/license/algorithm_version"],
   "referenced_ancestors": ["..."],
   "content_ids": ["..."],
-  "license_acknowledged": true
+  "license_acknowledged": false
 }
 ```
 
@@ -146,7 +144,7 @@ GET /api/v1/images/{image_id}       # 读取记录，供“使用已有版本”
 ```
 
 覆盖：分级边界、aHash/NCC、pattern_score、来源字段校验、`image_meta`、
-上传/重复/导出闸门、旧库兼容、manifest v2。
+上传、重复检测、本地导出、旧库兼容、manifest v2。
 
 ### 2026-11-03：zgx 分支修复验证
 

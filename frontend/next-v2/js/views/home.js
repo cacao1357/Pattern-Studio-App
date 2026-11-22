@@ -106,10 +106,61 @@ function kv(rows) {
 
 /* ------------------------------------------------------------------ 接着上次 */
 
-function renderResume(api) {
+/**
+ * 「接着上次」的目标：有内存会话时只认会话自己的当前版本与工序，
+ * 不和最近成果（可能是另一张图）混用；没有会话时才回退到最近成果。
+ */
+function resumeTarget() {
+  const session = store.session;
+  const assets = session?.assets || [];
+  if (session?.imageId && assets.length) {
+    const current =
+      assets.find((asset) => asset.asset_id === session.currentAssetId) ||
+      [...assets].reverse().find((asset) => hasPreview(asset)) ||
+      null;
+    if (current) {
+      return {
+        asset: current,
+        stage: clampStage(progress().current),
+        time: sessionStamp(current),
+      };
+    }
+  }
+  // 没有会话：工序与时间只来自所选目标，不再受 lastStage 或别的图的任务影响。
+  const asset = (store.recentAssets || []).find((item) => hasPreview(item)) || null;
+  if (asset) {
+    return {
+      asset,
+      stage: clampStage(stageForKind(asset.kind)),
+      time: asset.created_at || "",
+    };
+  }
   const job = store.recentJobs[0];
-  const asset = store.recentAssets.find((item) => hasPreview(item)) || null;
-  if (!job && !asset) {
+  if (!job) return null;
+  return {
+    asset: null,
+    job,
+    stage: clampStage(stageForJob(job)),
+    time: job.updated_at || "",
+  };
+}
+
+function clampStage(stage) {
+  return Math.max(1, Math.min(STAGES.length, Number(stage) || 1));
+}
+
+/** 会话内的时间：优先产出该版本的任务，其次最近一次会话任务，最后是版本自身的入库时间。 */
+function sessionStamp(asset) {
+  const jobs = [store.session?.activeJob, ...(store.session?.jobs || [])].filter((job) => job?.updated_at);
+  const own = jobs.filter((job) =>
+    (job.result?.assets || []).some((entry) => entry?.asset_id === asset?.asset_id)
+  );
+  return (own[own.length - 1] || jobs[jobs.length - 1])?.updated_at || asset?.created_at || "";
+}
+
+function renderResume(api) {
+  const target = resumeTarget();
+  if (!target) {
     return `
       <div class="resume card" data-reveal data-spotlight>
         <div class="resume__thumb">
@@ -131,8 +182,8 @@ function renderResume(api) {
       </div>
     `;
   }
-  const { current } = progress();
-  const stageNo = current || 1;
+  const asset = target.asset;
+  const stageNo = target.stage;
   const stageInfo = STAGES[stageNo - 1] || STAGES[0];
   const running = store.session?.activeJob;
   const note = running
@@ -148,10 +199,10 @@ function renderResume(api) {
       <div class="resume__main">
         <div class="resume__top">
           <p class="label">接着上次</p>
-          <span class="resume__time">${job ? relativeTime(job.updated_at) : relativeTime(asset?.created_at)}</span>
+          <span class="resume__time">${relativeTime(target.time)}</span>
         </div>
         <h2 class="resume__name">${
-          asset ? escapeHtml(kindLabel(asset.kind)) : escapeHtml(jobKindLabel(job.kind))
+          asset ? escapeHtml(kindLabel(asset.kind)) : escapeHtml(jobKindLabel(target.job?.kind))
         }</h2>
         <p class="resume__note">${note}</p>
         <ol class="resume__steps" aria-label="八道工序进度">
@@ -164,7 +215,9 @@ function renderResume(api) {
         </ol>
       </div>
       <div class="resume__side">
-        <button class="btn btn--primary" type="button" data-resume ${asset ? `data-asset="${asset.asset_id}"` : ""} data-magnetic>
+        <button class="btn btn--primary" type="button" data-resume ${
+          asset ? `data-resume-asset="${asset.asset_id}"` : ""
+        } data-resume-stage="${stageNo}" data-magnetic>
           继续处理 ${icon("arrow")}
         </button>
         <button class="btn btn--ghost btn--sm" type="button" data-recent-jobs>最近任务</button>
@@ -417,10 +470,28 @@ export default {
   mount(root, state, api, params) {
     const ghost = root.querySelector(".medallion-ghost");
     whenVisible(ghost, () => drawLineArt(ghost, { delay: 220 }), { threshold: 0.2 });
+    homeRoot = root;
 
+    // 一次访问（mount）最多各请求一次；失败不自动重绘，避免 503 时连续请求。
     const stale = (at) => !at || Date.now() - at > 15000;
-    if (stale(store.recentLoadedAt)) store.loadRecent().then(() => api.refresh());
-    if (stale(store.datasetLoadedAt)) store.loadDataset().then(() => api.refresh());
+    if (!homeDataAttempted) {
+      homeDataAttempted = true;
+      const seq = ++homeLoadSeq;
+      const recentAt = store.recentLoadedAt;
+      const datasetAt = store.datasetLoadedAt;
+      const pending = [];
+      if (stale(recentAt)) pending.push(store.loadRecent());
+      if (stale(datasetAt)) pending.push(store.loadDataset());
+      if (pending.length) {
+        Promise.allSettled(pending).then(() => {
+          // 离开首页或已开始新的访问：旧响应直接丢弃，不重绘别的页面。
+          if (seq !== homeLoadSeq || !stillOnHome(api)) return;
+          // 时间戳没变说明这次读取失败（store 内部已吞掉错误），不重绘。
+          if (store.recentLoadedAt === recentAt && store.datasetLoadedAt === datasetAt) return;
+          api.refresh();
+        });
+      }
+    }
 
     // 会话、任务或最近成果一变就重算高亮；进度没变不重绘，避免同一页里闪一下。
     // 导览浮层打开时不重绘：整页重绘会把浮层换掉，打断阅读。
@@ -449,15 +520,26 @@ export default {
     });
 
     root.querySelector("[data-resume]")?.addEventListener("click", async (event) => {
-      const assetId = event.currentTarget.dataset.asset;
+      const { resumeAsset: assetId = "", resumeStage } = event.currentTarget.dataset;
+      const stage = clampStage(resumeStage);
       if (!assetId) {
-        api.go("workbench", { query: { stage: 1 } });
+        api.go("workbench", { query: { stage } });
+        return;
+      }
+      // 目标版本已在会话里：只切当前版本，不再 openAsset——那会重建会话、丢掉任务与进度。
+      const known = store.assetById(assetId);
+      if (known) {
+        store.setCurrentAsset(assetId);
+        const params = { stage };
+        const imageId = store.session.imageId || known.image_id;
+        if (imageId) params.image = imageId;
+        api.go("workbench", { query: params });
         return;
       }
       try {
         const opened = await store.openAsset(assetId);
         if (!opened) return;
-        const { asset, stage } = opened;
+        const { asset } = opened;
         api.go("workbench", { query: { image: asset.image_id, asset: asset.asset_id, stage } });
       } catch (error) {
         api.toast(error?.message || "打开纹样失败", "warn");
@@ -484,10 +566,33 @@ export default {
     closeTour();
     tourEl?.remove();
     tourEl = null;
+    homeRoot = null;
+    // 同页重绘（unmount 后马上 mount，地址仍是 #/home）保留本次访问的尝试状态；
+    // 真正离开首页才重置，并让还在路上的旧响应失效。
+    if (!onHomeHash()) {
+      homeDataAttempted = false;
+      homeLoadSeq += 1;
+    }
   },
 };
 
 let homeUnsubscribe = null;
+/* 本次首页访问的数据加载状态：一次访问只尝试一次，失败不自动重绘。 */
+let homeDataAttempted = false;
+let homeLoadSeq = 0;
+/* 当前挂载的首页根节点：异步响应回来时据此判断是否还在首页。 */
+let homeRoot = null;
+
+/** 首页地址：空 hash 由渲染器当成 #/home，也要算在首页。 */
+function onHomeHash() {
+  const hash = String(location.hash || "");
+  return !hash || hash.startsWith("#/home");
+}
+
+/** 仍在首页（路由、地址栏与挂载点都还在）才允许因数据回来而重绘。 */
+function stillOnHome(api) {
+  return Boolean(api?.state?.route === "home" && onHomeHash() && homeRoot?.isConnected);
+}
 
 /* 会改变首页高亮的 store 事件；设置变化单独整页重绘（云端卡要更新）。 */
 const LIVE_REASONS = new Set(["session", "job-start", "job-end", "recent"]);

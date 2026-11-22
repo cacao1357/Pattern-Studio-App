@@ -59,8 +59,10 @@ def test_cloud_lineart_snapshot_idempotency_and_vectorization(studio):
     assert not calls  # admission never makes a provider request
     assert "fixture-cloud-key" not in submitted.text
     assert post("/jobs/cloud-lineart", json=payload, headers={"Idempotency-Key": key}).json()["job_id"] == job["job_id"]
-    assert post("/jobs/" + job["job_id"] + "/cancel").status_code == 409
     claimed, token = store.claim()
+    cancellation = post("/jobs/" + job["job_id"] + "/cancel")
+    assert cancellation.status_code == 409
+    assert cancellation.json()["error"]["code"] == "CANCEL_REQUIRES_RECONCILIATION"
     # Queued work retains the selected model even after subsequent settings changes.
     execute_cloud_lineart(store, claimed, token, replace(settings, model="ep-new-model"), transport=transport)
     store.finish_job(job["job_id"], token)

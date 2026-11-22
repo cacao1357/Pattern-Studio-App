@@ -297,7 +297,7 @@ const ERROR_TEXT = {
   BRUSH_OUT_OF_BOUNDS: "画笔点位超出了源图范围，请重画。",
   TILE_UNIT_REQUIRED: "请选择裁切、透明 PNG、线稿 PNG 或已接受的修复图作为平铺单元。",
   TILE_PIXEL_LIMIT: "平铺结果超过 4 MP，请换更小的单元。",
-  LICENSE_REVIEW_REQUIRED: "所选版本中有未登记的许可证，请先勾选「许可证已确认」再导出。",
+  LICENSE_REVIEW_REQUIRED: "本机服务仍在要求导出授权确认；请重启本机服务后再导出。",
   NESTED_EXPORT: "不能把已有的 ZIP 再打包一次，请只选图片或 SVG。",
   EXPORT_SIZE_LIMIT: "所选文件超过 128 MiB 导出上限，请少选几个。",
   STALE_SEAM_OBSERVATION: "接缝记录已被更新，已重新读取纹样，请再保存一次。",
@@ -369,7 +369,6 @@ function defaultDraft() {
     repairFeather: 0,
     repairSize: "1K",
     repairSkipped: false,
-    acceptFull: false,
     tileUnitId: "",
     tileUnitTouched: false,
     seamGrid: false,
@@ -1158,14 +1157,6 @@ const switchRow = (key, label, checked) => `
       data-switch="${key}"></button>
     <span class="wb-switch__label">${esc(label)}</span>
   </div>`;
-
-const checkRow = (key, label, checked, hint = "") => `
-  <label class="wb-check">
-    <input class="wb-check__input" type="checkbox" data-check="${key}" ${checked ? "checked" : ""}
-      aria-label="${esc(label)}" />
-    <span class="wb-check__box" aria-hidden="true">${icon("check")}</span>
-    <span class="wb-check__text"><span>${esc(label)}</span>${hint ? `<span class="field__hint">${esc(hint)}</span>` : ""}</span>
-  </label>`;
 
 const noteBox = (text, kind = "info") => `
   <div class="wb-note${kind === "error" ? " wb-error" : ""}" role="${kind === "error" ? "alert" : "note"}">
@@ -2362,7 +2353,7 @@ function processPanel(state) {
     route === "local"
       ? `本地模型：直接用本机模型生成线稿 PNG，不调用云端，也不会自动矢量化。${capHint}`
       : route === "cloud"
-      ? "云端模型：把当前输入上传到云端生成线稿 PNG；提交即视为同意上传与计费，失败不自动重发，也不会自动矢量化。"
+      ? "云端模型：把当前输入上传到云端生成线稿 PNG；不会自动矢量化。"
       : route === "opencv"
       ? `OpenCV：本机传统算法生成线稿 PNG，不依赖模型权重，也不调用云端。${capHint}`
       : `颜色提取：本机生成前景蒙版、透明 PNG 与外轮廓线稿；蒙版修正后再到 07 矢量化。${capHint}`;
@@ -2435,7 +2426,7 @@ function processPanel(state) {
         ? `${sec(
             "云端模型",
             `${esc(store.seedream?.model || "云端模型")}`,
-            `<p class="field__hint">云端线稿只返回一张 lineart PNG；识别的提示词版本与调用编号会写进纹样记录，方便核对。提交会上传当前输入到云端服务商并按次计费，失败不会自动重发。</p>`
+            `<p class="field__hint">云端线稿只返回一张 lineart PNG；识别的提示词版本与调用编号会写进纹样记录，方便核对。失败不会自动重发。</p>`
           )}`
         : cloudDisabled(null)
       : route === "opencv"
@@ -2535,7 +2526,7 @@ function candidatePanel(state) {
           `${selectField("candSize", "生成尺寸", AI_SIZE_OPTIONS, draft.candSize)}
           ${segField("candColors", "颜色数", COLOR_OPTIONS.map(([value, text]) => [value, text]), draft.candColors)}
           ${segField("candDetail", "细节", DETAILS, draft.candDetail)}
-          <p class="field__hint">尺寸与颜色数会随请求一起存档；这一步只拆分候选，不生成线稿。提交会上传当前输入到云端服务商并按次计费，失败不会自动重发。</p>`
+          <p class="field__hint">尺寸与颜色数会随请求一起存档；这一步只拆分候选，不生成线稿。失败不会自动重发。</p>`
         )}`
       : ""
   }
@@ -2816,7 +2807,10 @@ export function repairCandidateList(info, method = repairMethodOf(info)) {
               decided
                 ? ""
                 : `<button class="btn btn--primary btn--sm" type="button" data-act="accept-repair"
-                    data-id="${row.asset.asset_id}" data-full="${row.full ? "1" : "0"}">接受</button>`
+                    data-id="${row.asset.asset_id}" data-full="${row.full ? "1" : "0"}"
+                    title="${esc(row.full ? "接受后会用整幅 AI 结果替换当前画面" : "接受这次局部修复结果")}">${
+                      row.full ? "接受整图候选" : "接受局部修复"
+                    }</button>`
             }
           </div>
         </li>`;
@@ -2888,7 +2882,7 @@ function repairPanel(state, methodOverride = repairMethod()) {
   ${noticeBox()}
   ${sec(
     "修复方式",
-    method === "leftrefill" ? "本地 · 不上传、不计费" : "云端 · 需逐次确认",
+    method === "leftrefill" ? "本地 · 不上传、不计费" : "云端 · 按次计费",
     `${segField(
       "repairMethod",
       "修复方式",
@@ -2937,8 +2931,8 @@ function repairPanel(state, methodOverride = repairMethod()) {
                   currentId: store.session.currentAssetId,
                 })}`
               )}
-          ${boxSection("区域使用当前输入的像素坐标；云端的全图候选可能改变整幅画面，接受前需额外确认。")}
-          <p class="field__hint">提交会上传当前整张输入与框坐标到云端服务商，并按次计费；失败不会自动重发。需要不上传、不计费的修复时，切到「本地 LeftRefill」。</p>
+          ${boxSection("区域使用当前输入的像素坐标；云端的全图候选会改变整幅画面，接受时请选「接受整图候选」。")}
+          <p class="field__hint">失败不会自动重发；需要不上传、不计费的修复时，切到「本地 LeftRefill」。</p>
           ${sec(
             "修复参数",
             `262,144–1,048,576 px`,
@@ -3000,7 +2994,7 @@ function repairPanel(state, methodOverride = repairMethod()) {
            ${
              infoMethod === "leftrefill"
                ? `<p class="field__hint">只改修复框内，不调用云端。</p>`
-               : checkRow("acceptFull", "接受全图 AI 候选前，我确认它可能改变整个画面", draft.acceptFull)
+               : ""
            }`
         : ""
     }`
@@ -3015,7 +3009,7 @@ function exportsSection(state) {
     `${groups.length} 个原图组 · ${total} 项`,
     `<p class="field__hint">导出在网页内浮窗完成：按原图分目录打包，可整组选择或按处理类型批选；只打包原始文件、已有 PNG 与已有 SVG，不做格式转换。</p>
      <button class="btn btn--primary btn--sm btn--block" type="button" data-act="open-export"${total ? "" : " disabled"}>${icon("download")}打开批量导出</button>
-     <p class="field__hint">128 MiB 上限与授权提示在浮窗内确认；任务完成后 ZIP 出现在浮窗和纹样库中。</p>`
+     <p class="field__hint">128 MiB 上限在浮窗内提示；任务完成后 ZIP 出现在浮窗和纹样库中。</p>`
   );
 }
 
@@ -3153,7 +3147,7 @@ function stageActions(stage, state) {
       return `${skipButton}
         ${primaryButton(
           "run-repair",
-          input.asset ? "生成修复候选" : "先选修复输入",
+          input.asset ? "上传并生成修复候选（按次计费）" : "先选修复输入",
           "cloud",
           disabled(!input.asset || Boolean(input.error))
         )}`;
@@ -3179,13 +3173,13 @@ function stageActions(stage, state) {
       if (cand.layers.length) {
         return `<button class="btn btn--ghost btn--sm" type="button" data-act="run-candidate"${
           busy || !canRegenerate ? " disabled" : ""
-        }>${icon("cloud")}重新生成</button>
+        }>${icon("cloud")}重新上传并生成（按次计费）</button>
           ${goProcess}
           ${primaryButton("compose-layers", `${composeLabel} ${cand.selected.length} 层`, "layers", disabled(!cand.selected.length))}`;
       }
       return primaryButton(
         "run-candidate",
-        "生成云端候选",
+        "上传并生成云端候选（按次计费）",
         "cloud",
         disabled(!canRegenerate)
       );
@@ -3213,7 +3207,7 @@ function stageActions(stage, state) {
       if (draft.processRoute === "cloud") {
         return `${primaryButton(
           "run-cloud-lineart",
-          "云端生成线稿",
+          "上传并生成线稿（按次计费）",
           "cloud",
           disabled(
             !store.seedream?.enabled ||
@@ -3394,8 +3388,6 @@ function remember(root) {
   const data = el.dataset || {};
   if (data.field) focusMemo = { at: Date.now(), field: data.field };
   else if (data.range) focusMemo = { at: Date.now(), range: data.range };
-  else if (data.check) focusMemo = { at: Date.now(), check: data.check };
-  else if (data.export) focusMemo = { at: Date.now(), export: data.export };
   else if (data.seg) focusMemo = { at: Date.now(), seg: data.seg, val: data.val || "" };
   else if (data.act) focusMemo = { at: Date.now(), act: data.act, id: data.id || "", val: data.val || "" };
   else focusMemo = null;
@@ -3427,7 +3419,6 @@ function restoreFocus(root) {
   let selector = "";
   if (memo.field) selector = `[data-field="${memo.field}"]`;
   else if (memo.range) selector = `[data-range="${memo.range}"]`;
-  else if (memo.check) selector = `[data-check="${memo.check}"]`;
   else if (memo.seg) selector = `[data-seg="${memo.seg}"][data-val="${memo.val}"]`;
   else if (memo.act) {
     selector = `[data-act="${memo.act}"]`;
@@ -4141,14 +4132,6 @@ function stageClick(root, api, el) {
   patchStage(api, root, { stage: n, ...(target.key === "tile" ? { compare: false } : {}) });
 }
 
-function confirmSvgDraftBeforeSwitch(label = "切换") {
-  if (!svgHasUnsaved(store.session.currentAssetId)) return true;
-  if (typeof window === "undefined" || typeof window.confirm !== "function") return true;
-  return window.confirm(
-    `当前 SVG 还有未保存的编辑草稿；${label}后草稿会保留在本次页面，可切回继续编辑。继续？`
-  );
-}
-
 function switchAsset(api, root, assetId) {
   if (!assetId) return;
   const next = store.assetById(assetId);
@@ -4161,7 +4144,6 @@ function switchAsset(api, root, assetId) {
     }
     return;
   }
-  if (!confirmSvgDraftBeforeSwitch("切换纹样")) return;
   ui.notice = "";
   store.setCurrentAsset(assetId);
   api.syncUrl?.();
@@ -4192,7 +4174,6 @@ function cycleAsset(root, api, delta) {
   const index = assets.findIndex((asset) => asset.asset_id === store.session.currentAssetId);
   const next = assets[(index + delta + assets.length) % assets.length];
   if (!next || next.asset_id === store.session.currentAssetId) return;
-  if (!confirmSvgDraftBeforeSwitch("切换纹样")) return;
   ui.notice = "";
   store.setCurrentAsset(next.asset_id);
   api.syncUrl?.();
@@ -4211,15 +4192,7 @@ function removeSessionAsset(api, assetId) {
     api.toast("任务进行中，完成或取消后再移除。", "warn");
     return;
   }
-  if (
-    svgHasUnsaved(assetId) &&
-    typeof window !== "undefined" &&
-    typeof window.confirm === "function" &&
-    !window.confirm("这个 SVG 还有未保存的编辑草稿；从工作台移除会丢弃草稿，原文件不受影响。继续？")
-  ) {
-    return;
-  }
-  if (!window.confirm(`从工作台移除「${kindLabel(asset.kind)}」？纹样库与任务记录会保留。`)) return;
+  if (svgHasUnsaved(assetId) && !window.confirm("移除这个 SVG 会丢弃未保存的草稿。继续移除？")) return;
   discardSvgDraft(assetId);
   const removed = store.removeAsset(assetId);
   if (!removed) return;
@@ -4566,17 +4539,6 @@ function applyCropPreset(root, preset) {
     draft.crop = { left: 0, top: 0, width: dims.width, height: dims.height };
   }
   applyCropToDom(root);
-}
-
-function patchCheckbox(root, state, api, key, checked) {
-  switch (key) {
-    case "acceptFull":
-      draft[key] = checked;
-      break;
-    default:
-      break;
-  }
-  repaint(root, api);
 }
 
 /* ------------------------------------------------------------------ 事件绑定 */
@@ -5640,14 +5602,14 @@ async function adoptRepairAsset(api, info, token) {
 }
 
 /**
- * 修复接受/拒绝请求体：本地 LeftRefill 候选不是全图候选，调用方传 full=false，
- * 因此即使界面残留了全图确认，也不会把 accept_full_image_changes 带成 true。
+ * 修复接受/拒绝请求体：接受按钮本身就是明确选择，整图候选在点击带
+ * 「接受整图候选」的按钮时直接写入 accept_full_image_changes=true。
  */
-export function buildRepairDecisionPayload(info, action, assetId = "", full = false, acceptFull = false) {
+export function buildRepairDecisionPayload(info, action, assetId = "", full = false) {
   const payload = { revision: info?.revision, action };
   if (action === "accept") {
     payload.selected_asset_id = assetId;
-    payload.accept_full_image_changes = Boolean(full && acceptFull);
+    payload.accept_full_image_changes = Boolean(full);
   }
   return payload;
 }
@@ -5655,14 +5617,10 @@ export function buildRepairDecisionPayload(info, action, assetId = "", full = fa
 async function decideRepair(api, action, assetId = "", full = false) {
   const info = repairState.info;
   if (!info) return;
-  if (action === "accept" && full && !draft.acceptFull) {
-    api.toast("接受全图候选前，请先勾选确认它可能改变整个画面。", "warn");
-    return;
-  }
   // 修复决定属于当前会话；网络返回前会话切换了就不再写任何界面状态。
   const token = store.sessionToken();
   const jobId = info.repair_job_id || info.job_id || cand.jobId || "";
-  const payload = buildRepairDecisionPayload(info, action, assetId, full, draft.acceptFull);
+  const payload = buildRepairDecisionPayload(info, action, assetId, full);
   let next = null;
   try {
     next = await http.repairDecision(jobId, payload);
@@ -5842,7 +5800,6 @@ function handleClick(root, state, api, event) {
         api.toast("已经是当前原图。", "info");
         break;
       }
-      if (!confirmSvgDraftBeforeSwitch("打开其它纹样")) break;
       if (!openPattern(imageId, api, state.stage || 1)) {
         api.toast("已经是当前原图。", "info");
       }
@@ -5850,7 +5807,6 @@ function handleClick(root, state, api, event) {
     }
     case "pattern-asset":
       if (el.dataset.id && el.dataset.id === store.session.currentAssetId) break;
-      if (!confirmSvgDraftBeforeSwitch("打开其它纹样版本")) break;
       openPatternAsset(el.dataset.image || "", el.dataset.id || "", api, state.stage || 1);
       break;
     case "batch-import":
@@ -6201,10 +6157,6 @@ function handleChange(root, state, api, event) {
   }
   if (input.matches("[data-pattern-select-all]")) {
     selectAllPatterns(input.checked, api, root);
-    return;
-  }
-  if (input.matches("[data-check]")) {
-    patchCheckbox(root, state, api, input.dataset.check, input.checked);
     return;
   }
   const select = input.closest("[data-select]");
