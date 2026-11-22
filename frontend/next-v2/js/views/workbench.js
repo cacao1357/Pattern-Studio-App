@@ -363,6 +363,8 @@ function defaultDraft() {
     repair: null,
     repairMethod: "cloud",
     repairReferenceId: "",
+    /* 用户或历史记录明确指定过参考图后，不再用规范输入自动补默认值。 */
+    repairReferenceTouched: false,
     repairIntent: "restore_small_gap",
     repairFeather: 0,
     repairSize: "1K",
@@ -418,6 +420,8 @@ let viewState = null;
 let expectedImage = "";
 let lastCurrentId = "";
 let lastImageId = "";
+/* 当前接缝控件对应的平铺预览；切换预览时用它同步已保存的接缝观察。 */
+let lastSeamTarget = "";
 let lastSessionToken = null;
 let lastHealthCapability = "";
 let panelPref = null;
@@ -589,11 +593,16 @@ export function leftRefillReferenceAssets(assets) {
   });
 }
 
-/** 用户明确选中的参考图；未选择、已移除或超出上限都返回 null，不自动挑一张。 */
-function selectedLeftRefillReference() {
-  const id = String(draft.repairReferenceId || "");
-  if (!id) return null;
-  return leftRefillReferenceAssets(store.session.assets).find((asset) => asset.asset_id === id) || null;
+/** 参考图随当前纹样解析；手动选择和恢复的历史选择优先。 */
+function selectedLeftRefillReference(references = leftRefillReferenceAssets(store.session.assets)) {
+  if (draft.repairReferenceTouched) {
+    return references.find(asset => asset.asset_id === draft.repairReferenceId) || null;
+  }
+  if (references.length === 1) return references[0];
+  const normalizedId = store.session.image?.normalized?.asset_id;
+  return references.find(asset => normalizedId
+    ? asset.asset_id === normalizedId
+    : asset.kind === "normalized_input") || null;
 }
 
 /**
@@ -637,7 +646,7 @@ export function leftRefillBlockReason({ capability, input, referenceId, box } = 
     if (input?.error === "missing") return "先打开一张纹样，或从纹样库打开一组纹样。";
     return "当前纹样不能作为本地 LeftRefill 输入；请先准备 512 × 512 的光栅纹样（如裁切图）。";
   }
-  if (!referenceId) return "请选择一张已保存的参考图；本地 LeftRefill 不会自动改用当前纹样。";
+  if (!referenceId) return "请选择一张已保存的参考图。";
   if (!box || Number(box.width) <= 0 || Number(box.height) <= 0) return "请设置修复区域。";
   return "";
 }
@@ -891,9 +900,7 @@ function tileUnitAssets() {
 
 function tileUnit() {
   const list = tileUnitAssets();
-  const selected = list.find((asset) => asset.asset_id === draft.tileUnitId);
-  if (selected) return selected;
-  return list[list.length - 1] || null;
+  return list.find(asset => asset.asset_id === draft.tileUnitId) || null;
 }
 
 function tilePreviewFor(unitId, n) {
@@ -901,18 +908,46 @@ function tilePreviewFor(unitId, n) {
   for (let i = assets.length - 1; i >= 0; i -= 1) {
     const asset = assets[i];
     if (asset.kind !== "tile_preview") continue;
-    const sameUnit = (asset.unit_asset_id || asset.parameters?.unit_asset_id) === unitId;
-    const rows = asset.rows || asset.parameters?.rows;
-    const cols = asset.cols || asset.parameters?.cols;
-    if (sameUnit && Number(rows) === n && Number(cols) === n) return asset;
+    const settings = tilePreviewSettings(asset);
+    if (settings.unitId === unitId && settings.n === n) return asset;
   }
   return null;
 }
 
-function tilePreviewLatest() {
-  const assets = store.session.assets || [];
-  for (let i = assets.length - 1; i >= 0; i -= 1) if (assets[i].kind === "tile_preview") return assets[i];
-  return null;
+/** 当前单元与规格对应的平铺预览；没有就返回 null，不用旧预览或其它规格顶替。 */
+function tilePreviewForCurrent(state) {
+  const unitId = draft.tileUnitId;
+  if (!unitId) return null;
+  const current = currentAsset();
+  if (current?.kind === "tile_preview") {
+    const settings = tilePreviewSettings(current);
+    // 明确选中的旧预览只要与当前单元和规格一致，就继续显示它本身，
+    // 不换成同单元同规格的更新预览，避免接缝记录写到另一张结果。
+    if (settings.unitId === unitId && settings.n === tileN(state)) return current;
+  }
+  return tilePreviewFor(unitId, tileN(state));
+}
+
+/** 平铺预览记录的单元与规格；旧记录缺少字段时返回空值。 */
+function tilePreviewSettings(preview) {
+  const unitId = String(preview?.unit_asset_id || preview?.parameters?.unit_asset_id || preview?.source_asset_id || "");
+  const rows = Number(preview?.rows ?? preview?.parameters?.rows);
+  const cols = Number(preview?.cols ?? preview?.parameters?.cols);
+  const n = rows === 2 && cols === 2 ? 2 : rows === 3 && cols === 3 ? 3 : 0;
+  return { unitId, n };
+}
+
+/**
+ * 查看历史平铺结果时，把单元与规格切到该预览记录的值，
+ * 让画布、参数面板与接缝写入都指向同一张预览。
+ */
+function alignTileViewToPreview(state, preview) {
+  const { unitId, n } = tilePreviewSettings(preview);
+  if (unitId) {
+    draft.tileUnitId = unitId;
+    draft.tileUnitTouched = true;
+  }
+  if (n) state.tile = n === 3 ? "3x3" : "2x2";
 }
 
 function compareInfo(stage) {
@@ -975,9 +1010,14 @@ function syncDrafts(state) {
     repairState.info = null;
     repairState.loading = false;
     repairState.error = "";
+    lastSeamTarget = "";
     resetMaskStrokes();
     draft.repairSkipped = false;
-    draft.repairReferenceId = "";
+    // 同图深链可能在用户改选后才完成加载；仅无图归属的旧记录按会话隔离。
+    if (!store.session.imageId) {
+      draft.repairReferenceId = "";
+      draft.repairReferenceTouched = false;
+    }
     lastRestoredRepairKey = "";
     if (sessionTimer) {
       window.clearTimeout(sessionTimer);
@@ -1002,9 +1042,11 @@ function syncDrafts(state) {
     cand.selectionTouched = false;
     draft.repairSkipped = false;
     draft.repairReferenceId = "";
+    draft.repairReferenceTouched = false;
     lastRestoredRepairKey = "";
     repairState.info = null;
     repairState.error = "";
+    lastSeamTarget = "";
   }
   if (expectedImage && imageId === expectedImage) ui.sessionError = "";
   if (id !== lastCurrentId) {
@@ -1021,18 +1063,28 @@ function syncDrafts(state) {
       draft.repair = { ...pendingRepairBox.box };
       pendingRepairBox = null;
     }
+    // 打开历史平铺结果时，让单元与规格跟随该预览，画布和接缝写入才不会错位。
+    if (asset?.kind === "tile_preview" && currentStage(state).key === "tile") {
+      alignTileViewToPreview(state, asset);
+    }
     resetMaskStrokes();
     ui.error = "";
     ui.errorDetail = "";
     cand.selected = [];
   }
   const units = tileUnitAssets();
-  if (!units.length) {
-    draft.tileUnitId = "";
-  } else {
-    const exists = units.some((asset) => asset.asset_id === draft.tileUnitId);
-    const newest = units[units.length - 1].asset_id;
-    if (!exists || (!draft.tileUnitTouched && newest !== draft.tileUnitId)) draft.tileUnitId = newest;
+  const viewingSavedUnit = asset?.kind === "tile_preview" && tilePreviewSettings(asset).unitId === draft.tileUnitId;
+  if (!viewingSavedUnit && (!draft.tileUnitTouched || !units.some(unit => unit.asset_id === draft.tileUnitId))) {
+    const preferred = TILE_UNIT_KINDS.has(asset?.kind) ? asset : units.at(-1);
+    draft.tileUnitId = preferred?.asset_id || "";
+  }
+  // 接缝控件跟随当前单元与规格匹配的预览；只在该预览切换时同步已保存值，
+  // 不覆盖用户正在选择但尚未保存的接缝观察。
+  const activeTilePreview = tilePreviewForCurrent(state);
+  const seamTarget = activeTilePreview?.asset_id || `${draft.tileUnitId}:${tileN(state)}`;
+  if (seamTarget !== lastSeamTarget) {
+    draft.seam = activeTilePreview?.seam_observation || "not_reviewed";
+    lastSeamTarget = seamTarget;
   }
 }
 
@@ -1622,25 +1674,15 @@ function loadingPlate() {
 }
 
 function tilePlate(state, stage) {
-  const asset = currentAsset();
   const n = tileN(state);
   const unit = tileUnit();
-  const preview = unit ? tilePreviewFor(unit.asset_id, n) : null;
+  const preview = tilePreviewForCurrent(state);
   if (preview) {
     return mediaFrame(
       preview.width || 1,
       preview.height || 1,
       assetPreview(preview),
       `<span class="wb-badge mono">平铺结果 ${n} × ${n}</span>`,
-      "wb-media--tile"
-    );
-  }
-  if (asset && asset.kind === "tile_preview" && (!unit || !tilePreviewFor(unit.asset_id, n))) {
-    return mediaFrame(
-      asset.width || 1,
-      asset.height || 1,
-      assetPreview(asset),
-      `<span class="wb-badge mono">平铺结果</span>`,
       "wb-media--tile"
     );
   }
@@ -1955,7 +1997,7 @@ function statusFor(stage, state) {
     }
     case "tile": {
       const unit = tileUnit();
-      if (done) return "平铺预览完成 · 可在纹样轨查看结果";
+      if (tilePreviewForCurrent(state)) return "平铺预览完成 · 可在纹样轨查看结果";
       return unit
         ? `${kindLabel(unit.kind)} ${dimsOf(unit)} · 接缝${SEAM_LABELS[draftSeam()]}`
         : "没有可平铺的单元";
@@ -2003,7 +2045,11 @@ function statusShort(stage, state) {
       return done ? "矢量化完成" : "未矢量化";
     case "tile": {
       const unit = tileUnit();
-      return done ? "平铺预览已生成" : unit ? `${tileSpec(state)} 未生成` : "没有平铺单元";
+      return tilePreviewForCurrent(state)
+        ? "平铺预览已生成"
+        : unit
+        ? `${tileSpec(state)} 未生成`
+        : "没有平铺单元";
     }
     default:
       return "";
@@ -2014,7 +2060,7 @@ function statusShort(stage, state) {
 
 function mainHtml(stage, state) {
   const asset = currentAsset();
-  const tilePreview = stage.key === "tile" ? (tilePreviewFor(tileUnit()?.asset_id || "", tileN(state)) || (asset?.kind === "tile_preview" ? asset : null)) : null;
+  const tilePreview = stage.key === "tile" ? tilePreviewForCurrent(state) : null;
   const dims = stage.key === "tile" ? tilePreview || tileUnit() : asset;
   const zoom = zoomMode(state);
   const compare = compareInfo(stage);
@@ -2815,9 +2861,9 @@ function repairPanel(state, methodOverride = repairMethod()) {
       : `当前纹样是「${kindLabel(asset?.kind || "纹样")}」，不能作为本地 LeftRefill 输入。请先准备 512 × 512 的光栅纹样（如裁切图）。`
     : "";
   const references = leftRefillReferenceAssets(store.session.assets);
-  const reference = selectedLeftRefillReference();
+  const reference = selectedLeftRefillReference(references);
   const referenceOptions = [
-    ["", "请选择已保存的参考图"],
+    ...(!reference ? [["", "选择参考图"]] : []),
     ...references.map((entry) => [entry.asset_id, `${kindLabel(entry.kind)} · ${dimsOf(entry)} · #${shortId(entry.asset_id)}`]),
   ];
   const boxSection = (hint) =>
@@ -2915,7 +2961,9 @@ function repairPanel(state, methodOverride = repairMethod()) {
             )}
         <section class="wb-sec">
           ${
-            references.length
+            references.length === 1 && reference
+              ? `<header class="wb-sec__head"><span class="label">参考图</span><span class="wb-sec__extra">${esc(kindLabel(reference.kind))} · ${esc(dimsOf(reference))}</span></header>`
+              : references.length
               ? selectField("repairReference", "参考图", referenceOptions, reference?.asset_id || "", `${references.length} 张`)
               : noteBox("当前工作台没有可作参考图的已保存光栅纹样（最多 1,048,576 像素）。请先处理或保存一张参考图。", "error")
           }
@@ -2975,9 +3023,7 @@ function tilePanel(state) {
   const stage = currentStage(state);
   const units = tileUnitAssets();
   const unit = tileUnit();
-  const n = tileN(state);
-  const preview = unit ? tilePreviewFor(unit.asset_id, n) : null;
-  const previewAsset = preview || (currentAsset()?.kind === "tile_preview" ? currentAsset() : null);
+  const previewAsset = tilePreviewForCurrent(state);
   const revision = previewAsset?.seam_observation_revision ?? 0;
   return `
   ${jobBox(stage)}
@@ -2985,19 +3031,13 @@ function tilePanel(state) {
   ${noticeBox()}
   ${sec(
     "平铺单元",
-    unit ? esc(kindLabel(unit.kind)) : "无",
-    units.length
-      ? `${selectField(
-          "tileUnit",
-          "单元来源",
-          units.map((entry) => [
-            entry.asset_id,
-            `${kindLabel(entry.kind)} · ${dimsOf(entry)} · ${shortId(entry.asset_id)}`,
-          ]),
-          draft.tileUnitId
-        )}
-        <p class="field__hint">只有裁切、透明 PNG、线稿 PNG 与已接受的修复图能作为平铺单元。</p>`
-      : `<p class="field__hint">还没有可平铺的单元：先做 02 裁切，或在 05 生成透明 PNG / 线稿 PNG。</p>`
+    units.length === 1 && unit ? esc(kindLabel(unit.kind) + " · " + dimsOf(unit)) : "",
+    units.length === 1 && unit ? "" : units.length
+      ? selectField("tileUnit", "单元来源", [
+          ...(!unit ? [[draft.tileUnitId, "原单元已移出工作台"]] : []),
+          ...units.map(entry => [entry.asset_id, `${kindLabel(entry.kind)} · ${dimsOf(entry)} · ${shortId(entry.asset_id)}`]),
+        ], draft.tileUnitId)
+      : `<p class="field__hint">${previewAsset ? "原单元已移出工作台，仍可查看此预览。" : "先裁切纹样，或生成透明 PNG、线稿 PNG。"}</p>`
   )}
   ${sec(
     "规格",
@@ -3822,8 +3862,12 @@ async function restoreRepairState(api) {
     // 让界面默认方式与恢复的记录一致：本地记录不会因为界面还停在云端而误发付费请求。
     draft.repairMethod = repairMethodOf(info);
     if (draft.repairMethod === "leftrefill") {
-      const referenceId = String(info.parameters?.reference_asset_id || "");
-      draft.repairReferenceId = referenceId && store.assetById(referenceId) ? referenceId : "";
+      // 历史参考图只在用户尚未手动改选时恢复；手动选择（包括清空）优先。
+      if (!draft.repairReferenceTouched) {
+        const referenceId = String(info.parameters?.reference_asset_id || "");
+        draft.repairReferenceId = referenceId;
+      }
+      draft.repairReferenceTouched = true;
     }
     let inputAsset = (store.session.assets || []).find((asset) => asset.asset_id === info.input_asset_id) || null;
     if (!inputAsset && info.input_asset_id) {
@@ -4090,6 +4134,10 @@ function stageClick(root, api, el) {
   ui.error = "";
   ui.errorDetail = "";
   ui.notice = "";
+  if (target.key === "tile") {
+    const asset = currentAsset();
+    if (asset?.kind === "tile_preview") alignTileViewToPreview(api.state, asset);
+  }
   patchStage(api, root, { stage: n, ...(target.key === "tile" ? { compare: false } : {}) });
 }
 
@@ -4102,7 +4150,17 @@ function confirmSvgDraftBeforeSwitch(label = "切换") {
 }
 
 function switchAsset(api, root, assetId) {
-  if (!assetId || store.session.currentAssetId === assetId) return;
+  if (!assetId) return;
+  const next = store.assetById(assetId);
+  if (store.session.currentAssetId === assetId) {
+    // 再点一次同一张历史预览：按它的单元/规格重新对齐，便于从其它规格切回查看。
+    if (next?.kind === "tile_preview" && currentStage(api.state).key === "tile") {
+      alignTileViewToPreview(api.state, next);
+      api.syncUrl?.();
+      api.refresh();
+    }
+    return;
+  }
   if (!confirmSvgDraftBeforeSwitch("切换纹样")) return;
   ui.notice = "";
   store.setCurrentAsset(assetId);
@@ -4166,11 +4224,6 @@ function removeSessionAsset(api, assetId) {
   const removed = store.removeAsset(assetId);
   if (!removed) return;
   forgetGroupAsset(store.session.imageId || "", assetId);
-  if (draft.tileUnitId === assetId) {
-    draft.tileUnitId = "";
-    draft.tileUnitTouched = false;
-  }
-  if (draft.repairReferenceId === assetId) draft.repairReferenceId = "";
   api.toast(`已从工作台移除${kindLabel(removed.kind)}；可随时从纹样库重新打开。`, "info");
 }
 
@@ -5657,9 +5710,9 @@ async function decideRepair(api, action, assetId = "", full = false) {
 }
 
 async function saveSeam(api) {
-  const asset = tilePreviewFor(tileUnit()?.asset_id || "", tileN(api.state)) || tilePreviewLatest();
+  const asset = tilePreviewForCurrent(api.state);
   if (!asset) {
-    api.toast("先生成平铺预览，再记录接缝观察。", "warn");
+    api.toast("当前单元与规格还没有平铺预览，先生成预览再记录接缝观察。", "warn");
     return;
   }
   const revision = asset.seam_observation_revision ?? 0;
@@ -5671,6 +5724,7 @@ async function saveSeam(api) {
     const index = store.session.assets.findIndex((entry) => entry.asset_id === updated.asset_id);
     if (index >= 0) store.session.assets[index] = updated;
     store.notify("session");
+    if (tilePreviewForCurrent(api.state)?.asset_id !== updated.asset_id) return;
     draft.seam = updated.seam_observation;
     ui.notice = `接缝观察已保存为「${SEAM_LABELS[updated.seam_observation] || updated.seam_observation}」。`;
     api.toast(ui.notice, "done");
@@ -6168,8 +6222,9 @@ function handleChange(root, state, api, event) {
       draft.repairSize = value;
       break;
     case "repairReference":
-      // 必须显式选择；空值保持“未选”，不会自动挑一张参考图。
+      // 手动选择（包括清空）优先；自动默认值不会再覆盖。
       draft.repairReferenceId = value;
+      draft.repairReferenceTouched = true;
       break;
     case "tileUnit":
       draft.tileUnitId = value;

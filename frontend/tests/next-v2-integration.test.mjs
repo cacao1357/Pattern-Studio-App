@@ -1842,7 +1842,7 @@ test("修复请求只含契约字段并把框裁到规范输入范围", () => {
   assert.equal(payload.consent_to_charge, true);
 });
 
-test("本地 LeftRefill 只接受 512×512 输入；参考图必须显式选择且不超过像素上限", () => {
+test("本地 LeftRefill 只接受 512×512 输入，参考图遵守类型和像素上限", () => {
   const assets = [
     { asset_id: "in-512", kind: "cropped", width: 512, height: 512 },
     { asset_id: "in-1024", kind: "cropped", width: 1024, height: 1024 },
@@ -1927,7 +1927,7 @@ test("本地 LeftRefill 请求体只含本地字段，且不会静默改为云�
   );
 });
 
-test("本地 LeftRefill 面板要求 512×512 目标和显式参考图，不出现云端同意项", () => {
+test("本地 LeftRefill 面板默认使用规范输入作参考，允许改选并提示目标尺寸", () => {
   const originalWindow = globalThis.window;
   const originalSession = store.session;
   const originalSeedream = store.seedream;
@@ -1945,7 +1945,7 @@ test("本地 LeftRefill 面板要求 512×512 目标和显式参考图，不出�
       image: { image_id: "image-panel", meta: { source_name: "本地修复面板" } },
       assets: [
         { asset_id: "in-512", kind: "cropped", width: 512, height: 512 },
-        { asset_id: "ref-512", kind: "cropped", width: 512, height: 512 },
+        { asset_id: "ref-512", kind: "normalized_input", width: 512, height: 512 },
         { asset_id: "in-1024", kind: "cropped", width: 1024, height: 1024 },
       ],
       currentAssetId: "in-512",
@@ -1963,11 +1963,28 @@ test("本地 LeftRefill 面板要求 512×512 目标和显式参考图，不出�
     assert.match(html, /目标输入/);
     assert.match(html, /512 × 512/);
     assert.match(html, /data-select="repairReference"/);
-    assert.match(html, /请选择已保存的参考图/);
+    assert.match(html, /<option value="ref-512" selected>/);
     assert.doesNotMatch(html, /同意把当前输入上传/);
     assert.doesNotMatch(html, /同意本次云端调用/);
     assert.match(html, /不上传.{0,4}不计费/);
     assert.doesNotMatch(html, /不保证|不等于真实推理成功|本地条件核验/);
+
+    const alternatives = store.session.assets;
+    store.session.assets = [alternatives[1]];
+    store.session.currentAssetId = "ref-512";
+    workbench.default.render(state, { state: {} }, new URLSearchParams());
+    const singleReference = workbench.repairPanel(state, "leftrefill");
+    assert.doesNotMatch(singleReference, /data-select="repairReference"/);
+    assert.match(singleReference, /规范输入/);
+    // 大图的规范输入超出参考图上限时，512 裁切是唯一合法来源。
+    const oversized = { ...alternatives[1], width: 1536, height: 1024 };
+    store.session = { ...store.session, imageId: "large-import", image: { normalized: oversized },
+      assets: [oversized, alternatives[0]], currentAssetId: "in-512" };
+    const localState = { ...state };
+    workbench.default.render(localState, { state: localState }, new URLSearchParams());
+    const soleCrop = workbench.repairPanel(localState, "leftrefill");
+    assert.doesNotMatch(soleCrop, /data-select="repairReference"/);
+    store.session.assets = alternatives;
 
     store.session.currentAssetId = "in-1024";
     workbench.default.render(state, { state: {} }, new URLSearchParams());
@@ -1980,6 +1997,39 @@ test("本地 LeftRefill 面板要求 512×512 目标和显式参考图，不出�
     store.seedream = originalSeedream;
     store.leftrefillModel = originalLeft;
     globalThis.window = originalWindow;
+  }
+});
+
+test("同一单元有多个平铺版本时打开指定版本，切换规格只显示匹配的结果", () => {
+  const previousWindow = globalThis.window;
+  const previousSession = store.session;
+  globalThis.window = { matchMedia: () => ({ matches: false }), clearTimeout() {} };
+  try {
+    const unit = { asset_id: "unit", kind: "cropped", width: 512, height: 512 };
+    const preview = { kind: "tile_preview", unit_asset_id: unit.asset_id, rows: 2, cols: 2, width: 1024, height: 1024 };
+    store.session = {
+      ...previousSession, imageId: "tile-history", currentAssetId: "older",
+      assets: [unit, { ...preview, asset_id: "older", seam_observation: "visible" }, { ...preview, asset_id: "newer" }], jobs: [],
+    };
+    const state = { stage: 8, tile: "2x2", zoom: "fit" };
+    const render = () => workbench.default.render(state, { state }, new URLSearchParams());
+    const history = render();
+    assert.match(history, /class="wb-media__img" src="[^"]*\/older\/preview"/);
+    assert.match(history, /data-seg="tileSeam" data-val="visible" aria-pressed="true"/);
+    assert.doesNotMatch(history, /data-select="tileUnit"/);
+    assert.match(history, /data-act="save-seam">/);
+    state.tile = "3x3";
+    const pending = render();
+    assert.match(pending, /data-act="save-seam" disabled/);
+    assert.doesNotMatch(pending, /class="wb-media__img" src="[^"]*\/(older|newer)\/preview"/);
+    store.session.assets = store.session.assets.filter(asset => asset.asset_id !== unit.asset_id);
+    state.tile = "2x2";
+    const archived = render();
+    assert.match(archived, /class="wb-media__img" src="[^"]*\/older\/preview"/);
+    assert.match(archived, /data-act="run-tile" disabled/);
+  } finally {
+    globalThis.window = previousWindow;
+    store.session = previousSession;
   }
 });
 

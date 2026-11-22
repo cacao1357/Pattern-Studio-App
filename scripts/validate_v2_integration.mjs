@@ -490,9 +490,28 @@ try {
       await waitFor('window.__previousTestDocument!==true && document.readyState==="complete"','new test document loaded');
     };
     const stageKeys=['source','crop','repair','candidate','process','mask','vector','tile'];
-    if (!layoutOnly) for (const width of [1440,390]) {
+    async function checkCoordinateRows(prefix, width) {
+      await evaluate(`(() => {
+        const toggle = document.querySelector('[data-act=panel-toggle][aria-expanded=false]');
+        if (toggle?.getClientRects().length) toggle.click();
+      })()`);
+      await waitFor(`document.getElementById('wb-${prefix}Left')?.getBoundingClientRect().height > 0`, prefix + ' coordinates visible');
+      const fields = await evaluate(`['Left','Top','Width','Height'].map(name => {
+        const input = document.getElementById('wb-${prefix}' + name);
+        const box = input.getBoundingClientRect();
+        return {left:box.left, right:box.right, top:box.top, bottom:box.bottom,
+          label:input.labels[0].querySelector('.field__label').getBoundingClientRect().top};
+      })`);
+      for (const [left, right] of [[fields[0], fields[1]], [fields[2], fields[3]]]) {
+        assert.ok(Math.abs(left.top - right.top) <= 1 && Math.abs(left.label - right.label) <= 1,
+          prefix + ' labels and inputs must align at ' + width + 'px');
+        assert.ok(left.right <= right.left && right.right <= width + 1);
+      }
+      assert.ok(fields[0].bottom <= fields[2].top);
+    }
+    if (!layoutOnly) for (const width of [1440,1080,390]) {
       await call('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===390});
-      for (const [route,selector] of [['home','.home'],['settings','.st-page'],['notes','.notes']]) {
+      for (const [route,selector] of [['home','.home'],['library','.lb-page'],['tasks','.tk-page'],['settings','.st-page'],['notes','.notes']]) {
         await navigatePage(info.url+'/#/'+route);
         await waitFor(`Boolean(document.querySelector(${JSON.stringify(selector)}))`,route+' rendered');
         const overflow=await evaluate('document.documentElement.scrollWidth>innerWidth+1');
@@ -502,8 +521,14 @@ try {
         await navigatePage(info.url+'/#/workbench?asset='+info.input_asset_id+'&stage='+stage+'&v=2');
         await waitFor(`document.querySelector('.wb')?.dataset.stage===${JSON.stringify(stageKeys[stage-1])}`, 'stage '+stage);
         assert.equal(await evaluate('document.documentElement.scrollWidth>innerWidth+1'),false,'stage '+stage+' overflow at '+width);
+        if(stage===2) await checkCoordinateRows('crop', width);
         if(stage===3) {
           await waitFor(`import('/js/store.js').then(({store}) => store.session.currentAssetId === ${JSON.stringify(info.input_asset_id)} && !!document.querySelector('[data-act=skip-repair]:not(:disabled)'))`, 'skip repair available on loaded pattern');
+          await waitFor("import('/js/store.js').then(({store}) => store.leftrefillModel.available !== null)", 'local repair capability');
+          if (await evaluate("import('/js/store.js').then(({store}) => store.leftrefillModel.available)")) {
+            await evaluate("document.querySelector('[data-seg=repairMethod][data-val=leftrefill]').click()");
+            await checkCoordinateRows('repair', width);
+          }
           await evaluate("document.querySelector('[data-act=skip-repair]').click()");
           await waitFor("document.querySelector('.wb-panel [data-act=go-process]:not(:disabled)') && document.querySelector('.wb-panel [data-act=skip-repair]')?.textContent.includes('继续修复')", 'repair skipped without generation');
         }
@@ -514,7 +539,7 @@ try {
           await writeFile(path.join(output,'cloud-route-'+width+'.png'),Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
         }
       }
-      check('home/settings/notes and eight stages render without horizontal overflow at '+width+'px');
+      check('home/library/tasks/settings/notes and eight stages fit, with aligned coordinate fields at '+width+'px');
     }
     for (const [width,height] of [[1920,1080],[1440,900],[1280,720],[1080,720],[821,640],[820,900],[390,844]]) {
       await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<=820});
