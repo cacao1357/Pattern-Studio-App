@@ -8,6 +8,10 @@
      store.runJob 提交并轮询，期间维护 busy 与产物纹样。
    - 修复排在线稿提取之前；完整纹样可明确跳过修复。矢量化从提取中分离，蒙版修改
      完再矢量化，平铺/导出最后。云端线稿只生成 lineart PNG，不自动矢量化。
+    - 线稿 PNG 没有前景蒙版记录：06 先用「准备蒙版」按 alpha 提取
+      （POST /jobs/extract mode=alpha、阈值 0）发布配对的 foreground_mask 与
+      transparent_png，再画笔修正；与批量路线 prepare_mask 同一语义，不改 RGB、
+      不重新描线、不调用云端，原线稿保留。
    - 未提交的界面参数（选区、阈值、笔迹、导出勾选等）放在模块内 draft，
      api.patch / api.refresh 重绘后仍在；高频输入用局部 DOM 更新。
    - 云端未配置时（store.seedream.enabled === false）新的生成入口受门禁约束；
@@ -68,6 +72,7 @@ import { openRunDialog } from "./processing-panel.js";
 import {
   formatPixels,
   healthPixelLimits,
+  pixelLimitForExtractMode,
   pixelLimitForProcessRoute,
   pixelLimitForVectorMode,
 } from "../processing.js";
@@ -97,6 +102,9 @@ const MIN_SCALE = 0.2;
 const MAX_SCALE = 3;
 const CROP_MIN_PX = 4;
 const MASK_MAX_POINTS = 2048;
+/** 线稿蒙版准备：与批量路线 prepare_mask 同一语义（alpha 提取发布配对蒙版与透明 PNG）。 */
+const LINE_MASK_CHAIN_KINDS = new Set(["cropped", "working_copy", "prepared", "enhanced"]);
+const LINE_MASK_PREP_KINDS = new Set(["lineart", ...LINE_MASK_CHAIN_KINDS]);
 
 /** 会话底座：原件与规范输入不能从工作台移除。 */
 const SESSION_BASE_KINDS = new Set(["original", "normalized", "normalized_input"]);
@@ -169,7 +177,7 @@ const STAGE_COPY = {
   repair: { title: "局部修复", note: "可跳过；完整纹样直接下一步", desc: "框出问题区域，用云端或本地 LeftRefill 生成修复候选；接受或拒绝都在右侧完成。纹样完整时可明确跳过。" },
   candidate: { title: "选候选层", note: "按提示词拆分（可选）", desc: "云端按层拆分，勾选后合成一张候选；这一步不生成线稿。" },
   process: { title: "生成线稿", note: "本地模型 / 云端模型", desc: "明确选择本地模型或云端模型；也可以改用 OpenCV 或颜色提取。这里只出 PNG，矢量化在 07。" },
-  mask: { title: "修正前景", note: "只改透明 PNG", desc: "在源图上补前景或擦除杂点；修正完成后再到 07 矢量化。" },
+  mask: { title: "修正前景", note: "线稿先准备蒙版", desc: "在源图上补前景或擦除杂点；修正完成后再到 07 矢量化。" },
   vector: { title: "转成矢量", note: "PNG → SVG", desc: "把线稿或透明 PNG 转成可编辑 SVG；颜色与细节在这一步调整。" },
   tile: { title: "检查接缝", note: "2×2 / 3×3", desc: "从会话纹样选一个单元做整数重复；接缝观察写入纹样元数据。导出可勾选多个纹样。" },
 };
@@ -754,9 +762,7 @@ export function leftRefillConditions({
       key: "box",
       label: "修复区域",
       state: "ok",
-      detail: `${Math.round(box.width)} × ${Math.round(box.height)} px · 原点 (${Math.round(
-        box.left
-      )}, ${Math.round(box.top)})；框外像素保持不变。`,
+      detail: repairRegionDescription(box),
     });
   }
 
@@ -796,6 +802,10 @@ export function repairConditionSummary(rows) {
   return "条件已满足；可以提交本地修复。";
 }
 
+function repairRegionDescription(box) {
+  return `${Math.round(box.width)} × ${Math.round(box.height)} px · 原点 (${Math.round(box.left)}, ${Math.round(box.top)})；框外像素保持不变。`;
+}
+
 function repairChecklist(rows) {
   if (!rows?.length) return "";
   return `<ul class="wb-checklist">${rows
@@ -803,7 +813,7 @@ function repairChecklist(rows) {
       (row) =>
         `<li class="wb-checklist__item" data-state="${esc(row.state)}">
           <span class="wb-checklist__dot" aria-hidden="true"></span>
-          <span class="wb-checklist__body"><strong>${esc(row.label)}</strong><span>${esc(row.detail)}</span></span>
+          <span class="wb-checklist__body"><strong>${esc(row.label)}</strong><span${row.key === "box" ? ' data-live="repair-region"' : ""}>${esc(row.detail)}</span></span>
         </li>`
     )
     .join("")}</ul>`;
@@ -1998,8 +2008,14 @@ function statusShort(stage, state) {
       if (draft.processRoute === "cloud") return "云端线稿未提交";
       if (draft.processRoute === "opencv") return "OpenCV 线稿未提交";
       return "颜色提取未提交";
-    case "mask":
-      return done ? "蒙版修正完成" : maskState.strokes.length ? `${maskState.strokes.length} 笔未提交` : "还没有笔迹";
+    case "mask": {
+      if (done) return "蒙版修正完成";
+      if (maskState.strokes.length) return `${maskState.strokes.length} 笔未提交`;
+      const prep = lineartMaskPrep(store.session.assets, asset, { cap: maskPrepCap() });
+      if (prep.error === "") return prep.pair ? "已准备 · 切到透明 PNG 再画笔" : "待准备蒙版";
+      if (prep.error === "pixels") return "线稿超限 · 先创建工作副本";
+      return "还没有笔迹";
+    }
     case "vector":
       if (currentAsset()?.kind === "svg") {
         const svgDraft = currentSvgDraft();
@@ -2237,7 +2253,7 @@ function cropPanel(state) {
     <p class="wb-crop-summary mono" data-live="crop-summary">${Math.round(crop.width)} × ${Math.round(
       crop.height
     )} · 原点 (${Math.round(crop.left)}, ${Math.round(crop.top)})</p>
-    <p class="field__hint">坐标使用当前纹样真实像素：right = left + width，bottom = top + height，均为开区间终点。也可以直接在纸面上拖一个框。</p>`
+    <p class="field__hint">在图上拖出要保留的区域，也可以输入像素值微调。</p>`
   )}
   ${sec(
     "比例预设",
@@ -2311,6 +2327,11 @@ function processPanel(state) {
   const cap = lineartCapability();
   const outputs = (ui.job && ui.jobStage === stageNo(stage) ? ui.job.result?.assets || [] : []).filter(Boolean);
   const lastProcess = lastJob(["lineart", "cloud-lineart", "extract", "pipeline"]);
+  const inkRatio = asset.kind === "lineart" ? asset.parameters?.ink_ratio : null;
+  const device = asset.parameters?.inference_device;
+  const lineartStats = Number.isFinite(inkRatio)
+    ? `当前线稿的线条像素约占 ${(inkRatio * 100).toFixed(2)}%${device ? ` · 推理设备 ${String(device).toUpperCase()}` : ""}`
+    : "";
   const jobAssets = outputs.length
     ? outputs
     : (store.session.assets || []).filter((entry) => lastProcess && entry.generated_by_job_id === lastProcess.job_id);
@@ -2428,13 +2449,13 @@ function processPanel(state) {
   ${sec(
     "最新产物",
     jobAssets.length ? `${jobAssets.length} 个` : "暂无",
-    `${
+    `${lineartStats ? `<p class="field__hint">${esc(lineartStats)}</p>` : ""}${
       jobAssets.length
         ? `${assetChoices(jobAssets, { currentId: store.session.currentAssetId })}
            <div class="wb-inline">
              <button class="btn btn--ghost btn--sm" type="button" data-act="go-vector">${icon("spark")}去 07 矢量化</button>
            </div>`
-        : `<p class="field__hint">提交后这里会列出线稿 PNG、前景蒙版与透明 PNG；矢量化请到 07。</p>`
+        : `<p class="field__hint">提交后可在这里查看提取结果；需要修线时到 06，直接矢量化到 07。</p>`
     }`
   )}`;
 }
@@ -2554,6 +2575,41 @@ function candidatePanel(state) {
   )}`;
 }
 
+/**
+ * 06 里“当前纹样还不能直接画”的来源处理（操作按钮统一在底部动作栏）：
+ * - 线稿（lineart / 线稿直链派生的光栅）：提示先准备蒙版，或切到已准备好的透明 PNG；
+ * - 线稿超过本机上限：给显式工作副本入口，不隐式缩放；
+ * - 其它类型：不把彩色透明图当黑线稿补画，只提示先做颜色提取或选已有透明 PNG。
+ */
+function maskSourceBody(asset, prep, usable) {
+  if (prep.error === "pixels") {
+    return `${noteBox(
+      `这张线稿 ${esc(dimsOf(asset))} 超过本机准备蒙版的上限；请先创建显式工作副本，不会自动缩放。`,
+      "error"
+    )}
+    ${pixelCapSection(asset, prep.cap, "线稿蒙版准备")}`;
+  }
+  if (prep.error === "") {
+    if (prep.pair) {
+      return `${noteBox(
+        `这张线稿已准备好透明 PNG ${esc(shortId(prep.pair.asset_id))}；切过去即可继续画笔修正，不会重复提交。`
+      )}
+      ${assetChoices([prep.pair], { currentId: store.session.currentAssetId })}`;
+    }
+    return `${noteBox(
+      "线稿没有蒙版记录：先用「准备蒙版」按 alpha 方式发布配对的透明 PNG（阈值 0，保留半透明边缘）。只在本机执行，不改线稿像素、不重新描线、不调用云端，原线稿保留。"
+    )}
+    <p class="field__hint">准备好后直接画笔：补前景在透明处写入黑线，擦除去掉杂点。</p>`;
+  }
+  return `${noteBox(
+    prep.error === "unsupported"
+      ? "当前纹样不是线稿，也不是可修正的透明 PNG（或缺少来源蒙版）。只有线稿能用「准备蒙版」；其它纹样请先在 05 用颜色提取生成透明 PNG，或从下面选择一个透明 PNG。"
+      : "先打开一张纹样。",
+    "error"
+  )}
+  ${usable.length ? assetChoices(usable, { currentId: store.session.currentAssetId }) : ""}`;
+}
+
 function maskPanel(state) {
   const stage = currentStage(state);
   const asset = currentAsset();
@@ -2565,6 +2621,14 @@ function maskPanel(state) {
       (entry.source_rgb_asset_id || (entry.parents || []).some((parent) => parent.role === "source_rgb")) &&
       (entry.source_mask_asset_id || (entry.parents || []).some((parent) => parent.role === "foreground_mask"))
   );
+  const prep = lineartMaskPrep(store.session.assets, asset, { cap: maskPrepCap() });
+  const sourceStatus = source?.sourceId
+    ? `源图 ${esc(shortId(source.sourceId))}`
+    : prep.pair
+    ? "已准备"
+    : prep.error === ""
+    ? "待准备"
+    : "缺少记录";
   const points = maskState.strokes.reduce((sum, stroke) => sum + stroke.points.length, 0);
   const error = maskError();
   return `
@@ -2573,7 +2637,7 @@ function maskPanel(state) {
   ${noticeBox()}
   ${sec(
     "蒙版来源",
-    source?.sourceId ? `源图 ${esc(shortId(source.sourceId))}` : "缺少记录",
+    sourceStatus,
     source?.sourceId && source?.maskId
       ? `<dl class="kv wb-kv">
           <div class="kv__row"><dt>源图</dt><dd class="mono">${esc(source.sourceId)}</dd></div>
@@ -2581,11 +2645,7 @@ function maskPanel(state) {
           <div class="kv__row"><dt>画布</dt><dd class="mono">${esc(dimsOf(asset))}</dd></div>
         </dl>
         <p class="field__hint">画笔坐标使用源图 RGB 像素；提交后生成新的透明 PNG，修正完成再到 07 矢量化。</p>`
-      : `${noteBox(
-          "当前纹样不是可修正的透明 PNG（或缺少来源蒙版）。请先在 05 用颜色提取生成透明 PNG，或从下面选择一个透明 PNG。",
-          "error"
-        )}
-        ${usable.length ? assetChoices(usable, { currentId: store.session.currentAssetId }) : ""}`
+      : maskSourceBody(asset, prep, usable)
   )}
   ${sec(
     "模式",
@@ -2882,6 +2942,7 @@ function repairPanel(state, methodOverride = repairMethod()) {
                 })}`
               )}
           ${boxSection("区域使用当前输入的像素坐标；云端的全图候选可能改变整幅画面，接受前需额外确认。")}
+          <p class="field__hint">提交会上传当前整张输入与框坐标到云端服务商，并按次计费；失败不会自动重发。需要不上传、不计费的修复时，切到「本地 LeftRefill」。</p>
           ${sec(
             "修复参数",
             `262,144–1,048,576 px`,
@@ -3168,13 +3229,18 @@ function stageActions(stage, state) {
       const goVector = vectorInput(store.session.assets, asset).asset
         ? `<button class="btn btn--ghost btn--sm" type="button" data-act="go-vector">${icon("spark")}去 07 矢量化</button>`
         : "";
+      // 线稿本身没有蒙版记录：这里显式给 06 的准备入口，避免用户以为 06 坏了。
+      const goMask =
+        lineartMaskPrep(store.session.assets, asset, { cap: maskPrepCap() }).error === ""
+          ? `<button class="btn btn--ghost btn--sm" type="button" data-act="go-mask">${icon("mask")}去 06 准备蒙版</button>`
+          : "";
       if (draft.processRoute === "local") {
         return `${primaryButton(
           "run-model-lineart",
           cap.available === false ? "本地模型暂不可用" : "本地模型生成线稿",
           "flask",
           disabled(!localInput || cap.available === false)
-        )}${goVector}`;
+        )}${goMask}${goVector}`;
       }
       if (draft.processRoute === "cloud") {
         return `${primaryButton(
@@ -3186,22 +3252,27 @@ function stageActions(stage, state) {
               !cloudInput.asset ||
               Boolean(cloudInput.error)
           )
-        )}${goVector}`;
+        )}${goMask}${goVector}`;
       }
       if (draft.processRoute === "opencv") {
-        return `${primaryButton("run-opencv-lineart", "OpenCV 生成线稿", "brush", disabled(!localInput))}${goVector}`;
+        return `${primaryButton("run-opencv-lineart", "OpenCV 生成线稿", "brush", disabled(!localInput))}${goMask}${goVector}`;
       }
-      return `${primaryButton("run-extract", "开始颜色提取", "flask", disabled(!localInput))}${goVector}`;
+      return `${primaryButton("run-extract", "开始颜色提取", "flask", disabled(!localInput))}${goMask}${goVector}`;
     }
     case "mask": {
       const error = maskError();
+      const prep = lineartMaskPrep(store.session.assets, asset, { cap: maskPrepCap() });
       const goVector = vectorInput(store.session.assets, asset).asset
         ? `<button class="btn btn--ghost btn--sm" type="button" data-act="go-vector">${icon("spark")}去 07 矢量化</button>`
         : "";
+      const prepare =
+        prep.error === "" && !prep.pair
+          ? primaryButton("prepare-lineart-mask", "准备线稿蒙版", "mask", busy)
+          : "";
       return `<button class="btn btn--quiet btn--sm" type="button" data-act="undo-stroke"${
         disabled(!maskState.strokes.length) ? " disabled" : ""
       }>撤销上一笔</button>
-        ${primaryButton("run-mask", "提交蒙版修正", "mask", disabled(Boolean(error)))}${goVector}`;
+        ${prepare}${primaryButton("run-mask", "提交蒙版修正", "mask", disabled(Boolean(error)))}${goVector}`;
     }
     case "vector": {
       if (asset?.kind === "svg") return svgActionsHtml(asset, { busy });
@@ -3291,8 +3362,15 @@ function applyRepairToDom(root) {
   if (!root) return;
   const marker = root.querySelector("[data-repair-overlay] .wb-repair__region");
   const dims = currentDims(repairInputAsset());
-  if (!marker || !dims || !draft.repair) return;
+  if (!dims || !draft.repair) return;
   const box = draft.repair;
+  const description = root.querySelector('[data-live="repair-region"]');
+  if (description) description.textContent = repairRegionDescription(box);
+  for (const [key, value] of Object.entries(box)) {
+    const field = root.querySelector(`[data-field="repair${key[0].toUpperCase()}${key.slice(1)}"]`);
+    if (field && Number(field.value) !== value) field.value = String(value);
+  }
+  if (!marker) return;
   marker.style.left = `${(box.left / dims.width) * 100}%`;
   marker.style.top = `${(box.top / dims.height) * 100}%`;
   marker.style.width = `${(box.width / dims.width) * 100}%`;
@@ -3900,11 +3978,19 @@ function maskSource() {
   };
 }
 
+/** 线稿蒙版准备的入口上限：alpha 提取按 working_pixels 计，与 refine-mask 的源图上限一致。 */
+const maskPrepCap = () => pixelLimitForExtractMode("alpha", healthPixelLimits());
+
 function maskError() {
   const asset = currentAsset();
   if (!asset) return "先打开一个纹样";
   const source = maskSource();
-  if (!source?.sourceId || !source?.maskId) return "当前纹样缺少源图或蒙版记录";
+  if (!source?.sourceId || !source?.maskId) {
+    const prep = lineartMaskPrep(store.session.assets, asset, { cap: maskPrepCap() });
+    if (prep.error === "" && !prep.pair) return "先准备蒙版：把线稿的透明像素发布成前景蒙版与透明 PNG";
+    if (prep.error === "pixels") return `线稿超过本机准备上限 ${formatPixels(prep.cap)} 像素，请先创建工作副本`;
+    return "当前纹样缺少源图或蒙版记录";
+  }
   const points = maskState.strokes.reduce((sum, stroke) => sum + stroke.points.length, 0);
   if (!points) return "先在纸面上画几笔";
   return "";
@@ -3961,6 +4047,71 @@ export function cloudEditInput(assets, current, maxPixels = CLOUD_INPUT_MAX_PIXE
 
 export function vectorInput(assets, current) {
   return resolveCloudInput(assets, current, VECTOR_INPUT_KINDS);
+}
+
+/**
+ * 纹样是否线稿：只认 lineart 本身，或沿连续的 cropped / working_copy / prepared /
+ * enhanced 的 source_asset_id 直链回溯到 lineart。中间夹着别的类型（例如颜色提取
+ * 的透明 PNG）就按“不是线稿”处理，避免把彩色透明图当黑线稿补画。
+ * 只在同一会话的纹样里查；找不到记录不猜测归属。
+ */
+export function derivedFromLineart(assets, asset) {
+  const byId = new Map((assets || []).filter((entry) => entry?.asset_id).map((entry) => [entry.asset_id, entry]));
+  let current = asset || null;
+  const visited = new Set();
+  while (current && !visited.has(current.asset_id)) {
+    if (current.kind === "lineart") return true;
+    if (!LINE_MASK_CHAIN_KINDS.has(current.kind)) return false;
+    visited.add(current.asset_id);
+    const parentId = String(current.source_asset_id || "");
+    current = parentId ? byId.get(parentId) || null : null;
+  }
+  return false;
+}
+
+/** 同一张线稿上已经准备好的配对透明 PNG；后出现的覆盖前面的，用于避免重复提交准备任务。 */
+function preparedMaskPair(assets, sourceId) {
+  if (!sourceId) return null;
+  const roleId = (entry, role) => (entry?.parents || []).find((parent) => parent?.role === role)?.asset_id || "";
+  return (assets || []).reduce((found, entry) => {
+    if (entry?.kind !== "transparent_png") return found;
+    const source = entry.source_rgb_asset_id || roleId(entry, "source_rgb");
+    const mask = entry.source_mask_asset_id || roleId(entry, "foreground_mask");
+    return source === sourceId && mask ? entry : found;
+  }, null);
+}
+
+/**
+ * 线稿 → 06 蒙版修正的准备状态。只有 lineart，或沿 cropped / working_copy /
+ * prepared / enhanced 直链回到 lineart 的纹样可准备：颜色提取的透明 PNG、
+ * 候选合成、已接受修复都不能当成黑线稿再补画。
+ * `cap` 是 alpha 提取的本机入口上限（来自 /health，不在界面写死）。
+ * 返回 error：""（可准备/已准备）、"missing"、"unsupported"、"pixels"。
+ */
+export function lineartMaskPrep(assets, current, { cap = null } = {}) {
+  const capValue = Number(cap) > 0 ? Math.floor(Number(cap)) : null;
+  const state = { asset: null, error: "", cap: capValue, pixels: 0, pair: null };
+  if (!current?.asset_id) return { ...state, error: "missing" };
+  const width = Math.max(0, Number(current.width) || 0);
+  const height = Math.max(0, Number(current.height) || 0);
+  const pixels = width * height;
+  state.pixels = pixels;
+  if (!LINE_MASK_PREP_KINDS.has(current.kind) || !derivedFromLineart(assets, current)) {
+    return { ...state, error: "unsupported" };
+  }
+  const pair = preparedMaskPair(assets, current.asset_id);
+  if (pair) return { ...state, asset: current, pair };
+  if (capValue && pixels > capValue) return { ...state, asset: current, error: "pixels" };
+  return { ...state, asset: current };
+}
+
+/**
+ * 准备蒙版的请求体：只提交 alpha 方式与阈值 0。
+ * 阈值 0 = 任何可见像素都算前景，保留半透明边缘；不带清理参数、
+ * 不带云端同意，也不改 RGBA 像素（后端 alpha_policy=preserve_existing）。
+ */
+export function buildLineartMaskPayload(assetId) {
+  return { input_asset_id: assetId, mode: "alpha", threshold: 0 };
 }
 
 function cloudRepairInput() {
@@ -4982,7 +5133,7 @@ function lineartNotice(asset, sourceLabelText) {
   if (meta.method === "cloud") bits.push("云端模型");
   if (meta.promptVersion) bits.push(`提示词 ${meta.promptVersion}`);
   if (meta.providerCallId) bits.push(`调用 ${shortId(meta.providerCallId)}`);
-  return `${sourceLabelText}线稿 PNG 已生成${bits.length ? `（${bits.join(" · ")}）` : ""}，已设为当前纹样；请人工核对，确认后到 07 矢量化。`;
+  return `${sourceLabelText}线稿 PNG 已生成${bits.length ? `（${bits.join(" · ")}）` : ""}，已设为当前纹样；请人工核对，需要局部修正就到 06 准备蒙版，确认后到 07 矢量化。`;
 }
 
 /** 本地模型线稿：POST /jobs/lineart method=model，只出 PNG，不自动矢量化。 */
@@ -5302,6 +5453,58 @@ async function composeLayers(api) {
       ui.notice = "候选合成任务完成，但没有返回合成候选。";
       api.toast("候选合成完成，但没有返回合成候选。", "warn");
     }
+  });
+}
+
+/**
+ * 线稿 → 蒙版准备：POST /jobs/extract mode=alpha、threshold=0。
+ * 与批量路线 prepare_mask 同一语义：以线稿现有的透明像素发布配对的
+ * foreground_mask 与 transparent_png（alpha_policy=preserve_existing），
+ * 不改 RGB、不重新描线、不调用云端；原线稿与来源记录保留。
+ * 已有配对时只切换当前纹样，不重复提交同一张线稿的准备任务。
+ */
+async function runPrepareLineartMask(api) {
+  const asset = currentAsset();
+  const prep = lineartMaskPrep(store.session.assets, asset, { cap: maskPrepCap() });
+  if (prep.error === "missing" || !asset) {
+    api.toast("先打开一张纹样。", "warn");
+    return;
+  }
+  if (prep.error === "unsupported") {
+    api.toast("只有线稿 PNG（或沿裁切/工作副本/预处理直连到线稿的纹样）能这样准备蒙版；其它纹样请先用颜色提取，或选择已有的透明 PNG。", "warn");
+    return;
+  }
+  if (prep.pair) {
+    store.setCurrentAsset(prep.pair.asset_id);
+    resetMaskStrokes();
+    ui.notice = `已切到这张线稿的透明 PNG（${shortId(prep.pair.asset_id)}）：没有重复提交，原线稿与蒙版都保留。`;
+    api.toast("已切到已准备的透明 PNG。", "info");
+    return;
+  }
+  if (prep.error === "pixels") {
+    api.toast(
+      `线稿 ${dimsOf(asset)} 超过本机蒙版准备上限 ${formatPixels(prep.cap)} 像素；请先创建工作副本，不会自动缩放。`,
+      "warn"
+    );
+    return;
+  }
+  const lineartId = asset.asset_id;
+  await startJob(api, () => http.extract(buildLineartMaskPayload(lineartId)), (final) => {
+    const produced = (final.result?.assets || []).filter(Boolean);
+    const transparent = produced.find((entry) => entry.kind === "transparent_png") || null;
+    const mask = produced.find((entry) => entry.kind === "foreground_mask") || null;
+    if (!transparent || !mask) {
+      ui.notice = "蒙版准备任务完成，但没有返回配对的透明 PNG 与前景蒙版；线稿保持不变。";
+      api.toast("没有返回配对的蒙版与透明 PNG。", "warn");
+      return;
+    }
+    // 只切换同一会话里刚发布的透明 PNG；线稿、蒙版与来源记录都留在会话中。
+    store.setCurrentAsset(transparent.asset_id);
+    resetMaskStrokes();
+    ui.notice = `线稿蒙版已准备好（alpha、阈值 0，保留半透明边缘）：透明 PNG ${shortId(
+      transparent.asset_id
+    )} 已设为当前纹样，可以补黑线或擦除，完成后再到 07 矢量化。原线稿 ${shortId(lineartId)} 保留。`;
+    api.toast("线稿蒙版已准备好，可以画笔修正。", "done");
   });
 }
 
@@ -5794,6 +5997,13 @@ function handleClick(root, state, api, event) {
     case "go-process":
       patchStage(api, root, { stage: 5 });
       api.toast("在 05 明确选择本地模型或云端模型生成线稿。", "info");
+      break;
+    case "go-mask":
+      patchStage(api, root, { stage: 6 });
+      api.toast("在 06 先「准备蒙版」，再用画笔补前景或擦除；完成后到 07 矢量化。", "info");
+      break;
+    case "prepare-lineart-mask":
+      runPrepareLineartMask(api);
       break;
     case "skip-repair":
       draft.repairSkipped = !draft.repairSkipped;

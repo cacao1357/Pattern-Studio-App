@@ -195,7 +195,11 @@ class AWorkflowTests(unittest.TestCase):
         original_svg = next(a for a in original["result"]["assets"] if a["kind"] == "svg")
         self.assertEqual(original_svg["algorithm_version"], VECTOR_VERSION)
         parent = self.store.read_asset(original_svg["source_asset_id"])[0]
-        for field in ("image_id", "content_id", "license"):
+        candidate = next(a for a in original["result"]["assets"] if a["kind"] == "composed_candidate")
+        self.assertEqual(parent["kind"], "working_copy")
+        self.assertNotEqual(parent["width"], candidate["width"])
+        self.assertNotEqual(parent["coordinate_space_id"], candidate["coordinate_space_id"])
+        for field in ("image_id", "content_id", "license", "coordinate_space_id", "width", "height"):
             self.assertEqual(original_svg[field], parent[field])
         flow = self.store.get_ai_flow(flow["pipeline_id"])
         result = self.post("/pipelines/" + flow["pipeline_id"] + "/rerun", json={"revision": flow["revision"],
@@ -287,6 +291,35 @@ class AWorkflowTests(unittest.TestCase):
         self.assertEqual(completed["state"], "succeeded", completed)
         self.assertTrue(any(a["kind"] == "svg" for a in completed["result"]["assets"]))
         self.assertEqual(len(self.calls), 1)
+
+    def test_brush_adds_ink_to_lineart_and_preserves_transparent_color_sources(self):
+        pixels = Image.new("RGBA", (32, 32))
+        pixels.putpixel((20, 20), (0, 0, 0, 64))
+        pixels.putpixel((25, 25), (0, 0, 0, 255))
+        uploaded = self.post("/images", files={"file": ("ink.png", png_bytes(pixels), "image/png")}).json()["normalized"]
+        lineart = self.store.put_asset(png_bytes(pixels), ".png", {
+            "kind": "lineart", "width": 32, "height": 32,
+            "coordinate_space_id": uploaded["coordinate_space_id"], "source_asset_id": uploaded["asset_id"]})
+        result = self.post("/jobs/working-copy", json={"input_asset_id": lineart["asset_id"], "max_pixels": 10_000})
+        self.assertEqual(result.status_code, 202, result.text)
+        copy = self.run_next()["result"]["assets"][0]
+        for source in (lineart, copy, uploaded):
+            with self.subTest(kind=source["kind"]):
+                result = self.post("/jobs/extract", json={"input_asset_id": source["asset_id"], "mode": "alpha", "threshold": 0})
+                self.assertEqual(result.status_code, 202, result.text)
+                mask = next(a for a in self.run_next()["result"]["assets"] if a["kind"] == "foreground_mask")
+                for mode, point in (("add", 5), ("erase", 25)):
+                    result = self.post("/jobs/refine-mask", json={"source_rgb_asset_id": source["asset_id"],
+                        "base_mask_asset_id": mask["asset_id"], "strokes": [
+                            {"mode": mode, "radius": 2, "points": [{"x": point, "y": point}]}]})
+                    self.assertEqual(result.status_code, 202, result.text)
+                    assets = self.run_next()["result"]["assets"]
+                    mask = next(a for a in assets if a["kind"] == "foreground_mask")
+                    png = next(a for a in assets if a["kind"] == "transparent_png")
+                    with Image.open(BytesIO(self.store.read_asset(png["asset_id"])[1])) as saved:
+                        self.assertEqual(saved.getpixel((5, 5)), (0, 0, 0, 0 if source is uploaded else 255))
+                        self.assertEqual(saved.getpixel((20, 20))[3], 64)
+                        self.assertEqual(saved.getpixel((25, 25))[3], 0 if mode == "erase" else 255)
 
     def test_refined_png_descendant_can_feed_vector_branch(self):
         flow = self.select(self.flow())

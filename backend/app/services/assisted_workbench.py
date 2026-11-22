@@ -198,6 +198,22 @@ class AssistedWorkbench:
         return self.store.continue_ai_flow(flow_id, values, key, kind=kind, parameters=parameters, actor=actor)
 
 
+def _is_lineart_canvas(store, source):
+    seen = set()
+    while source["kind"] in {"cropped", "working_copy", "prepared", "enhanced"}:
+        parent_id = source.get("source_asset_id")
+        if not parent_id or parent_id in seen:
+            return False
+        seen.add(parent_id)
+        try:
+            source, _ = store.get_asset(parent_id)
+        except ServiceError as error:
+            if error.code in {"ASSET_NOT_FOUND", "ASSET_UNAVAILABLE"}:
+                return False
+            raise
+    return source["kind"] == "lineart"
+
+
 def _publish_mask_products(store, job, token, source, image, mask, *, params, extra=None):
     if mask.mode != "L" or not set(np.unique(np.asarray(mask))) <= {0, 255}:
         raise ServiceError("INVALID_FOREGROUND_MASK", "Foreground correction requires a binary L mask")
@@ -205,7 +221,13 @@ def _publish_mask_products(store, job, token, source, image, mask, *, params, ex
         raise ProcessingError("EMPTY_MASK", "The foreground is empty; keep some foreground before saving")
     mask_id = str(uuid4())
     rgba = image.copy()
-    rgba.putalpha(ImageChops.multiply(image.getchannel("A"), mask))
+    alpha = image.getchannel("A")
+    rgba.putalpha(ImageChops.multiply(alpha, mask))
+    if _is_lineart_canvas(store, source):
+        # In transparent black line art, a newly selected blank pixel is ink.
+        # Retain the original opacity of existing antialiased strokes.
+        added_ink = ImageChops.multiply(mask, alpha.point(lambda a: 0 if a else 255))
+        rgba.paste((0, 0, 0, 255), (0, 0), added_ink)
     contour, contour_meta = contour_line_art(mask)
     mask_parents = [{"asset_id": source["asset_id"], "role": "source_rgb"}]
     if params.get("base_mask_asset_id"):
@@ -302,7 +324,7 @@ def execute_assisted(store, job, token):
             scale = math.sqrt(max_vector_pixels / (canvas.width * canvas.height))
             size = max(1, int(canvas.width * scale)), max(1, int(canvas.height * scale))
             resized = canvas.convert("RGBa").resize(size, Image.Resampling.LANCZOS).convert("RGBA")
-            working = _output(resized, "working_copy", candidate, job_id,
+            working = _output(resized, "working_copy", candidate, job_id, space=str(uuid4()),
                               parents=[{"asset_id": candidate_id, "role": "vector_input"}],
                               extra={"reason": "vector_pixel_limit",
                                      "transform": {"operation": "vector_working_copy", "input_size": [canvas.width, canvas.height],
@@ -315,6 +337,7 @@ def execute_assisted(store, job, token):
         store.publish(job_id, token, "vectorize", [{"data": result.svg.encode(), "suffix": ".svg", "metadata": {
             **{key: value for key, value in candidate.items() if key not in {"asset_id", "sha256", "bytes", "created_at", "parents", "kind", "width", "height"}},
             "kind": "svg", "width": vector_source["width"], "height": vector_source["height"],
+            "coordinate_space_id": vector_source["coordinate_space_id"],
             "source_asset_id": vector_source["asset_id"],
             "parents": [{"asset_id": vector_source["asset_id"], "role": "vector_input"}],
             "algorithm_version": result.metadata["adapter_version"],

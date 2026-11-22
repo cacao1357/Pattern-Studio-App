@@ -7,6 +7,10 @@
    - 会话与异步加载带归属令牌：每次会话身份改变（新会话发布、resetSession）
      都会递增 sessionEpoch；异步请求返回后若令牌已过期就丢弃结果，避免慢响应
      覆盖新会话。runJob 在提交前捕获令牌，轮询与终态写入只属于原会话。
+   - 打开已保存版本时按图恢复同图历史：openAsset 用公开的只读按图历史
+     （GET /images/{id}/history?collection=assets）把这张图的其他已保存版本
+     并入会话，参考图、来源链与对比叠加才找得到另一块纹样。同一张图读完一次
+     后的活跃会话直接复用自己的纹样；换图才重读；历史不可读时仍按单个资产打开。
    ============================================================================= */
 
 import { api, ApiError, waitForJob } from "./api.js";
@@ -40,6 +44,9 @@ function blankSession() {
     activeJob: null,
     busy: false,
     error: "",
+    /* 这份会话是否已载入这张图的完整版本历史（打开版本时据此复用，不再重读）。 */
+    sameImageLoaded: false,
+    removedAssetIds: new Set(),
   };
 }
 
@@ -279,7 +286,9 @@ export const store = {
     });
     if (!image) return null;
     if (seq !== loadSeq || sessionEpoch !== epoch) return null;
-    const assets = uniqueAssets([image.normalized, image.original]);
+    const history = await this.sameImageHistory(imageId);
+    if (seq !== loadSeq || sessionEpoch !== epoch) return null;
+    const assets = uniqueAssets([image.normalized, image.original, ...history.assets]);
     sessionEpoch += 1;
     this.session = {
       ...blankSession(),
@@ -287,6 +296,7 @@ export const store = {
       image,
       assets,
       currentAssetId: assets[0]?.asset_id || "",
+      sameImageLoaded: history.complete,
     };
     emit("session");
     return this.session;
@@ -339,7 +349,12 @@ export const store = {
     return this.session;
   },
 
-  /** 从纹样库挑一个纹样作为工作输入。 */
+  /**
+   * 从纹样库挑一个纹样作为工作输入（打开已保存版本）。
+   * 恢复顺序：资产本身 → 原图记录（原件/规范输入）→ 同图历史版本。
+   * get asset 读到的这份资产始终优先（同名不再用历史里的旧元数据）；
+   * 历史读取失败不影响打开，只是少一些参考与来源。
+   */
   async openAsset(assetId, { stage = null } = {}) {
     const seq = ++loadSeq;
     const epoch = sessionEpoch;
@@ -352,12 +367,13 @@ export const store = {
       throw error;
     }
     if (!current()) return null;
+    const imageId = asset.image_id || "";
     let image = null;
-    if (asset.image_id) {
+    if (imageId) {
       try {
-        image = this.session.imageId === asset.image_id && this.session.image
+        image = this.session.imageId === imageId && this.session.image
           ? this.session.image
-          : await api.image(asset.image_id);
+          : await api.image(imageId);
       } catch {
         if (!current()) return null;
         image = null;
@@ -365,19 +381,52 @@ export const store = {
     }
     if (!current()) return null;
     const extras = image ? [image.normalized, image.original] : [];
+    const history = await this.sameImageHistory(imageId);
+    if (!current()) return null;
+    const removedAssetIds = new Set(imageId === this.session.imageId ? this.session.removedAssetIds : []);
+    removedAssetIds.delete(asset.asset_id);
+    const assets = uniqueAssets([...extras, ...history.assets, asset])
+      .filter((entry) => !removedAssetIds.has(entry.asset_id))
+      .map((entry) => entry.asset_id === asset.asset_id ? asset : entry);
     sessionEpoch += 1;
     this.session = {
       ...blankSession(),
-      imageId: asset.image_id || "",
+      imageId,
       image,
-      assets: uniqueAssets([...extras, asset]),
+      assets,
+      removedAssetIds,
       currentAssetId: asset.asset_id,
+      // 只有读完整张图的版本历史，才允许同一张图的下一次打开直接复用这些纹样。
+      sameImageLoaded: history.complete,
     };
     emit("session");
     const humanCorrected =
       asset.annotation_source === "human_foreground_correction" ||
       asset.parameters?.annotation_source === "human_foreground_correction";
     return { asset, stage: stage ?? (humanCorrected ? 6 : stageForKind(asset.kind)) };
+  },
+
+  /**
+   * 打开版本时要并入会话的同图其他版本（旧→新），用于恢复参考图与来源。
+   * 优先复用活跃会话：如果当前会话就是这张图、且它的按图历史已经读完，
+   * 那么会话纹样本身就是完整历史——手动移除的不会回来，刚发布的版本也在里面，
+   * 不重复请求，也不跨图驻留。
+   * 换图或历史没读完时用公开的按图历史重读（按图分页，不是全库）；
+   * 旧后端/读取失败时返回空列表，调用方仍按单个资产打开。
+   */
+  async sameImageHistory(imageId) {
+    if (!imageId) return { assets: [], complete: false };
+    const active = this.session.imageId === imageId;
+    if (active && this.session.sameImageLoaded) return { assets: this.session.assets, complete: true };
+    try {
+      const page = await this.imageHistory(imageId, "assets");
+      return {
+        assets: page.items.filter((entry) => !entry.image_id || entry.image_id === imageId).reverse(),
+        complete: page.complete,
+      };
+    } catch {
+      return { assets: active ? this.session.assets : [], complete: false };
+    }
   },
 
   setCurrentAsset(assetId) {
@@ -401,6 +450,7 @@ export const store = {
       this.session.currentAssetId = fallback?.asset_id || "";
     }
     this.session.assets = remaining;
+    this.session.removedAssetIds?.add(assetId);
     emit("session");
     return removed;
   },
