@@ -165,6 +165,21 @@ try {
     assert.deepEqual(saved.assets.map(a=>a.asset_id), group.assets.map(a=>a.asset_id));
     await reload();
     await waitFor("document.querySelector('.wb') && !document.querySelector('[data-pattern]')", "empty workbench opens directly after reload");
+    for (const width of [1440, 390]) {
+      await call("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: width === 390 });
+      const actions = await evaluate(`(() => {
+        const count = selector => [...document.querySelectorAll(selector)].filter(button =>
+          !button.disabled && !button.closest('[hidden]') && button.getClientRects().length
+        ).length;
+        return {
+          upload: count('[data-action="upload"], [data-act="upload"]'),
+          fromLibrary: count('[data-act="workbench-picker"]'),
+          batchImport: count('[data-act="batch-import"]'),
+        };
+      })()`);
+      assert.deepEqual(actions, { upload: 1, fromLibrary: 1, batchImport: 1 }, "distinct import actions at " + width + "px");
+    }
+    check("empty workbench exposes one action for uploading, picking from the library and importing multiple files at both widths");
     await evaluate(`location.hash='#/workbench?image=${group.image_id}&asset=${info.input_asset_id}&stage=3&v=2'`);
     await waitFor(currentStage, "saved pattern can be opened again");
     assert.equal(errors.length, 0, JSON.stringify(errors));
@@ -488,9 +503,9 @@ try {
         await waitFor(`document.querySelector('.wb')?.dataset.stage===${JSON.stringify(stageKeys[stage-1])}`, 'stage '+stage);
         assert.equal(await evaluate('document.documentElement.scrollWidth>innerWidth+1'),false,'stage '+stage+' overflow at '+width);
         if(stage===3) {
-          await waitFor("Boolean(document.querySelector('[data-act=skip-repair]'))",'skip repair visible');
+          await waitFor(`import('/js/store.js').then(({store}) => store.session.currentAssetId === ${JSON.stringify(info.input_asset_id)} && !!document.querySelector('[data-act=skip-repair]:not(:disabled)'))`, 'skip repair available on loaded pattern');
           await evaluate("document.querySelector('[data-act=skip-repair]').click()");
-          await waitFor("document.querySelector('.wb-note')?.textContent.includes('已跳过修复')",'repair skipped without generation');
+          await waitFor("document.querySelector('.wb-panel [data-act=go-process]:not(:disabled)') && document.querySelector('.wb-panel [data-act=skip-repair]')?.textContent.includes('继续修复')", 'repair skipped without generation');
         }
         if(stage===5) {
           await waitFor("Boolean(document.querySelector('[data-seg=processRoute][data-val=cloud]'))",'cloud route available');
@@ -564,7 +579,11 @@ try {
     for (const [key,value] of Object.entries({repairLeft:32,repairTop:24,repairWidth:64,repairHeight:40})) {
       await fill("wb-"+key,value);
     }
-    assert.match(await evaluate("document.querySelector('[data-live=repair-region]').textContent"), /64 × 40 px · 原点 \(32, 24\)/);
+    const visibleBox = await evaluate(`(() => {
+      const region = document.querySelector('[data-repair-overlay] .wb-repair__region');
+      return ['left', 'top', 'width', 'height'].map(key => Number.parseFloat(region.style[key]) * 512 / 100);
+    })()`);
+    assert.deepEqual(visibleBox.map(Math.round), [32, 24, 64, 40]);
   }
   check("local repair entry reflects prerequisites without generating or calling cloud");
 

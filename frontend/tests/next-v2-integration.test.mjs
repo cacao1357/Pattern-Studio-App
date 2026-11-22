@@ -1173,9 +1173,7 @@ test("LeftRefill 不可用时禁用本地路线并给出通俗原因，未知不
     const unavailable = render();
     assert.match(localButton(unavailable), /disabled/);
     assert.match(unavailable, /缺少基础模型权重/);
-    // 解释“上传的小模型只是提示向量，需要匹配的基础网络”，且不暴露内部接口/字段名。
-    assert.match(unavailable, /提示向量/);
-    assert.match(unavailable, /SD2/);
+    // 缺少依赖时给出原因；正常时可直接选择，不要求用户先阅读模型原理。
     assert.doesNotMatch(unavailable, /\/health|capabilities\.leftrefill/);
 
     store.leftrefillModel = { available: null, reason: "", checked: "" };
@@ -1968,13 +1966,14 @@ test("本地 LeftRefill 面板要求 512×512 目标和显式参考图，不出�
     assert.match(html, /请选择已保存的参考图/);
     assert.doesNotMatch(html, /同意把当前输入上传/);
     assert.doesNotMatch(html, /同意本次云端调用/);
-    assert.match(html, /不上传 · 不计费/);
-    assert.match(html, /不会自动改用云端/);
+    assert.match(html, /不上传.{0,4}不计费/);
+    assert.doesNotMatch(html, /不保证|不等于真实推理成功|本地条件核验/);
 
     store.session.currentAssetId = "in-1024";
     workbench.default.render(state, { state: {} }, new URLSearchParams());
     const wrongSize = workbench.repairPanel(state, "leftrefill");
-    assert.match(wrongSize, /不会自动缩放/);
+    assert.match(wrongSize, /1024 × 1024/);
+    assert.match(wrongSize, /裁切/);
     assert.doesNotMatch(wrongSize, /目标输入/);
   } finally {
     store.session = originalSession;

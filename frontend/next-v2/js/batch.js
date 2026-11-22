@@ -1,7 +1,7 @@
 /* =============================================================================
    batch.js — 工作台「纹样」列：用户自行挑选的原图组、批量导入队列与跨图切换。
    边界：
-   - 工作台列不是纹样库的镜像：只有用户通过「添加纹样」或上传/导入加入的原图
+   - 工作台列不是纹样库的镜像：只有用户通过「从库选图」或上传/导入加入的原图
      才会出现在这里；加入与移出只改工作台成员表，不删除纹样库记录。
    - 当前会话原图即使尚未加入，也会临时显示在列首，并提供「加入工作台」。
    - 批量索引只服务于侧栏与导出选择，**不把别的原图纹样塞进 store.session**；
@@ -990,17 +990,20 @@ function uploadPanelHtml() {
   const failed = summary.failed > 0;
   if (!state.uploads.length) return "";
   return `
-  <section class="bp-import" aria-label="批量导入" data-batch-panel>
+  <section class="bp-import" aria-label="批量导入结果" data-batch-panel>
     <header class="bp-import__head">
-      <span class="label">批量导入</span>
+      <span class="label">导入结果</span>
       <span class="mono">${summary.done}/${summary.total} 张完成${failed ? ` · ${summary.failed} 张失败` : ""}</span>
-      <button class="icon-btn" type="button" data-act="batch-dismiss" aria-label="收起批量导入">${icon("close")}</button>
+      <button class="icon-btn" type="button" data-act="batch-dismiss" aria-label="收起导入结果">${icon("close")}</button>
     </header>
     <ul class="bp-import__list">${state.uploads.map(uploadRowHtml).join("")}</ul>
-    <div class="bp-import__acts">
-      ${failed ? `<button class="btn btn--ghost btn--sm" type="button" data-act="batch-retry">重试失败项</button>` : ""}
-      <button class="btn btn--primary btn--sm" type="button" data-act="batch-import"${summary.busy ? " disabled" : ""}>${icon("plus")}继续导入</button>
-    </div>
+    ${
+      failed
+        ? `<div class="bp-import__acts">
+             <button class="btn btn--ghost btn--sm" type="button" data-act="batch-retry">重试失败项</button>
+           </div>`
+        : ""
+    }
     ${
       duplicate.count
         ? `<div class="bp-dupes" data-batch-dupes>
@@ -1037,10 +1040,10 @@ export function patternColumnHtml({ selected = new Set() } = {}) {
         <span class="mono">${groups.length} 个原图 · ${totalAssets} 项${state.nextCursor ? "+" : ""}</span>
       </span>
       <span class="bp-head__acts">
-        <button class="btn btn--ghost btn--sm" type="button" data-act="workbench-picker">${icon("plus")}添加纹样</button>
-        <button class="btn btn--ghost btn--sm" type="button" data-act="process-batch"${groups.length ? "" : " disabled"}>${icon("play")}一键处理</button>
+        <button class="btn btn--ghost btn--sm" type="button" data-act="workbench-picker" title="从纹样库选图并加入工作台">${icon("plus")}从库选图</button>
+        ${groups.length ? `<button class="btn btn--ghost btn--sm" type="button" data-act="process-batch">${icon("play")}一键处理</button>` : ""}
         <button class="btn btn--ghost btn--sm" type="button" data-act="batch-import"${state.uploadBusy ? " disabled" : ""}>${icon("upload")}批量导入</button>
-        <button class="btn btn--ghost btn--sm" type="button" data-act="open-export"${totalAssets ? "" : " disabled"}>${icon("download")}批量导出</button>
+        ${totalAssets ? `<button class="btn btn--ghost btn--sm" type="button" data-act="open-export">${icon("download")}批量导出</button>` : ""}
       </span>
     </header>
     ${uploadPanelHtml()}
@@ -1075,9 +1078,7 @@ export function patternColumnHtml({ selected = new Set() } = {}) {
             }
           </div>`
         : `<div class="wb-assets-empty bp-empty">
-             <p>工作台还没有选入纹样。这里不是纹样库的镜像：挑几张进来，或直接批量导入。</p>
-             <button class="btn btn--ghost btn--sm btn--block" type="button" data-act="workbench-picker">${icon("plus")}从纹样库添加</button>
-             <button class="btn btn--quiet btn--sm btn--block" type="button" data-act="batch-import">${icon("upload")}批量导入</button>
+             <p>还没有选入纹样。</p>
            </div>`
     }
     <input class="bp-file" type="file" accept="image/png,image/jpeg" multiple data-batch-files tabindex="-1" aria-hidden="true" />

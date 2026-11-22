@@ -39,12 +39,6 @@
   font-size: var(--text-lead);
 }
 
-.st-head__meta {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-}
 
 /* ------------------------------------------------------------------ 两栏骨架 */
 
@@ -546,13 +540,6 @@
   color: var(--jade);
 }
 
-.st-savebar__hint {
-  font-family: var(--font-mono);
-  font-size: var(--text-meta);
-  letter-spacing: 0.01em;
-  color: var(--text-4);
-}
-
 .st-savebar__acts {
   display: flex;
   gap: 10px;
@@ -627,11 +614,6 @@
   color: var(--gold);
 }
 
-.st-blockers__copy {
-  font-size: var(--text-sm);
-  line-height: 1.7;
-  color: var(--text-3);
-}
 
 .st-blockers__list {
   display: flex;
@@ -897,9 +879,6 @@
   .st-head {
     grid-template-columns: 1fr;
   }
-  .st-head__meta {
-    justify-content: flex-start;
-  }
 }
 
 @media (max-width: 640px) {
@@ -936,9 +915,6 @@
   }
   .st-meta > div:nth-child(odd) {
     border-right: 0;
-  }
-  .st-savebar__hint {
-    display: none;
   }
   .st-savebar__acts {
     gap: 8px;

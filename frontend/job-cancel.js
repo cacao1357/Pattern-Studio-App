@@ -47,7 +47,7 @@ export function cancelEligibility(job) {
   if (EXTERNAL_CALL_KINDS.has(kind)) {
     return {
       supported: false,
-      reason: "AI 付费调用的取消尚未开放；页面不会伪报“已停止”，也不会自动重发。请等待真实终态。",
+      reason: "进行中的云端调用无法取消，可在任务记录中查看结果。",
       ended: false,
       paid: true
     };
@@ -76,7 +76,7 @@ export function cancelledMessage() {
 }
 
 export function successRaceMessage() {
-  return "取消请求到达前任务已经完成。页面按真实成功终态处理，没有伪报停止；可用“撤销”回到处理前。";
+  return "任务已在取消前完成。可用「撤销」回到处理前。";
 }
 
 export function cancelConflictMessage(error) {
@@ -89,7 +89,7 @@ export function cancelConflictMessage(error) {
     return "任务状态已经变化（可能已完成或已被取消）。请以重新读取的真实状态为准；如果已完成，可用“撤销”回到处理前。";
   }
   if (status === 404) {
-    return "没有找到可取消的任务，或取消接口尚未就绪。请刷新任务状态；页面不会自动重新提交任务。";
+    return "未找到可取消的任务，请刷新任务状态。";
   }
   if (status === 0) {
     return "取消请求没有得到确定响应。请先“重新查询”任务状态再决定；页面不会自动再次发送取消请求。";

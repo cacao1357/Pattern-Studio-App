@@ -316,7 +316,7 @@ function renderStatusbar() {
   const batchDock = document.getElementById("pf-dock");
   bar.innerHTML = `
     <span class="statusbar__item" title="${online ? "数据库、存储与后台任务均正常" : escapeHtml(store.healthError || "尚未连接本机服务")}">
-      <span class="svc__dot${online ? "" : " is-off"}" aria-hidden="true"></span>${online ? "本机服务正常" : "本机服务未连接"}
+      <span class="svc__dot${online ? "" : " is-off"}" aria-hidden="true"></span><span class="${online ? "sr-only" : ""}">${online ? "本机服务正常" : "本机服务未连接"}</span>
     </span>
     ${
       isWorkbench
@@ -356,6 +356,8 @@ function renderView() {
     if (!state.workbenchEntry) applyParams(params, route);
   }
   state.route = route;
+  // 顶栏动作按页面收敛：有本页主入口的页面不再显示重复的顶栏「上传纹样」。
+  document.body.dataset.route = route;
   syncNav(route);
   renderStatusbar();
 
@@ -719,15 +721,6 @@ function showDuplicateDrawer(result, duplicates, api) {
   });
 }
 
-function renderServiceChip() {
-  const chip = document.querySelector(".svc");
-  if (!chip) return;
-  const online = store.health?.status === "ok";
-  chip.classList.toggle("is-off", !online);
-  chip.innerHTML = `<span class="svc__dot${online ? "" : " is-off"}" aria-hidden="true"></span>${online ? "本机服务就绪" : "本机服务未连接"}`;
-  chip.title = online ? "数据库、存储与后台任务均正常" : store.healthError || "尚未连接本机服务";
-}
-
 /* ------------------------------------------------------------------ 外壳事件 */
 
 function bindShell() {
@@ -816,10 +809,7 @@ export function boot() {
   bindShell();
   // 批次浮窗与预设入口挂在外壳上：换页不卸载，刷新后从服务端批次列表恢复。
   initProcessingUI(api);
-  store.subscribe(() => {
-    renderStatusbar();
-    renderServiceChip();
-  });
+  store.subscribe(() => renderStatusbar());
   store.loadHealth();
   store.loadSettings();
   store.loadRecent();

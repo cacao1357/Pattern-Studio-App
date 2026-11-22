@@ -295,7 +295,7 @@ export function openPatternPicker({ existing = [], onAdd = null } = {}) {
     <header class="pp__head">
       <div>
         <p class="eyebrow">工作台</p>
-        <h2 class="pp__title" id="pp-title">添加纹样</h2>
+        <h2 class="pp__title" id="pp-title">从纹样库选图</h2>
         <p class="pp__lead">纹样库保持完整；只有勾选的组会出现在工作台并跨刷新保留。</p>
       </div>
       <button class="icon-btn pp__close" type="button" data-pp-close aria-label="关闭">${icon("close")}</button>

@@ -125,7 +125,6 @@ function renderResume(api) {
           <h2 class="resume__name">从一张原图开始</h2>
           <p class="resume__note">上传 PNG 或 JPEG，保留原件后即可裁切、提取与矢量化。</p>
           <div class="resume__actions">
-            <button class="btn btn--primary" type="button" data-upload>上传纹样 ${icon("upload")}</button>
             <a class="btn btn--ghost btn--sm" href="#/library">去纹样库挑一件</a>
           </div>
         </div>
@@ -411,19 +410,6 @@ export default {
           </div>
         </section>
 
-        <section class="section section--closing">
-          <div class="wrap wrap--tight">
-            <div class="closing" data-reveal>
-              <h2 class="title closing__title">每一步都留独立产物</h2>
-              <div class="closing__actions">
-                <button class="btn btn--primary" type="button" data-upload data-magnetic>
-                  从上传纹样开始 ${icon("arrow")}
-                </button>
-                <a class="btn btn--ghost" href="#/notes">使用说明</a>
-              </div>
-            </div>
-          </div>
-        </section>
       </div>
     `;
   },
@@ -456,10 +442,6 @@ export default {
       card.addEventListener("click", () => {
         api.go("workbench", { query: { stage: card.dataset.stage } });
       });
-    });
-
-    root.querySelectorAll("[data-upload]").forEach((button) => {
-      button.addEventListener("click", () => document.querySelector('[data-action="upload"]')?.click());
     });
 
     root.querySelectorAll("[data-asset]").forEach((card) => {

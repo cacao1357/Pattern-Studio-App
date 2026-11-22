@@ -229,6 +229,10 @@ code {
   gap: var(--s2);
 }
 
+html[data-stage="1"] .is-workspace #quick-upload {
+  display: none;
+}
+
 .health {
   display: inline-flex;
   align-items: center;

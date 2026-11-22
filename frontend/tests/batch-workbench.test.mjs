@@ -344,7 +344,9 @@ test("工作台纹样列提供多选、全选、移出与批量删除入口", ()
     error: "",
   };
   const html = batch.patternColumnHtml({ selected: new Set(["image-current"]) });
-  assert.match(html, /data-act="workbench-picker"[^>]*>[\s\S]*?添加纹样/);
+  assert.match(html, /data-act="workbench-picker"[^>]*>[\s\S]*?从库选图/);
+  assert.equal((html.match(/data-act="workbench-picker"/g) || []).length, 1);
+  assert.equal((html.match(/data-act="batch-import"/g) || []).length, 1);
   assert.match(html, /data-pattern-select-all/);
   assert.match(html, /data-pattern-select[^>]*data-image="image-current"/);
   assert.match(html, /data-pattern-select[^>]*checked/);

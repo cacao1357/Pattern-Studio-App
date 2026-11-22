@@ -721,7 +721,7 @@ function presetLayerHtml() {
       <div>
         <span class="label">流程预设</span>
         <h2>预设管理</h2>
-        <p class="pf-modal__lead">预设保存处理步骤与参数；提交批次时冻结为快照，之后修改不会改变已有批次。</p>
+        <p class="pf-modal__lead">将常用步骤和参数存为预设，下次可直接选用。</p>
       </div>
       <button class="icon-btn" type="button" data-pf-close-presets aria-label="关闭预设管理">${icon("close")}</button>
     </header>
@@ -907,7 +907,7 @@ function presetEditorHtml(selected) {
       }
       <button class="btn btn--quiet btn--sm" type="button" data-pf-close-presets>关闭</button>
     </div>
-    <p class="pf-form__hint">保存不会改变已经提交的批次；已提交批次使用提交时的快照。</p>
+    <p class="pf-form__hint">更改只对之后提交的批次生效。</p>
   </div>`;
 }
 

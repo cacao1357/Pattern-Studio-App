@@ -87,16 +87,15 @@ test("损伤蒙版提示与实际请求一致：有记录也不自动选用，�
   const sameSpace = { asset_id: "mask-1", kind: "damage_mask", width: 512, height: 512, coordinate_space_id: "space-a" };
   const ok = conditions({ assets: [target, reference, sameSpace] }).find((row) => row.key === "damage_mask");
   assert.equal(ok.state, "info");
-  assert.match(ok.detail, /mask-1/);
   assert.match(ok.detail, /不会自动选用/);
-  assert.match(ok.detail, /仍按修复框推断/);
+  assert.doesNotMatch(ok.detail, /优先使用.*蒙版/);
   const request = buildLeftRefillPayload(target.asset_id, box, { width: 512, height: 512 }, { repairReferenceId: reference.asset_id });
   assert.equal(Object.hasOwn(request, "damage_mask_asset_id"), false);
 
   const otherSpace = { asset_id: "mask-2", kind: "damage_mask", width: 512, height: 512, coordinate_space_id: "space-b" };
   const info = conditions({ assets: [target, reference, otherSpace] }).find((row) => row.key === "damage_mask");
   assert.equal(info.state, "info");
-  assert.match(info.detail, /按修复框推断/);
+  assert.match(info.detail, /按修复框/);
 });
 
 test("matchingDamageMasks 同时识别 parent 登记与同坐标空间", () => {
@@ -107,10 +106,10 @@ test("matchingDamageMasks 同时识别 parent 登记与同坐标空间", () => {
   assert.deepEqual(matches.map((asset) => asset.asset_id), ["mask-parent", "mask-space"]);
 });
 
-test("轮廓模式提示微小结构限制，且明确不改变算法", () => {
+test("轮廓模式提示保留微小细节的可选操作", () => {
   const caveat = vectorModeCaveat("contour");
   assert.match(caveat, /微小孔洞|微小/);
-  assert.match(caveat, /不改变算法/);
+  assert.match(caveat, /彩色模式/);
   assert.equal(vectorModeCaveat("color"), "");
   assert.equal(vectorModeCaveat("monochrome"), "");
 });

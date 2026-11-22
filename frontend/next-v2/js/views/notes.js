@@ -55,7 +55,7 @@ export default {
                   `<div class="notes-table__row" role="row"><span role="cell" class="notes-table__k">${stage}</span><span role="cell">${what}</span><span role="cell">${out}</span></div>`
               ).join("")}
             </div>
-            <p class="notes-foot">处理任务在后台队列串行执行；页面会轮询任务状态。失败或取消的任务保留原因。</p>
+            <p class="notes-foot">到「任务」查看进度和失败原因。</p>
           </div>
         </section>
 
@@ -65,7 +65,7 @@ export default {
               <div class="sec-head__main">
                 <h2 class="section-title">常用的几个动作</h2>
               </div>
-              <p class="sec-head__aside">顶部「上传纹样」随时可用；工作台的纹样列决定画布显示哪一个纹样。</p>
+              <p class="sec-head__aside">单张上传在工作台顶栏；「从库选图」与「批量导入」在纹样列。</p>
             </header>
             <div class="notes-why">
               <article class="card notes-why__card" data-reveal>
@@ -164,18 +164,15 @@ export default {
           </div>
         </section>
 
-        <section class="section section--closing">
+        <section class="section">
           <div class="wrap wrap--tight">
             <div class="notes-known card" data-reveal>
               <div>
-                <p class="label">已知限制</p>
+                <p class="label">处理前准备</p>
                 <ul class="notes-list">
-                  <li>「本地线稿模型」需要本机已安装 torch、分割模型库与 model/ 权重；没有这些依赖时请用 OpenCV 线稿或颜色提取。</li>
-                  <li>「本地 LeftRefill」需要 NVIDIA 显卡、512 × 512 输入与已保存参考图；不可用时不会自动改用云端。</li>
-                  <li>云端线稿、修复与候选失败或结果未知时不会自动重发。</li>
-                  <li>超过本机上限的大图在提取或矢量化阶段可能失败，先创建工作副本更稳。</li>
-                  <li>页面按 Chrome 验证；未做完整的屏幕阅读器人工走查（已有焦点环、aria 状态与减少动态效果适配）。</li>
-                  <li>字体依赖本机 Noto Serif SC、Noto Sans SC、Bahnschrift、Cascadia Code；缺字体会回退。</li>
+                  <li>本地线稿模型未安装时，可选 OpenCV 线稿或颜色提取。</li>
+                  <li>本地 LeftRefill 需要 NVIDIA 显卡、512 × 512 的目标图和一张已保存的参考图。</li>
+                  <li>大图超过处理上限时，可在「裁切」创建工作副本。</li>
                 </ul>
               </div>
               <div class="notes-compare">

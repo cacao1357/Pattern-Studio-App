@@ -48,7 +48,7 @@ export function buildGuidance(context = {}) {
     const label = task.label || "任务";
     if (task.cancelBusy) {
       headline = "正在请求取消「" + label + "」…";
-      detail = "等待服务端给出真实终态。取消与成功同时发生时，页面以服务端返回的状态为准。";
+      detail = "正在确认取消结果。";
       tone = "working";
     } else if (task.cancelSupported) {
       headline = "正在处理「" + label + "」";
@@ -56,16 +56,16 @@ export function buildGuidance(context = {}) {
       tone = "working";
     } else {
       headline = "正在处理「" + label + "」";
-      detail = task.cancelReason || "此任务暂不支持取消，请等待真实终态；页面不会自动重发。";
+      detail = task.cancelReason || "此任务无法取消，请等待处理完成。";
       tone = "working";
     }
   } else if (previewState === "ready") {
     headline = "预览已生成，尚未应用";
-    detail = "应用后才会写入版本并切换工作区；放弃不会删除已生成的任务和文件，也不会自动应用。";
+    detail = "点击「应用」使用这个版本，或放弃预览继续调整。";
     tone = "ready";
   } else if (previewState === "pending") {
     headline = "正在生成「" + (preview.label || "预览") + "」…";
-    detail = "预览只关联当前图片和当前参数修订。可等待，或在任务条请求取消；结果不会自动应用。";
+    detail = "可在任务栏查看进度。";
     tone = "working";
   } else if (previewState === "stale" || previewState === "expired") {
     headline = previewState === "expired" ? "预览已过期，不能应用" : "参数或图片已更新，此预览不能应用";
@@ -93,20 +93,20 @@ export function buildGuidance(context = {}) {
     tone = "ready";
   } else if (hasSvg) {
     headline = "已生成矢量成果";
-    detail = "在左栏版本区预览或下载。SVG 调色与颜色替换留待后续切片；本轮可继续导出 ZIP。";
+    detail = "在左栏预览或下载 SVG，也可勾选多个版本打包导出。";
     tone = "done";
   } else if (hasResult) {
     headline = "成果已归档，可预览并决定下一步";
     detail = "将需要的版本“设为当前输入”后继续处理；勾选版本可打包 ZIP。";
     tone = "ready";
   } else {
-    headline = "当前输入已就绪，可开始本地提取";
-    detail = "建议先用“预览”检查效果：满意后应用；不满意就放弃并调整参数，不产生正式版本。";
+    headline = "开始本地提取";
+    detail = "先预览提取效果，满意后点击「应用」。";
     tone = "ready";
   }
 
   if (context.hasTransparency === true && context.extractMode === "alpha") {
-    detail += " 检测到透明输入：Alpha 模式保留源透明通道，处理前后接近是正常保真，不是没有处理。";
+    detail += " Alpha 模式保留原图的透明度。";
   } else if (context.hasTransparency === true) {
     detail += " 检测到透明输入：若可见图形被大量去掉，优先改用“既有 Alpha”保留原透明。";
   }

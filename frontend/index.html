@@ -239,7 +239,7 @@
           <div>
             <p class="eyebrow">HISTORY</p>
             <h1 id="history-title">历史任务</h1>
-            <p class="subtitle">本机保留的每一次处理与生成；在左侧索引里选中一条，查看详情、恢复工作区或重试失败步骤。</p>
+            <p class="subtitle">选择任务，可查看详情、恢复工作区或重试。</p>
           </div>
           <div class="view-actions">
             <span class="history-count" id="history-summary">尚未加载</span>
@@ -298,8 +298,6 @@
         <div class="empty-state library-empty" id="library-empty">
           <svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg>
           <strong>纹样库还是空的</strong>
-          <p>上传第一张纹样，原图和每一步成果都会自动出现在这里。</p>
-          <button class="btn btn-solid btn-sm" id="library-empty-upload" type="button">上传纹样</button>
         </div>
       </section>
 
@@ -427,7 +425,7 @@
           <div class="stage" id="canvas-stage">
             <div class="stage-empty" id="canvas-empty">
               <p class="stage-empty-line">先放入一张纹样</p>
-              <p class="stage-empty-note">PNG 或 JPEG。上传后可拖拽框选，或直接填写真实像素坐标。</p>
+              <p class="stage-empty-note">PNG 或 JPEG。可拖动框选或输入像素坐标。</p>
             </div>
             <div class="stage-loading" id="canvas-loading" hidden>
               <span class="spinner" aria-hidden="true"></span>
@@ -483,15 +481,10 @@
 
           <section class="stage-panel" id="source-panel" data-stage="1" aria-labelledby="source-heading">
             <h2 class="tools-title" id="source-heading">来源</h2>
-            <details class="inline-help">
-              <summary>来源说明</summary>
-              <p class="tools-note">原文件保留，规范输入另存为新资产。</p>
-            </details>
-
             <div class="dropzone" id="dropzone" aria-describedby="dropzone-help">
               <svg class="dropzone-icon" aria-hidden="true"><use href="#i-upload"></use></svg>
               <p class="dropzone-title" id="dropzone-title">拖入 PNG 或 JPEG</p>
-              <p class="dropzone-sub" id="dropzone-help">规范输入另存为新资产，原文件不会被改写。</p>
+              <p class="dropzone-sub" id="dropzone-help">原图会保留。</p>
               <button class="btn btn-line btn-sm" id="choose-file" type="button">选择文件</button>
               <input class="visually-hidden" id="image-file" type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg">
             </div>
@@ -633,7 +626,7 @@
                 <span>裁切</span>
               </button>
             </div>
-            <p class="hint">GrabCut 需要框选；其他方式在框选有效时会一并使用当前矩形。提交不会隐式修改画布。</p>
+            <p class="hint">GrabCut 需要先框选区域。其他方式可选用当前框选。</p>
 
             <details class="group">
               <summary>
@@ -669,13 +662,13 @@
 
           <section class="stage-panel" id="controls-panel" data-stage="3" aria-labelledby="controls-heading">
             <h2 class="tools-title" id="controls-heading">处理</h2>
-            <p class="tools-note">本地处理始终可用，不依赖 AI 服务状态。</p>
+
 
             <label class="check-row preview-toggle">
               <input type="checkbox" id="preview-mode" checked>
               <span><strong>先预览，再应用</strong><small>默认开启；关闭后保持完成任务即应用</small></span>
             </label>
-            <p class="hint">预览只显示在画布，不会自动写入版本。应用确认后才切换工作区；放弃不会删除已生成任务。</p>
+            <p class="hint">点击「应用」即可使用预览结果。</p>
 
             <div class="oneclick">
               <div class="oneclick-top">
@@ -1036,7 +1029,7 @@
 
               <div class="ai-rerun" id="ai-rerun" hidden>
                 <h3 class="ai-rerun-title">局部重跑 · 仅本地</h3>
-                <p class="hint">只复用已归档图层或本流程 PNG 重跑本地合成／矢量化；不发起云端调用、不产生新费用，旧结果保留。</p>
+                <p class="hint">用已保存的图层重新合成，或用 PNG 重新矢量化。原版本会保留。</p>
                 <label class="field" for="ai-rerun-input">
                   <span class="field-label">矢量化输入（本流程 PNG）</span>
                   <select id="ai-rerun-input"></select>
@@ -1154,7 +1147,7 @@
                 <option value="">不提供损伤标注</option>
               </select>
             </div>
-            <p class="hint" id="repair-damage-note">不会把当前矩形当作损伤真值；只接受已登记、同源、同尺寸的损伤标注。</p>
+            <p class="hint" id="repair-damage-note">可选择与当前输入匹配的损伤标注。</p>
 
             <div class="consents" id="repair-consents">
               <label class="check-row">
@@ -1166,7 +1159,7 @@
                 <span><strong>同意可能产生的费用</strong><small>默认关闭，单独确认</small></span>
               </label>
             </div>
-            <p class="hint">新修复需要两项都确认；页面不会自动重发收费请求。复用归档时两项都以 false 提交。</p>
+            <p class="hint">生成新候选需确认上传和费用。复用已有候选免费。</p>
 
             <button class="btn btn-solid btn-wide" id="repair-start" type="button" disabled>提交修复任务</button>
             <p class="hint" id="repair-start-note">先选择规范输入并框选缺损区域。</p>
@@ -1243,7 +1236,7 @@
               <button class="btn btn-line btn-sm" id="tile-crop" type="button" disabled>裁切当前框选为单元</button>
               <button class="btn btn-quiet btn-sm" id="tile-unit-download" type="button" disabled>下载单元</button>
             </div>
-            <p class="hint">单元复用裁切接口保存的 cropped 资产与 bbox 映射；不会另建一套裁切流程。</p>
+            <p class="hint">选择已保存的裁切图作为平铺单元。</p>
 
             <div class="unit-preview" id="tile-unit-preview" hidden>
               <div class="unit-thumb">
@@ -1271,7 +1264,7 @@
               </select>
             </div>
             <p class="hint">这是你的目测记录，不是系统的无缝判定；不提供自动消缝。</p>
-            <p class="tile-note" id="tile-note">选择单元后显示输出尺寸与 4 MP 上限检查。</p>
+            <p class="tile-note" id="tile-note">先选一张图作为平铺单元。</p>
             <p class="field-error" id="tile-error" role="alert" hidden></p>
             <button class="btn btn-solid btn-wide" id="tile-generate" type="button" disabled>生成平铺预览</button>
 
@@ -1288,7 +1281,7 @@
                 <button class="btn btn-line btn-sm" id="tile-download" type="button">下载平铺 PNG</button>
                 <button class="btn btn-quiet btn-sm" id="tile-zip" type="button">打包单元与平铺</button>
               </div>
-              <p class="hint">输出尺寸为列数 × 单元宽、行数 × 单元高；超过 4 MP 会拒绝，不会隐式缩放。</p>
+              <p class="hint">输出上限为 400 万像素。可减少行列数或缩小单元。</p>
             </div>
           </section>
 
@@ -1370,7 +1363,7 @@
                 <span><strong>允许训练</strong><small>默认关闭，单独授权</small></span>
               </label>
             </div>
-            <p class="hint">两项授权分别保存，勾选前不会授权。备注与来源记录不代表来源许可证明。</p>
+            <p class="hint">请按素材的实际授权情况勾选。</p>
             <p class="field-error" id="feedback-error" role="alert" hidden></p>
             <button class="btn btn-line btn-wide" id="feedback-submit" type="button" disabled>提交评价</button>
           </form>

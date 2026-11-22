@@ -130,31 +130,23 @@ export function settingsSaveState(
       : dirty > 0
         ? `未保存的修改 · ${dirty} 处`
         : migration
-          ? "密钥存储待更新 · 保存会由服务端重新写入本机配置"
+          ? "密钥存储待更新 · 保存后生效"
           : saved
-            ? "已保存 · 已写入本机配置"
-            : "尚未修改 · 保存写入本机配置";
+            ? "已保存"
+            : "尚未修改";
   return { enabled, note, migration, dirty };
 }
 
 /* ---------- 页头 / 目录 / 保存条 ---------- */
 
-function headHtml(record) {
-  const blockers = (record?.blockers || []).length;
+function headHtml() {
   return `
   <header class="st-head">
     <div class="st-head__text">
       <h1 class="title st-head__title">设置</h1>
       <p class="lead st-head__lead">
-        只影响云端调用；密钥只显示是否已配置，不回显内容。
+        云端密钥只保存在本机，页面不回显内容。
       </p>
-    </div>
-    <div class="st-head__meta">
-      <span class="chip chip--jade">本地配置</span>
-      <span class="chip" data-head-key>${record ? (record.api_key_configured ? "密钥已配置" : "密钥未配置") : "读取中"}</span>
-      <span class="chip${blockers ? " chip--gold" : " chip--jade"}" data-head-cloud>
-        ${record ? `云端${blockers ? `不可用 · ${blockers} 项` : "配置就绪"}` : "读取中"}
-      </span>
     </div>
   </header>`;
 }
@@ -176,7 +168,6 @@ function navHtml() {
       </li>`
       ).join("")}
     </ul>
-    <p class="st-nav__foot">保存写入本机配置</p>
   </nav>`;
 }
 
@@ -185,7 +176,6 @@ function savebarHtml() {
   <div class="st-savebar" role="region" aria-label="保存设置">
     <div class="wrap st-savebar__inner">
       <p class="st-savebar__note" data-st-note data-dirty="false" aria-live="polite">正在读取当前配置…</p>
-      <p class="st-savebar__hint" data-st-hint>保存在这台电脑上，下次打开仍然有效。</p>
       <p class="st-form-error" data-st-error role="alert" hidden></p>
       <div class="st-savebar__acts">
         <button class="btn btn--ghost btn--sm" type="button" data-act="reload" hidden>重新加载</button>
@@ -209,27 +199,19 @@ function secHead(n, title, note, id) {
 
 function blockersHtml(record) {
   const codes = Array.isArray(record?.blockers) ? record.blockers : [];
-  if (!codes.length) {
-    return `
-    <div class="st-blockers" data-blockers aria-live="polite">
-      <p class="st-blockers__title">${icon("check")}当前云端配置已就绪</p>
-      <p class="st-blockers__copy">API Key 已配置，云端可以发起调用；实际是否成功仍取决于服务商校验与网络。</p>
-      <p class="field__hint">修改后按「保存设置」写入配置；保存不测试密钥，也不发起调用。</p>
-    </div>`;
-  }
+  if (!codes.length) return "";
   return `
   <div class="st-blockers st-blockers--warn" data-blockers aria-live="polite">
     <p class="st-blockers__title">${icon("alert")}当前云端不可用</p>
-    <p class="st-blockers__copy">以下条件尚未满足，云端调用会被拒绝。</p>
     <ul class="st-blockers__list">
       ${codes
         .map(
           (code) =>
-            `<li><span class="chip chip--gold">${esc(blockerLabel(code))}</span><code class="mono">${esc(code)}</code></li>`
+            `<li><span class="chip chip--gold">${esc(blockerLabel(code))}</span></li>`
         )
         .join("")}
     </ul>
-    <p class="field__hint">修改后按「保存设置」写入配置；保存不测试密钥，也不发起调用。</p>
+    <p class="field__hint">补齐后再保存。</p>
   </div>`;
 }
 
@@ -263,7 +245,7 @@ function cloudSection(record) {
           <button class="btn btn--primary btn--sm" type="submit" data-key-save>保存密钥</button>
           <button class="btn btn--ghost btn--sm" type="button" data-act="clear-key" aria-pressed="false">清除密钥</button>
         </div>
-        <p class="field__hint" data-key-hint>页面不回显密钥内容；粘贴后按「保存密钥」写入本机配置。</p>
+        <p class="field__hint" data-key-hint>保存只写本机配置，不校验密钥。</p>
         <p class="field__hint" data-key-storage>${esc(apiKeyStorageText(record))}</p>
       </form>
 
@@ -527,7 +509,6 @@ function paintKeyState(page) {
   const chip = page.querySelector("[data-key-chip]");
   const clearButton = page.querySelector('[data-act="clear-key"]');
   const hint = page.querySelector("[data-key-hint]");
-  const headChip = page.querySelector("[data-head-key]");
   const storage = page.querySelector("[data-key-storage]");
 
   if (state) {
@@ -548,8 +529,8 @@ function paintKeyState(page) {
   }
   if (hint) {
     hint.textContent = pendingClear
-      ? "保存设置后会清除本机保存的密钥；保存前可再次点击按钮撤销。"
-      : "页面不回显密钥内容；保存只写本机配置，不验证密钥，也不发起调用。";
+      ? "保存后清除本机密钥；可再次点击按钮撤销。"
+      : "保存只写本机配置，不校验密钥。";
   }
   if (storage) storage.textContent = apiKeyStorageText(settings());
   const keyInput = page.querySelector('[data-cfg="api_key"]');
@@ -560,21 +541,13 @@ function paintKeyState(page) {
         ? "留空保持不变；粘贴新值即替换"
         : "粘贴 API Key";
   }
-  if (headChip) {
-    headChip.textContent = pendingClear ? "密钥待清除" : configured ? "密钥已配置" : "密钥未配置";
-  }
+
 }
 
 function paintBlockers(page) {
   const wrap = page.querySelector("[data-blockers-wrap]");
   if (wrap) wrap.innerHTML = blockersHtml(settings());
-  const headCloud = page.querySelector("[data-head-cloud]");
-  if (headCloud) {
-    const count = (settings()?.blockers || []).length;
-    headCloud.textContent = count ? `云端不可用 · ${count} 项` : "云端配置就绪";
-    headCloud.classList.toggle("chip--gold", count > 0);
-    headCloud.classList.toggle("chip--jade", count === 0);
-  }
+
 }
 
 function paintRevision(page) {
@@ -867,7 +840,7 @@ export default {
     return `
     <div class="st-page">
       <div class="wrap">
-        ${headHtml(record)}
+        ${headHtml()}
         <div class="st-body">
           ${navHtml()}
           <div class="st-sections">
