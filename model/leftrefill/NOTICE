@@ -10,8 +10,32 @@ Diffusers inference adaptation and textile-specific 50-token prompt tuning.
 The prompt tensor is copied exactly into safetensors from the local step-1108
 checkpoint. Source and delivered SHA-256 digests are in inference.json.
 
-The Stable Diffusion 2 inpainting base is a separate dependency governed by
-its original model license and access terms. The upstream LeftRefill code
-license does not replace those terms. Training images are not distributed
-with this delivery. Dataset provenance does not establish redistribution
-rights for the datasets or warrant clearance for every downstream use.
+Training images are not distributed with this delivery. Dataset provenance
+does not establish redistribution rights for the datasets or warrant
+clearance for every downstream use.
+
+Stable Diffusion 2 inpainting offline conversion for LeftRefill
+Copyright (c) 2022 Stability AI and contributors
+
+Original model: stabilityai/stable-diffusion-2-inpainting
+Original checkpoint: 512-inpainting-ema.ckpt
+Preserved model card: https://huggingface.co/sd2-community/stable-diffusion-2-inpainting
+License source: https://huggingface.co/sd2-community/stable-diffusion-2/raw/main/LICENSE-MODEL
+
+2026-11-14 Pattern Studio redistribution of the existing training conversion.
+Modified files are the seven model/configuration files listed in inference.json.
+The original checkpoint was converted to Diffusers component files, FP16 model
+weights and safetensors serialization. The text encoder retains 23 transformer
+blocks, as required by the existing LeftRefill training and inference route.
+No model parameters were further changed while packaging this release.
+The source checkpoint conversion was performed previously. The exact original
+download and conversion command have not been independently reconstructed here.
+
+The supplied model and its derivatives are governed by the accompanying
+CreativeML Open RAIL++-M License. Its paragraph 5 and Attachment A use-based
+restrictions apply to every recipient and downstream redistribution.
+Recipients must comply with these restrictions and preserve this license and
+the required notices when redistributing the model or derivatives.
+
+Use both release ZIP files. Extract them into the same parent directory to
+produce leftrefill-sd2/. Verify each model file with inference.json before use.
