@@ -1,10 +1,10 @@
 /* =============================================================================
    svg-edit.js — SVG 图形级编辑：按视觉独立图形选择、移动、删除、撤销/重做、保存新版本。
-   契约：docs/svg-editing-contract.md（消费者依据，不另建接口）
+   契约：docs/contracts/svg-editing-contract.md（消费者依据，不另建接口）
    - 只消费 GET /assets/{id}/svg-elements 的受控字段，路径只写入 d/fill/
      fill-rule/transform 等白名单属性，不插入未经检查的原始 SVG。
-   - 草稿按当前 SVG 资产隔离；编辑只改 DOM 预览，保存时经 /jobs/edit-svg
-     发布新的 SVG 资产，原文件不变。
+   - 草稿按当前 SVG 纹样隔离；编辑只改 DOM 预览，保存时经 /jobs/edit-svg
+     发布新的 SVG 纹样，原文件不变。
    - 本模块不直接提交任务：保存回调由工作台注入，沿用现有任务条、取消与错误文案。
    ============================================================================= */
 
@@ -15,7 +15,7 @@ import { store } from "./store.js";
 
 /** 与契约一致：单次最多 2000 个元素变化。 */
 export const SVG_EDIT_MAX_CHANGES = 2000;
-/** 每个资产保留的撤销步数；只存 edits 快照，不复制路径数据。 */
+/** 每个纹样保留的撤销步数；只存 edits 快照，不复制路径数据。 */
 const HISTORY_LIMIT = 60;
 /** 同时保留的 SVG 草稿数；只回收无改动的旧草稿，绝不静默丢弃未保存改动。 */
 const DRAFT_LIMIT = 24;
@@ -29,11 +29,11 @@ const num = (value, fallback = 0) => {
 };
 const esc = (value) => escapeHtml(value);
 
-/** 草稿按资产 id 隔离：切换资产再回来，未保存改动仍在。 */
+/** 草稿按纹样 id 隔离：切换纹样再回来，未保存改动仍在。 */
 const drafts = new Map();
 const loadState = { seq: 0, loadingAssetId: "", errorAssetId: "", error: "" };
 const historyState = { imageId: "", items: [], loading: false, error: "", loadedAt: 0, seq: 0 };
-/** 已尝试补齐来源链的资产（按会话令牌），避免每次重绘重复请求；换会话后可重试。 */
+/** 已尝试补齐来源链的纹样（按会话令牌），避免每次重绘重复请求；换会话后可重试。 */
 const sourceChecked = new Map();
 const sourceFetches = new Set();
 let historyPick = "";
@@ -73,7 +73,7 @@ export function parseSvgElements(payload, { assetId = "" } = {}) {
   }
   const returnedId = String(payload.asset_id || "").trim();
   if (assetId && returnedId && returnedId !== assetId) {
-    throw new Error("返回的 SVG 图形不属于当前资产，已停止加载。");
+    throw new Error("返回的 SVG 图形不属于当前纹样，已停止加载。");
   }
   if (!Array.isArray(payload.elements)) {
     throw new Error("SVG 图形数据缺少可读取的图形列表。");
@@ -126,11 +126,11 @@ export function createSvgDraft(parsed) {
   };
 }
 
-/** 把响应装入按资产隔离的草稿表；返回新草稿。 */
+/** 把响应装入按纹样隔离的草稿表；返回新草稿。 */
 export function adoptSvgPayload(asset, payload) {
   const parsed = parseSvgElements(payload, { assetId: asset?.asset_id || "" });
   const key = parsed.assetId || String(asset?.asset_id || "");
-  if (!key) throw new Error("SVG 资产缺少 asset_id。");
+  if (!key) throw new Error("SVG 纹样缺少 asset_id。");
   parsed.assetId = key;
   const draft = createSvgDraft(parsed);
   drafts.set(key, draft);
@@ -602,7 +602,7 @@ function historySection(asset, busy = false) {
   const items = sameImage ? historyState.items : [];
   const waiting = Boolean(imageId) && (historyState.loading || (!historyState.loadedAt && !historyState.error));
   const body = !imageId
-    ? `<p class="field__hint">当前资产没有关联原图记录，无法按图列出历史版本；可从左侧资产轨切换已保存版本。</p>`
+    ? `<p class="field__hint">当前纹样没有关联原图记录，无法按图列出历史版本；可从左侧纹样轨切换已保存版本。</p>`
     : waiting
     ? historyLoading()
     : historyState.error && sameImage
@@ -631,7 +631,7 @@ function historySection(asset, busy = false) {
         })}
         ${toggleButton("history-refresh", "刷新历史", "history")}
       </div>
-      <p class="field__hint">历史版本来自这张纹样的保存记录；重开只切换当前版本，不复制或改写文件。刷新页面后可通过地址栏的资产或这里回到已保存版本。</p>`;
+      <p class="field__hint">历史版本来自这张纹样的保存记录；重开只切换当前版本，不复制或改写文件。刷新页面后可通过地址栏的纹样或这里回到已保存版本。</p>`;
   return sec("历史版本", sameImage ? `${items.length} 个` : "", body);
 }
 
@@ -779,7 +779,7 @@ function nextSourceId(asset) {
 }
 
 /**
- * 沿 source_asset_id / vector_input 链补齐当前资产在本次会话里缺失的来源。
+ * 沿 source_asset_id / vector_input 链补齐当前纹样在本次会话里缺失的来源。
  * 保存过的新 SVG 的 source_asset_id 指向前一 SVG；前一层光栅可能不在会话里，
  * 不补齐的话叠加会误判“没有对照”。只读 GET /assets/{id}，不提交任务。
  */
@@ -821,7 +821,7 @@ export async function ensureAssetSourceChain(asset, { depthLimit = 8 } = {}) {
         if (next.image_id && imageId && next.image_id !== imageId) return;
         store.rememberAsset(next, { token });
       } else if (next.image_id && imageId && next.image_id !== imageId) {
-        // 来源记录跨到了别的原图：不并入当前会话，避免跨图资产污染。
+        // 来源记录跨到了别的原图：不并入当前会话，避免跨图纹样污染。
         return;
       }
       // 找到光栅来源即可停止；继续往前是原图，不需要为叠加再拉一层。

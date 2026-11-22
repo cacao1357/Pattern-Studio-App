@@ -1,6 +1,6 @@
 # 前端接入说明（新版工作台）
 
-最新批量交互与验证见第 15 节。下方带日期的旧记录保留为历史，当前不再使用七步；单图工序仍分开提取与 SVG，批次可按显式预设自动衔接。
+当前工作台入口、资料编辑与批量导出见[批量工作台契约](../contracts/batch-workbench-contract.md)。第 7 节以后的日期记录用于追溯历次接入。单图工序分开执行提取与 SVG 矢量化；批次可按显式预设自动衔接。
 
 日期：2026-11-10（2026-11-11 合并到 `main`；同日接入「蜜蜡 · 沉褐」配色）
 状态：新版工作台已接入本机服务并纳入版本库（提交 `016197b`）；旧前端文件原地保留并通过 `/legacy/` 只读访问。
@@ -42,7 +42,7 @@
 - 上传：`POST /api/v1/images`（FormData，带幂等键）→ 用返回的 `original` / `normalized` 初始化会话。
 - 打开已有资产：`store.openAsset(assetId)` → `GET /assets/{id}` + 同图原件/规范输入；新版 URL 参数 `#/workbench?image=<imageId>&asset=<assetId>&stage=<1-8>&v=2`。没有 `v=2` 的旧链接按旧工序编号映射。
 - 任务：`store.runJob(() => http.xxx(...))` 在提交前捕获会话归属，再每 1.2s 轮询 `GET /jobs/{id}`，返回 `{ job, owned }`。切换会话后停止该页面的旧任务轮询，不取消服务端任务，不向新会话写产物、进度或成功回调；失败/取消已发布的产物仍保留。
-- 会话只存在内存里；刷新页面通过 URL 或纹样库重新进入（不写浏览器存储，与旧前端行为一致）。
+- 操作会话驻留内存。浏览器以 `pattern-studio.next-v2.workbench-resume` 保存最后打开的工作台位置，服务端保存选入列表。选择「开始新的工作」可清空列表和浏览器中的恢复位置，已保存版本仍可从纹样库打开。
 
 ## 4. 工序与接口
 
@@ -150,14 +150,14 @@ node scripts/validate_v2_integration.mjs D:/CondaEnvs/pattern-studio/python.exe
 - 后端挂载（隔离实例，独立存储目录，不动已在运行的服务）：`/` 200 且仍是 studio CSP，`/preview/` 404，`/assets/favicon.svg` 200，`/legacy/` 200，`/api/v1/health` 200。
 - 后端测试：`tests/` 69 passed（`PYTHONPATH=backend`）。本机 DSH 沙箱会把 `0o700` 目录变成不可列目录的对象，pytest 的 `tmp_path` 需一次性 shim；`backend/tests/` 大量用例直接用 `tempfile.TemporaryDirectory()`，在该沙箱下不可运行，本批未执行，不能据此判定通过或失败。
 - 浏览器（Chrome，真实本机数据）：首页、工作台（含资产与空态）、纹样库、设置、使用说明共 5 页 + 七道工序导览浮层，1440×900 与 390×844 均无横向溢出、控制台无报错、请求全部同源；Lighthouse 无障碍逐页 100（设置页首轮 96 由警示面板金色标签 4.07:1 引起，已修）。
-- 截图：`frontend/next-v2/review/` 已按新配色重出 8 张（清单见 [next-v2/README.md](../frontend/next-v2/README.md) 的「截图」一节）。本批没有重拍「对比」：现有素材只有原件与规范输入，工作台如实提示没有可对比的另一版本。
+- 截图：`frontend/next-v2/review/` 已按新配色重出 8 张（Git 历史 `9dc0613:frontend/next-v2/review/`）。本批没有重拍「对比」：现有素材只有原件与规范输入，工作台如实提示没有可对比的另一版本。
 - 未做：Safari / Firefox、屏幕阅读器、超宽屏暗角复核；未重启已在运行的 8765 服务；未做真实素材质量、真实云端与第二批前端验收。
 
 
 
 ## 12. 2026-11-13 工序样例图、首页进度高亮与工作台资产分组
 
-纯前端改动，未改接口、参数版本、后端与 `docs/a-interface-contract.md`：
+纯前端改动，未改接口、参数版本、后端与 `docs/contracts/a-interface-contract.md`：
 
 - 首页：七道工序卡与导览浮层各配一张 `assets/demo` 的缠枝莲团花样例（同一张纹样从原图走到无缝平铺），
   `js/samples.js` 提供 `sampleFor(stage)`；工序高亮不再写死第 3 道，按「正在跑的任务 → `store.lastStage`（用户刚停下的工序）
@@ -223,7 +223,7 @@ node scripts/validate_v2_integration.mjs D:/CondaEnvs/pattern-studio/python.exe
 - 批量导入有逐文件进度、失败重试和近似版本汇总，不合并原图。纹样库沿用按图历史，提供处理类型筛选、多分类创建/重命名/解除，并保留统计、评级、排序、网格/列表和档案深链。
 - 批量导出浮窗支持缩略图、放大、全选/取消/反选、整组及同处理类型选择。范围明确为已载入纹样；沿用许可确认、500 文件和 128 MiB 限制。
 - 一键预设默认提供三条 PNG→SVG 路线，也可配置 PNG-only。批次由服务器持久推进；浮窗可收起，刷新可恢复，人工门需明确选择同图后代产物续接。云端逐批双同意，不自动重发；队列满等待空位。
-- 像素提示读取 health。实测提高本地模型到 25 MP、Otsu 到 4 MP；SVG 不增试验档，工作副本由用户明确创建。边界和失败证据见[处理上限说明](local-processing-limits.md)，接口见[批量契约](batch-workbench-contract.md)。
+- 像素提示读取 health。实测提高本地模型到 25 MP、Otsu 到 4 MP；SVG 不增试验档，工作副本由用户明确创建。边界和失败证据见[处理上限说明](local-processing-limits.md)，接口见[批量契约](../contracts/batch-workbench-contract.md)。
 - 最终前端 128 项通过，相关后端 107 项与 2 子测试通过。`--batch-only` 真实浏览器验收通过：导入、多原图分组、1440/1080/390 宽内部滚动、导出 ZIP/放大、多分类、本地批次执行、收起及刷新恢复、结果 SVG 导出，以及旧修复/清空恢复/任务中心入口；页面异常和新增云端生成请求均为 0。未运行新的真实云端质量实验。
 - DSH 路线 `harness / wb / deepseek-v4.1-flash`；步骤样式会话 `session-6b171757-2958-4425-87d0-d9f0e3792796`、运行 `c202d4cc-70f1-470d-8250-71dda9332607`；批量交互会话 `session-a8174ae0-10d7-4fcb-a66b-9ab25059e41e`，运行 `64afe1fd-101b-481f-9c84-ff8d7a316b37`，上限接入续跑 `3704e7cd-6fd7-491e-b0d9-be423b5ef53a`，均已终态并由 Codex 独立检查。后端关键差异由非作者复核，已修复队列背压、蒙版衔接和取消恢复问题。
 - 本批已提交到 `zgx` 并推送 `origin/zgx`：后端 `2f9ab95`、前端 `f0a4dbb`，文档随本批后续提交；未合并 `main`。验证产物保持在忽略的 `storage/validation/`；没有启动生产服务、安装依赖、改动模型权重或提交私有配置。

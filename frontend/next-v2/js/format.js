@@ -54,11 +54,11 @@ export const KIND_LABELS = {
 };
 
 export function kindLabel(kind) {
-  return KIND_LABELS[kind] || String(kind || "资产");
+  return KIND_LABELS[kind] || String(kind || "纹样");
 }
 
 /**
- * 资产大致属于哪一道工序，用于“在哪个阶段打开它”。
+ * 纹样大致属于哪一道工序，用于“在哪个阶段打开它”。
  * 顺序：01 来源、02 裁切、03 修复、04 候选、05 处理、06 蒙版、07 矢量化、08 平铺。
  * 未接受的修复候选（edit_candidate 等）属于 03 的事实记录，但不会作为后续处理输入。
  */

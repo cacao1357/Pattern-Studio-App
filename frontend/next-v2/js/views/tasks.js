@@ -53,7 +53,7 @@ export function statusGroup(state) {
   return state === "failed" || state === "succeeded" || state === "cancelled" ? state : "other";
 }
 
-/** 任务和工作台之间的跳转目标：优先已发布产物，其次输入资产。 */
+/** 任务和工作台之间的跳转目标：优先已发布产物，其次输入纹样。 */
 export function taskTarget(job) {
   if (!job) return null;
   const assets = Array.isArray(job.result?.assets) ? job.result.assets : [];
@@ -332,7 +332,7 @@ function detailHtml(job) {
       <div class="kv__row"><dt>创建时间</dt><dd class="mono">${esc(formatTime(job.created_at, { withDate: true }))}</dd></div>
       <div class="kv__row"><dt>完成时间</dt><dd class="mono">${esc(formatTime(job.finished_at, { withDate: true }))}</dd></div>
       <div class="kv__row"><dt>尝试次数</dt><dd>第 ${Number(job.attempt || 1)} 次</dd></div>
-      <div class="kv__row"><dt>输入资产</dt><dd class="mono">${job.input_asset_id ? esc("#" + shortId(job.input_asset_id)) : "—"}</dd></div>
+      <div class="kv__row"><dt>输入纹样</dt><dd class="mono">${job.input_asset_id ? esc("#" + shortId(job.input_asset_id)) : "—"}</dd></div>
       ${
         job.retry_of
           ? `<div class="kv__row"><dt>重试自</dt><dd class="mono">#${esc(shortId(job.retry_of))}</dd></div>`

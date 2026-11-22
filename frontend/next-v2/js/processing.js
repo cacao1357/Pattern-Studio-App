@@ -4,7 +4,7 @@
    - 批次由服务端后台推进；这里只读取状态、提交新建/取消/人工续接，绝不另跑
      一套本地流程，也不自动续接或重试。
    - 人工门（裁切/修复/候选/蒙版）暂停该图，其余图片继续；界面只提供回到既有
-     工作台处理、再显式选择后代资产续接的入口。
+     工作台处理、再显式选择后代纹样续接的入口。
    - 预设编辑只影响之后的提交；每个批次保存提交时的快照。
    - 结果分组复用 /patterns，不新建第二份素材索引。
    ============================================================================= */
@@ -95,8 +95,8 @@ export const STEP_STATE_LABELS = {
 
 const BATCH_ERROR_TEXT = {
   BATCH_CLOUD_CONSENT_REQUIRED: "云端预设需要同时确认当批次上传与可能费用。",
-  BATCH_INPUT_KIND: "所选预设不能处理这个资产类型。",
-  BATCH_IMAGE_REQUIRED: "请选择属于已登记原图的输入资产。",
+  BATCH_INPUT_KIND: "所选预设不能处理这个纹样类型。",
+  BATCH_IMAGE_REQUIRED: "请选择属于已登记原图的输入纹样。",
   BATCH_RESUME_ASSET_MISMATCH: "这个结果不是当前版本的后代，或类型不符合这一步；请在工作台生成正确结果后再选。",
   BATCH_ITEM_NOT_WAITING: "这张图当前没有待确认的人工步骤，请刷新批次。",
   BATCH_ITEM_NOT_FOUND: "找不到这张图的批次项，请刷新。",
@@ -417,7 +417,7 @@ export function currentStep(item) {
   return steps[item.cursor] || steps[steps.length - 1] || null;
 }
 
-/* ------------------------------------------------------------------ 预设输入资产 */
+/* ------------------------------------------------------------------ 预设输入纹样 */
 
 export function compatibleInputAssets(group, options) {
   const recipe = normalizePresetOptions(options).recipe;
@@ -433,7 +433,7 @@ const createdMs = (value) => {
 };
 
 /**
- * 每张原图只选一个输入资产：优先调用方指定的当前版本（若类型兼容），
+ * 每张原图只选一个输入纹样：优先调用方指定的当前版本（若类型兼容），
  * 其次规范输入，最后选最新的兼容版本。绝不使用原图 original 作为处理输入。
  */
 export function pickInputAsset(group, options, preferredId = "") {
@@ -448,7 +448,7 @@ export function pickInputAsset(group, options, preferredId = "") {
   return normalizedKind || list[0];
 }
 
-/** 提交前的输入：每个原图组一个兼容资产；没有兼容资产的组不能选中。 */
+/** 提交前的输入：每个原图组一个兼容纹样；没有兼容纹样的组不能选中。 */
 export function batchInputs(groups, options, selectedImageIds, preferredInputs = {}) {
   const selected = selectedImageIds instanceof Set ? selectedImageIds : new Set(selectedImageIds || []);
   const inputs = [];
@@ -509,7 +509,7 @@ export function runValidation({ presetId, groups, selectedImageIds, options, con
   if (selected.size > 100) return "单个批次最多 100 张原图。";
   const { inputs, missing } = batchInputs(groups, options, selected);
   if (missing.length) return `有 ${missing.length} 张原图没有该预设可用的输入版本，请取消选择它们。`;
-  if (inputs.length !== selected.size) return "输入资产不完整，请重新选择原图。";
+  if (inputs.length !== selected.size) return "输入纹样不完整，请重新选择原图。";
   if (normalizePresetOptions(options).recipe === "cloud_lineart" && !(consentToUpload && consentToCharge)) {
     return "云端预设需要同时确认本批次上传与可能费用。";
   }
@@ -643,7 +643,7 @@ export function patternFor(imageId) {
 export function ensurePatternsForBatch(batch) {
   for (const item of batch?.items || []) {
     if (!item?.image_id) continue;
-    // 结果缩略图与人工门候选都需要这张原图的资产清单。
+    // 结果缩略图与人工门候选都需要这张原图的纹样清单。
     if (!(item.results || []).length && item.state !== "waiting") continue;
     const previous = processing.patterns.get(item.image_id);
     const changed = !previous || previous.resultCount !== (item.results || []).length;

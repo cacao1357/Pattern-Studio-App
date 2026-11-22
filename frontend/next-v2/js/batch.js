@@ -4,9 +4,9 @@
    - 工作台列不是纹样库的镜像：只有用户通过「添加纹样」或上传/导入加入的原图
      才会出现在这里；加入与移出只改工作台成员表，不删除纹样库记录。
    - 当前会话原图即使尚未加入，也会临时显示在列首，并提供「加入工作台」。
-   - 批量索引只服务于侧栏与导出选择，**不把别的原图资产塞进 store.session**；
+   - 批量索引只服务于侧栏与导出选择，**不把别的原图纹样塞进 store.session**；
      跨原图切换一律走 store 既有的会话隔离（api.go → ensureSession/openAsset）。
-   - 当前原图组优先读取 store.session 的实时资产；其它组读取 /workbench/items
+   - 当前原图组优先读取 store.session 的实时纹样；其它组读取 /workbench/items
      分页结果（只读，不提交任务、不改写会话）。
    - 上传逐个提交：每个文件单独成功/失败；已成功的文件不会因为重试或再次勾选而
      重复提交。批量近似版本只汇总提示，不自动删除或合并。
@@ -110,6 +110,9 @@ const state = {
   duplicates: [],
   lastImport: null,
 };
+
+// 清空期间已经发出的分页请求可能晚到，不能再写入已重置的列表。
+let workbenchIndexGeneration = 0;
 
 /* ------------------------------------------------------------------ 纯逻辑 */
 
@@ -333,7 +336,7 @@ function addToOrder(imageId) {
   if (!state.order.includes(imageId)) state.order.push(imageId);
 }
 
-/** 把当前会话的资产并入索引中的当前原图组；不移动别的组的资产。 */
+/** 把当前会话的纹样并入索引中的当前原图组；不移动别的组的纹样。 */
 export function syncSessionGroup() {
   const imageId = store.session.imageId;
   if (!imageId) return null;
@@ -401,6 +404,7 @@ export function duplicateSummary() {
 }
 
 export function resetBatchState() {
+  workbenchIndexGeneration += 1;
   succeededSignatures.clear();
   state.groups = new Map();
   state.members = new Set();
@@ -421,6 +425,7 @@ export function resetBatchState() {
 /** 从 /workbench/items 读一页用户选入工作台的原图组；只做索引，不改变当前会话。 */
 export async function loadWorkbenchPage({ append = false, onChange } = {}) {
   if (state.loading) return null;
+  const generation = workbenchIndexGeneration;
   state.loading = true;
   state.error = "";
   try {
@@ -428,6 +433,7 @@ export async function loadWorkbenchPage({ append = false, onChange } = {}) {
       limit: BATCH_PAGE_SIZE,
       cursor: append ? state.cursor : "",
     });
+    if (generation !== workbenchIndexGeneration) return null;
     const items = (page?.items || []).filter((item) => item?.image_id);
     if (!append) {
       // 第一页是权威集合：另一窗口移出的组不能继续留在本地。
@@ -439,7 +445,7 @@ export async function loadWorkbenchPage({ append = false, onChange } = {}) {
       const next = groupFromPattern(item);
       const existing = state.groups.get(item.image_id);
       if (existing) {
-        // 索引页比会话旧：保留会话里的实时资产，只补上分类/创建时间。
+        // 索引页比会话旧：保留会话里的实时纹样，只补上分类/创建时间。
         existing.assets = mergeAssets(next.assets, existing.assets);
         existing.name = existing.name || next.name;
         existing.createdAt = existing.createdAt || next.createdAt;
@@ -460,11 +466,12 @@ export async function loadWorkbenchPage({ append = false, onChange } = {}) {
     onChange?.({ reason: "loaded" });
     return page;
   } catch (error) {
+    if (generation !== workbenchIndexGeneration) return null;
     state.error = error?.message || "工作台纹样读取失败。";
     onChange?.({ reason: "error", error });
     return null;
   } finally {
-    state.loading = false;
+    if (generation === workbenchIndexGeneration) state.loading = false;
   }
 }
 
@@ -473,6 +480,16 @@ export function ensureBatchIndex({ onChange } = {}) {
   syncSessionGroup();
   if (state.loaded || state.loading) return Promise.resolve(null);
   return loadWorkbenchPage({ append: false, onChange });
+}
+
+export function workbenchIndexStatus() {
+  return { loaded: state.loaded, error: state.error };
+}
+
+export async function clearWorkbenchMembers() {
+  await api.clearWorkbenchItems();
+  resetBatchState();
+  state.loaded = true;
 }
 
 /** 把已经从 /patterns 读到的组直接并入工作台索引（不写会话）。 */
@@ -500,7 +517,7 @@ export async function addWorkbenchItems(items) {
   return result;
 }
 
-/** 移出工作台：只删成员关系，纹样与资产仍然保留在纹样库。 */
+/** 移出工作台：只删成员关系，纹样仍然保留在原图与纹样库。 */
 export async function removeWorkbenchMembers(imageIds) {
   const ids = [...new Set((imageIds || []).filter(Boolean))];
   if (!ids.length) return null;
@@ -778,6 +795,7 @@ export function forgetPatternGroup(imageId) {
  * 避免侧栏停在“还没有纹样”。当前会话组由 syncSessionGroup 重新补入。
  */
 export function reloadBatchIndex({ onChange } = {}) {
+  workbenchIndexGeneration += 1;
   state.groups = new Map();
   state.members = new Set();
   state.order = [];
@@ -807,7 +825,7 @@ export function isPatternCollapsed(imageId) {
 
 /**
  * 打开另一张原图：交给路由的 image 参数，由 app.applyParams → ensureSession
- * 建立新会话；不把两个原图的资产混在同一会话里。
+ * 建立新会话；不把两个原图的纹样混在同一会话里。
  */
 export function openPattern(imageId, api, stage = 1) {
   if (!imageId) return false;
@@ -850,7 +868,7 @@ function thumbHtml(asset, { current, currentId, imageId, version, versions, inSe
   const label = kindLabel(asset.kind);
   const versionText = versions > 1 ? ` · v${version}` : "";
   // 当前原图组里也可能有未载入本会话的历史版本：那种缩略图必须走 openAsset
-  // 深链把它重新读进会话，不能只改 currentAssetId 指向一个会话里不存在的资产。
+  // 深链把它重新读进会话，不能只改 currentAssetId 指向一个会话里不存在的纹样。
   const useSessionAction = current && inSession;
   const removable = useSessionAction && !SESSION_BASE_KINDS.has(asset.kind);
   return `

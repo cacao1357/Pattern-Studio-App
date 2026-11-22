@@ -9,7 +9,7 @@
        mount(root, state, api, params) {},
        unmount() {},
      }
-   数据来自本机服务 /api/v1：服务状态、设置、会话资产在 store.js，
+   数据来自本机服务 /api/v1：服务状态、设置、会话纹样在 store.js，
    视图自行通过 js/api.js 发起读写。界面仍是静态 HTML + ES Modules，无构建步骤。
    ============================================================================= */
 
@@ -43,9 +43,22 @@ const state = {
   brush: 24,
   cmdkOpen: false,
   uploading: false,
+  workbenchEntry: false,
   /** 最近一次深链目标载入失败：{ image, asset, message }；工作台据此立即显示错误。 */
   targetError: null,
 };
+
+const WORKBENCH_RESUME_KEY = "pattern-studio.next-v2.workbench-resume";
+
+function saveWorkbenchLocation(params) {
+  try {
+    const { image, asset } = loadTarget(params);
+    if (image || asset) localStorage.setItem(WORKBENCH_RESUME_KEY, params.toString());
+    else localStorage.removeItem(WORKBENCH_RESUME_KEY);
+  } catch {
+    // 浏览器禁用本地存储时，仍可从地址栏或工作台列表继续。
+  }
+}
 
 const api = {
   get state() {
@@ -70,6 +83,31 @@ const api = {
   resetTarget() {
     lastAppliedTarget = null;
     lastHash = null;
+  },
+  continueWorkbench() {
+    const { image, asset } = loadTarget(parseHash().params);
+    state.workbenchEntry = false;
+    lastHash = null;
+    renderView();
+    if (!image && !asset) syncWorkbenchUrl();
+  },
+  workbenchResumeQuery() {
+    try {
+      return Object.fromEntries(new URLSearchParams(localStorage.getItem(WORKBENCH_RESUME_KEY) || ""));
+    } catch {
+      return {};
+    }
+  },
+  forgetWorkbenchLocation() {
+    saveWorkbenchLocation(new URLSearchParams());
+  },
+  startWorkbench() {
+    state.workbenchEntry = false;
+    this.resetTarget();
+    this.set({ targetError: null, stage: 1, compare: false, zoom: "fit", tile: "2x2" });
+    this.forgetWorkbenchLocation();
+    history.replaceState(null, "", "#/workbench");
+    renderView();
   },
   render() {
     renderView();
@@ -150,7 +188,7 @@ export function shouldLoadTarget(next, previous, session = null) {
   if (!previous) return true;
   if (next.asset) {
     if (next.asset !== previous.asset) return true;
-    // 同一资产但 URL 明确换了图片：按新目标打开，避免跨图错配。
+    // 同一纹样但 URL 明确换了图片：按新目标打开，避免跨图错配。
     return Boolean(next.image && previous.image && next.image !== previous.image);
   }
   if (!next.image) return false;
@@ -162,13 +200,11 @@ export function shouldLoadTarget(next, previous, session = null) {
 let lastAppliedTarget = null;
 
 /** 深链目标不存在时给用户看得懂的话，而不是 404/422 的接口措辞。 */
-function targetErrorMessage(error, kind) {
+function targetErrorMessage(error) {
   if (error?.status === 404 || error?.status === 422) {
-    return kind === "asset"
-      ? "没有找到这个资产，链接可能已失效。"
-      : "没有找到这张纹样，链接可能已失效。";
+    return "没有找到这个纹样，链接可能已失效。";
   }
-  return error?.message || (kind === "asset" ? "载入资产失败。" : "载入纹样失败。");
+  return error?.message || "载入纹样失败。";
 }
 
 function applyParams(params, route) {
@@ -183,18 +219,20 @@ function applyParams(params, route) {
     lastAppliedTarget = target;
     state.targetError = null;
     if (target.asset) {
-      // 从纹样库/首页带着具体资产进来：必须载入该资产及其同图来源，
-      // 不能只改 currentAssetId（会话资产里可能还没有它）。
+      // 从纹样库/首页带着具体纹样进来：必须载入该纹样及其同图来源，
+      // 不能只改 currentAssetId（会话纹样里可能还没有它）。
       // openAsset 在请求被更新的加载/会话取代时返回 null；此时不 refresh、不报错。
       store
         .openAsset(target.asset)
         .then((opened) => {
-          if (opened) api.refresh();
+          if (!opened) return;
+          if (lastAppliedTarget === target) syncWorkbenchUrl();
+          api.refresh();
         })
         .catch((error) => {
           // 真正失败时允许下一次 hash 变化重试；成功的会话不在这里重置。
           if (lastAppliedTarget === target) lastAppliedTarget = previousTarget;
-          api.toast(targetErrorMessage(error, "asset"), "warn");
+          api.toast(targetErrorMessage(error), "warn");
         });
     } else {
       store
@@ -202,12 +240,13 @@ function applyParams(params, route) {
         .then((session) => {
           if (session) {
             state.targetError = null;
+            if (lastAppliedTarget === target) syncWorkbenchUrl();
             api.refresh();
           }
         })
         .catch((error) => {
           if (lastAppliedTarget === target) lastAppliedTarget = previousTarget;
-          const message = targetErrorMessage(error, "image");
+          const message = targetErrorMessage(error);
           state.targetError = { image: target.image, asset: "", message };
           api.toast(message, "warn");
           // 立即重绘工作台：render() 会读取 targetError 并把加载态换成错误态。
@@ -229,12 +268,12 @@ async function resolveView(route) {
 }
 
 /**
- * 工作台内的工序/资产/对比/平铺变化同步回地址栏。
+ * 工作台内的工序/纹样/对比/平铺变化同步回地址栏。
  * 用 replaceState 不产生历史记录；同时更新 lastHash，避免下一次重绘把这次
  * 同步当成新的深链再载入一遍。
  */
 function syncWorkbenchUrl() {
-  if (state.route !== "workbench") return;
+  if (state.route !== "workbench" || state.workbenchEntry) return;
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
   if (store.session.imageId) params.set("image", store.session.imageId);
   else params.delete("image");
@@ -246,6 +285,7 @@ function syncWorkbenchUrl() {
   else params.delete("compare");
   if (state.tile === "3x3") params.set("tile", "3x3");
   else params.delete("tile");
+  saveWorkbenchLocation(params);
   const next = `#/workbench?${params.toString()}`;
   if (location.hash !== next) {
     history.replaceState(null, "", next);
@@ -294,9 +334,19 @@ let paintedRoute = null;
 function renderView() {
   const { route, params } = parseHash();
   const hash = location.hash || "#/home";
+  const nav = route !== paintedRoute;
+  const firstPaint = paintedRoute === null;
+  const { image, asset } = loadTarget(params);
+  const reloading = firstPaint && performance.getEntriesByType("navigation")[0]?.type === "reload";
+  if (nav) {
+    state.workbenchEntry = route === "workbench" && ((!image && !asset) || reloading);
+  } else if (hash !== lastHash && lastHash !== null && (image || asset)) {
+    // 用户从纹样库或其他入口打开了指定纹样。
+    state.workbenchEntry = false;
+  }
   if (hash !== lastHash) {
     lastHash = hash;
-    applyParams(params, route);
+    if (!state.workbenchEntry) applyParams(params, route);
   }
   state.route = route;
   syncNav(route);
@@ -306,8 +356,6 @@ function renderView() {
   // 直接换掉内容，避免整页淡入/闪动反复打断注意力。
   // 用路由名而不是完整 hash 判断：抽屉关闭等操作会用 replaceState 清理查询串，
   // 那不属于换页，不应再播一次过渡。
-  const nav = route !== paintedRoute;
-  const firstPaint = paintedRoute === null;
   paintedRoute = route;
 
   const paint = async () => {
@@ -434,7 +482,7 @@ const COMMANDS = [
   })),
   { group: "操作", label: "八道工序导览", hint: "", icon: "play", run: () => api.go("home", { query: { tour: 1 } }) },
   { group: "操作", label: "上传纹样", hint: "", icon: "upload", run: () => pickUpload() },
-  { group: "操作", label: "对比原图与当前资产", hint: "C", icon: "compare", run: () => api.go("workbench", { query: { compare: 1 } }) },
+  { group: "操作", label: "对比原图与当前纹样", hint: "C", icon: "compare", run: () => api.go("workbench", { query: { compare: 1 } }) },
   { group: "操作", label: "平铺 2 × 2", hint: "", icon: "tile", run: () => api.go("workbench", { query: { stage: 8, tile: "2x2" } }) },
   { group: "操作", label: "平铺 3 × 3", hint: "", icon: "tile", run: () => api.go("workbench", { query: { stage: 8, tile: "3x3" } }) },
   { group: "操作", label: "打包导出", hint: "", icon: "download", run: () => api.go("workbench", { query: { stage: 8 } }) },
@@ -729,7 +777,7 @@ function bindShell() {
     }
     if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
 
-    if (state.route !== "workbench") return;
+    if (state.route !== "workbench" || state.workbenchEntry) return;
     if (/^[1-8]$/.test(event.key)) {
       const stage = Number(event.key);
       // 08 平铺不支持对比；键盘切过去时和点击一样关掉对比。

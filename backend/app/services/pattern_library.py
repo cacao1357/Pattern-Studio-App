@@ -4,14 +4,21 @@ from __future__ import annotations
 
 import json
 import unicodedata
+from io import BytesIO
 from uuid import UUID, uuid4
 
+from PIL import Image
+
+from app.services import quality
 from app.storage import ServiceError, now
+from app.services.provenance import normalize_provenance
 from app.workbench_store import page_offset
 
 
 MAX_CATEGORIES = 200
 MAX_CATEGORY_NAME = 60
+GRADE_MANUAL_VERSION = "manual-v1"
+GRADE_VALUES = {"A", "B", "C", "U"}
 
 
 class PatternLibrary:
@@ -176,6 +183,53 @@ class PatternLibrary:
             if cursor is None:
                 return assets
 
+    def update_meta(self, image_id, *, grade="", source_type=None, source_name=None, source_url=None, source_note=None):
+        """Edit the original image's declaration and keep asset snapshots intact."""
+        image_id = self._image_id(image_id)
+        grade = str(grade or "").strip().upper()
+        if grade and grade not in GRADE_VALUES:
+            raise ServiceError("INVALID_GRADE", "Grade must be A, B, C or U", 422)
+        note = source_note.strip() if source_note is not None else None
+        if note is not None and (len(note) > 1000 or any(ord(ch) < 32 for ch in note)):
+            raise ServiceError("INVALID_PROVENANCE", "source_note must be one line up to 1000 characters", 422)
+        with self.store.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            image = db.execute("SELECT * FROM images WHERE id=?", (image_id,)).fetchone()
+            if image is None:
+                raise ServiceError("IMAGE_NOT_FOUND", "Pattern not found", 404)
+            meta = db.execute("SELECT * FROM image_meta WHERE image_id=?", (image_id,)).fetchone()
+            if meta is None:
+                _, original = self.store.read_asset(image["original_id"])
+                _, normalized = self.store.read_asset(image["normalized_id"])
+                content_id = quality.content_id_of(original)
+                with Image.open(BytesIO(normalized)) as pixels:
+                    measured = quality.analyze(pixels)
+                self.store.insert_image_meta(db, image_id, {
+                    **measured, "content_id": content_id, "split": quality.assign_split(content_id),
+                }, image["created_at"])
+                meta = db.execute("SELECT * FROM image_meta WHERE image_id=?", (image_id,)).fetchone()
+            source = normalize_provenance({
+                "source_type": meta["source_type"] if source_type is None else source_type,
+                "source_name": meta["source_name"] if source_name is None else source_name,
+                "source_url": meta["source_url"] if source_url is None else source_url,
+                "license": meta["license"],
+                "collected_at": meta["collected_at"],
+            })
+            note = image["source_note"] if note is None else note
+            source_fields = ("source_type", "source_name", "source_url", "license", "collected_at", "provenance_status")
+            updated = {field: source[field] for field in source_fields}
+            updated["grade"] = grade or meta["grade"]
+            updated["grade_version"] = GRADE_MANUAL_VERSION if grade else meta["grade_version"]
+            db.execute("UPDATE images SET source_note=? WHERE id=?", (note, image_id))
+            db.execute(
+                """UPDATE image_meta SET grade=:grade,grade_version=:grade_version,source_type=:source_type,
+                       source_name=:source_name,source_url=:source_url,provenance_status=:provenance_status
+                   WHERE image_id=:image_id""",
+                {**updated, "image_id": image_id},
+            )
+            db.commit()
+        return {"image_id": image_id, "source_note": note, "meta": updated}
+
     def _pattern(self, image_id, *, supplied_assets=None, image_record=None):
         image_id = self._image_id(image_id)
         record = image_record if image_record is not None else self.store.get_image(image_id)
@@ -187,10 +241,16 @@ class PatternLibrary:
         with self.store.connection() as db:
             category_rows = self._categories(db, image_id)
             revision_row = db.execute("SELECT revision FROM pattern_category_revisions WHERE image_id=?", (image_id,)).fetchone()
+            meta_row = db.execute(
+                """SELECT grade,grade_version,source_type,source_name,source_url,license,provenance_status
+                   FROM image_meta WHERE image_id=?""", (image_id,)
+            ).fetchone()
         return {"image_id": image_id, "original_asset_id": original["asset_id"],
                 "normalized_asset_id": normalized["asset_id"], "name": filename,
                 "created_at": record["created_at"], "assets": sorted(assets, key=lambda item: item.get("created_at", ""), reverse=True),
                 "categories": category_rows, "category_ids": [item["category_id"] for item in category_rows],
+                "meta": dict(meta_row) if meta_row is not None else {},
+                "source_note": record.get("source_note", ""),
                 "revision": revision_row[0] if revision_row else 0}
 
     def get_pattern(self, image_id):

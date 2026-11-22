@@ -491,6 +491,12 @@
   }
 }
 
+/* 勾选、切预设等局部重绘不重播入场动画：只在首次打开时淡入一次。 */
+.bx__panel.is-repaint,
+.pf-modal.is-repaint {
+  animation: none;
+}
+
 .bx__head {
   display: flex;
   align-items: flex-start;
@@ -1947,33 +1953,6 @@
   font-size: var(--text-label);
   line-height: 1.7;
   color: var(--text-2);
-}
-
-.pf-consents {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 9px 11px;
-  border: 1px solid var(--line-1);
-  border-radius: var(--r-sm);
-}
-
-.pf-consent {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  font-size: var(--text-label);
-  line-height: 1.7;
-  color: var(--text-2);
-  cursor: pointer;
-}
-
-.pf-consent input {
-  width: 15px;
-  height: 15px;
-  margin-top: 3px;
-  accent-color: var(--cinnabar);
-  flex: none;
 }
 
 /* 预设管理 */

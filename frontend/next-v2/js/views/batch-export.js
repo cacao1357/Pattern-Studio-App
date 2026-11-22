@@ -374,6 +374,7 @@ function paint({ focusSelector = "" } = {}) {
   const template = document.createElement("template");
   template.innerHTML = exportModalHtml(model()).trim();
   const next = template.content.firstElementChild;
+  next.querySelector(".bx__panel")?.classList.add("is-repaint");
   current.replaceWith(next);
   modal.el = next;
   bind();

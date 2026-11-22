@@ -1,6 +1,7 @@
 // New workbench integration smoke: isolated data, real local worker, no cloud calls.
 // Run: node scripts/validate_v2_integration.mjs D:/CondaEnvs/pattern-studio/python.exe
 // --pages-only checks all pages plus layout; --layout-only checks responsive assets and drawer.
+// --entry-only checks workbench resume and starting fresh without deleting library versions.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
@@ -18,6 +19,7 @@ const archiveOnly = process.argv.includes("--archive-only");
 const sessionOnly = process.argv.includes("--session-only");
 const layoutOnly = process.argv.includes("--layout-only");
 const batchOnly = process.argv.includes("--batch-only");
+const entryOnly = process.argv.includes("--entry-only");
 const pagesOnly = batchOnly || layoutOnly || process.argv.includes("--pages-only");
 let fixture, browser, socket;
 
@@ -103,7 +105,8 @@ try {
     }
     const diagnostic = await evaluate("({stage:document.querySelector('.wb')?.dataset.stage,error:document.querySelector('.wb-error')?.textContent,notice:document.querySelector('.wb-note')?.textContent,layers:[...document.querySelectorAll('[data-act=layer]')].map(e=>({id:e.dataset.id,on:e.getAttribute('aria-pressed')})),compose:document.querySelector('[data-act=compose-layers]')?.outerHTML})");
     const batchDiagnostic = batchOnly ? await evaluate("({error:document.querySelector('.pf-error')?.textContent,run:document.querySelector('.pf-run')?.innerText?.slice(-1400)})") : undefined;
-    throw new Error("UI timeout: " + label + " " + JSON.stringify({ diagnostic, batchDiagnostic, errors, requests: requests.slice(-12) }));
+    const route = await evaluate("({hash: location.hash, stage: document.querySelector('.wb')?.dataset.stage, entry: Boolean(document.querySelector('.wb-entry'))})");
+    throw new Error("UI timeout: " + label + " " + JSON.stringify({ route, diagnostic, batchDiagnostic, errors, requests: requests.slice(-12) }));
   };
   const check = (label) => { checks.push(label); console.log("PASS " + label); };
   const click = (id) => evaluate(`document.getElementById(${JSON.stringify(id)}).click()`);
@@ -111,6 +114,62 @@ try {
 
 
   await call("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  if (entryOnly) {
+    const reload = async () => {
+      const before = await evaluate("performance.timeOrigin");
+      await call("Page.reload");
+      await waitFor(`performance.timeOrigin !== ${before}`, "new document after reload");
+    };
+    const url = info.url + "/#/workbench?asset=" + info.input_asset_id + "&stage=3&v=2";
+    await call("Page.navigate", { url });
+    const currentStage = "document.querySelector('.wb')?.dataset.stage === 'repair'";
+    await waitFor(currentStage, "direct link opens without a prompt");
+    const group = await evaluate(`fetch('/api/v1/patterns').then(r=>r.json()).then(p=>p.items[0])`);
+    assert.ok(group.assets.length > 2);
+    const added = await evaluate(`import('/js/api.js').then(({api})=>api.addWorkbenchItems([${JSON.stringify(group.image_id)}]))`);
+    assert.deepEqual(added.added, [group.image_id]);
+    await reload();
+    await waitFor("Boolean(document.querySelector('[data-entry=continue]'))", "resume prompt after reload");
+    await evaluate("document.querySelector('[data-entry=continue]').click()");
+    await waitFor(currentStage, "resume prior stage");
+    await waitFor(`import('/js/store.js').then(m=>m.store.session.currentAssetId===${JSON.stringify(info.input_asset_id)})`, "resume prior asset");
+
+    await evaluate("location.hash='#/library'");
+    await waitFor("document.querySelector('[data-act=assign]')", "library route");
+    await reload();
+    await waitFor("document.querySelector('[data-act=assign]')", "library reload");
+    await evaluate("location.hash='#/workbench'");
+    await waitFor("Boolean(document.querySelector('[data-entry=new]'))", "prompt on workbench navigation");
+    await evaluate("document.querySelector('[data-entry=continue]').click()");
+    await waitFor(currentStage, "resume prior stage from generic entry");
+    await evaluate("location.hash='#/library'");
+    await waitFor("document.querySelector('[data-act=assign]')", "library route after resume");
+    await evaluate("location.hash='#/workbench'");
+    await waitFor("Boolean(document.querySelector('[data-entry=new]'))", "prompt on return to workbench");
+    await evaluate(`(() => {
+      const fetch = window.fetch;
+      window.fetch = (...args) => {
+        if (!String(args[0]).endsWith('/workbench/items/all')) return fetch(...args);
+        window.fetch = fetch;
+        return Promise.resolve(Response.json({error: {code: 'SERVICE_ERROR'}}, {status: 500}));
+      };
+      document.querySelector('[data-entry=new]').click();
+    })()`);
+    await waitFor("document.querySelector('[data-entry=new]')?.disabled === false && document.querySelector('#toasts').textContent.includes('无法清空工作台')", "failed clear keeps the entry choice");
+    assert.equal(await evaluate("fetch('/api/v1/workbench/items').then(r=>r.json()).then(p=>p.items.length)"), 1);
+    await evaluate("document.querySelector('[data-entry=new]').click()");
+    await waitFor("document.querySelector('.wb') && !document.querySelector('[data-pattern]')", "fresh workbench is empty");
+    assert.equal(await evaluate("fetch('/api/v1/workbench/items').then(r=>r.json()).then(p=>p.items.length)"), 0);
+    const saved = await evaluate(`fetch('/api/v1/patterns/${group.image_id}').then(r=>r.json())`);
+    assert.deepEqual(saved.assets.map(a=>a.asset_id), group.assets.map(a=>a.asset_id));
+    await reload();
+    await waitFor("document.querySelector('.wb') && !document.querySelector('[data-pattern]')", "empty workbench opens directly after reload");
+    await evaluate(`location.hash='#/workbench?image=${group.image_id}&asset=${info.input_asset_id}&stage=3&v=2'`);
+    await waitFor(currentStage, "saved pattern can be opened again");
+    assert.equal(errors.length, 0, JSON.stringify(errors));
+    check("workbench prompts on return and reload, restores the asset and stage, and keeps every library version after starting fresh");
+    await call("Browser.close",{},false);
+  } else {
   if (batchOnly) {
     await call("Page.navigate", { url: info.url + "/#/workbench?asset=" + info.input_asset_id + "&stage=1&v=2" });
     await waitFor("Boolean(document.querySelector('[data-act=batch-import]'))", "batch workbench entry");
@@ -448,6 +507,7 @@ try {
   check("page has no exceptions and sends no cloud-generation requests");
   await writeFile(path.join(output,"browser-checks.json"),JSON.stringify({checks,model,isolated,cloudGenerationRequests:0,pageErrors:errors},null,2));
   await call("Browser.close",{},false);
+  }
 } finally {
   socket?.close();fixture?.kill();
   await stopOwnedBrowser();

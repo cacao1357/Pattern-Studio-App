@@ -26,7 +26,7 @@ const CODE_MESSAGES = {
   PIXEL_LIMIT: "图片像素超过上限，请先创建工作副本。",
   UNSUPPORTED_FORMAT: "不支持这种图片格式，请使用 PNG 或 JPEG。",
   FORMAT_MISMATCH: "文件内容与扩展名不一致。",
-  NOT_FOUND: "没有找到对应的资产或任务。",
+  NOT_FOUND: "没有找到对应的纹样或任务。",
   INVALID_REQUEST: "请求参数不符合接口约定。",
   INVALID_SETTINGS: "设置校验未通过，请检查填写内容。",
   STALE_SETTINGS: "设置已被其他操作更新，请刷新后重新保存。",
@@ -35,6 +35,8 @@ const CODE_MESSAGES = {
   CATEGORY_LIMIT: "题材分类最多 200 个，请先删除不用的分类。",
   CATEGORY_NOT_FOUND: "找不到这个题材分类，可能已被删除。",
   INVALID_CATEGORY_NAME: "分类名需要 1–60 个字符，且不能包含控制字符。",
+  INVALID_GRADE: "等级只能选 A、B、C 或未评定。",
+  INVALID_PROVENANCE: "来源字段不符合要求：链接只接受 http(s) 地址，且不能包含控制字符。",
   IMAGE_NOT_FOUND: "没有找到这张原图，可能已被移除。",
   PATTERN_BUSY: "这张纹样还有排队或进行中的任务；完成或取消后再删除。",
   PATTERN_IN_BATCH: "这张纹样正在批处理中；先取消该批次再删除。",
@@ -43,10 +45,10 @@ const CODE_MESSAGES = {
   EXPORT_SIZE_LIMIT: "所选文件超过 128 MiB 导出上限，请少选几个。",
   EXPORT_LAYOUT_INVALID: "导出目录布局不受支持。",
   NESTED_EXPORT: "不能把已有的 ZIP 再打包一次，请只选图片或 SVG。",
-  LICENSE_REVIEW_REQUIRED: "所选资产里有未登记的许可证，请先确认许可提示再导出。",
-  BATCH_CLOUD_CONSENT_REQUIRED: "云端预设需要同时确认本批次上传与可能费用，两项都不默认勾选。",
-  BATCH_INPUT_KIND: "所选预设不能处理这个资产类型，请换一个输入版本。",
-  BATCH_IMAGE_REQUIRED: "请选择属于已登记原图的输入资产。",
+  LICENSE_REVIEW_REQUIRED: "所选纹样里有未登记的许可证；导出清单会记录本次导出，请自行确认授权。",
+  BATCH_CLOUD_CONSENT_REQUIRED: "云端批次需要确认本批次上传与可能费用。",
+  BATCH_INPUT_KIND: "所选预设不能处理这个纹样类型，请换一个输入版本。",
+  BATCH_IMAGE_REQUIRED: "请选择属于已登记原图的输入纹样。",
   BATCH_RESUME_ASSET_MISMATCH: "这个结果不是当前版本的后代，或类型不符合这一步；请在工作台生成正确结果后再选。",
   BATCH_ITEM_NOT_WAITING: "这张图当前没有待确认的人工步骤，请刷新批次。",
   BATCH_ITEM_NOT_FOUND: "找不到这张图的批次项，请刷新批次。",
@@ -73,10 +75,10 @@ const CODE_MESSAGES = {
   VECTOR_PALETTE_LIMIT: "颜色数超过所选上限，请调低颜色数或简化图片。",
   AI_PIPELINE_NOT_FOUND: "找不到对应的云端流程。",
   PIPELINE_NOT_FOUND: "找不到对应的处理流程。",
-  SEAM_OBSERVATION_CONFLICT: "接缝记录已被更新，请重新读取资产后再保存。",
-  SEAM_OBSERVATION_NOT_TILE: "这个资产不是平铺结果，不能记录接缝。",
+  SEAM_OBSERVATION_CONFLICT: "接缝记录已被更新，请重新读取纹样后再保存。",
+  SEAM_OBSERVATION_NOT_TILE: "这个纹样不是平铺结果，不能记录接缝。",
   TILE_NOT_READY: "平铺结果尚未生成完成。",
-  SVG_INPUT_REQUIRED: "当前资产不是可编辑的 SVG；请先完成矢量化，或从历史版本重开一个 SVG。",
+  SVG_INPUT_REQUIRED: "当前纹样不是可编辑的 SVG；请先完成矢量化，或从历史版本重开一个 SVG。",
   SVG_EDIT_UNSUPPORTED: "这个 SVG 存在无法安全拆分的重叠或复杂结构；原文件保留，可使用外部矢量编辑器处理。",
   SVG_EDIT_COMPLEXITY: "SVG 超出安全编辑的复杂度限制；请减少单次改动，或使用外部矢量编辑器处理复杂图形，原文件保留。",
   SVG_ELEMENT_NOT_FOUND: "有图形在当前 SVG 版本里不存在（可能来自旧草稿）；请重新读取后再编辑。",
@@ -92,7 +94,7 @@ const CODE_MESSAGES = {
   LEFTREFILL_EMPTY_MASK: "修复框内没有可修复的内容（损伤蒙版为空）；请调整修复区域后重试。",
   PROVIDER_BUSY: "已有一个云端请求在运行，请等待它结束后再试。",
   PROVIDER_DISABLED: "云端尚未就绪，请先在设置里完成 API Key 与调用许可。",
-  PROVIDER_INPUT_KIND: "当前资产不能作为这次云端请求的输入，请先切换到接口支持的输入类型。",
+  PROVIDER_INPUT_KIND: "当前纹样不能作为这次云端请求的输入，请先切换到接口支持的输入类型。",
   PROVIDER_INPUT_DIMENSIONS: "输入的像素或长宽比不在云端允许范围内。",
   NORMALIZED_TOO_LARGE: "云端输入文件超过 20 MB；请先创建工作副本或压缩后再上传。",
   NEEDS_RECONCILIATION: "上一次云端调用的结果尚未确认；请先在任务记录中核对，不会自动重发。",
@@ -263,7 +265,7 @@ export const api = {
     });
   },
 
-  /* --- 资产 --- */
+  /* --- 纹样 --- */
   assets: ({ limit = 20, cursor = "", q = "", kinds = [], ...rest } = {}) => {
     const query = new URLSearchParams({ limit: String(limit) });
     if (cursor) query.set("cursor", cursor);
@@ -272,7 +274,7 @@ export const api = {
     return request(`/assets?${query}`, rest);
   },
 
-  /* --- 纹样分组与手动分类（接口合同见 docs/batch-workbench-contract.md） --- */
+  /* --- 纹样分组与手动分类（接口合同见 docs/contracts/batch-workbench-contract.md） --- */
   patterns: ({ limit = 20, cursor = "", q = "", kind = "", categoryId = "", ...rest } = {}) => {
     const query = new URLSearchParams({ limit: String(limit) });
     if (cursor) query.set("cursor", cursor);
@@ -292,6 +294,7 @@ export const api = {
     request("/workbench/items", { method: "POST", json: { image_ids: [...imageIds] } }),
   removeWorkbenchItems: (imageIds) =>
     request("/workbench/items", { method: "DELETE", json: { image_ids: [...imageIds] } }),
+  clearWorkbenchItems: () => request("/workbench/items/all", { method: "DELETE" }),
   patternCategories: (options) => request("/pattern-categories", options),
   createPatternCategory: (name) =>
     request("/pattern-categories", { method: "POST", json: { name } }),
@@ -301,6 +304,8 @@ export const api = {
     request(`/pattern-categories/${enc(categoryId)}?revision=${enc(revision)}`, { method: "DELETE" }),
   setPatternCategories: (imageId, payload) =>
     request(`/patterns/${enc(imageId)}/categories`, { method: "PUT", json: payload }),
+  updatePatternMeta: (imageId, payload) =>
+    request(`/patterns/${enc(imageId)}`, { method: "PATCH", json: payload }),
   asset: (assetId, options) => request(`/assets/${enc(assetId)}`, options),
   svgElements: (assetId, options) => request(`/assets/${enc(assetId)}/svg-elements`, options),
   assetPreviewUrl: (assetId, stamp = "") =>
@@ -378,7 +383,7 @@ export const api = {
       headers: { "Idempotency-Key": idempotencyKey() },
     }),
 
-  /* --- 流程预设与持久批次（接口合同见 docs/batch-workbench-contract.md） --- */
+  /* --- 流程预设与持久批次（接口合同见 docs/contracts/batch-workbench-contract.md） --- */
   workflowPresets: (options) => request("/workflow-presets", options),
   createWorkflowPreset: (payload) =>
     request("/workflow-presets", { method: "POST", json: payload }),

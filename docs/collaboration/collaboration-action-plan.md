@@ -4,7 +4,7 @@
 
 状态：讨论共识已确认；本文件为后续实施方案，不表示功能已实现或质量验收已通过。
 
-实施进展：A 的设置、公共云端接口、工作流快照与局部恢复基础已落地，见 [A 实施与交接记录](a-implementation-status.md) 和 [接口合同](a-interface-contract.md)。B/C 的算法交付、真实提示词实验和共同质量验收继续按下列阶段推进。
+实施进展：A 的设置、公共云端接口、工作流快照与局部恢复基础已落地，见 [A 实施与交接记录](a-implementation-status.md) 和 [接口合同](../contracts/a-interface-contract.md)。B/C 的算法交付、真实提示词实验和共同质量验收继续按下列阶段推进。
 
 ## 1. 目标与方向
 
@@ -15,7 +15,7 @@
 - 按阶段及出口条件推进，不设周数和日期承诺。
 - 当前只使用云端图像模型及现有本地图像算法，不安排自有模型训练、云 GPU 或新供应商接入。
 - 三人各负责完整功能链，负责人另外承担整合与兜底。
-- 保持现有前端，补齐功能对接和设置界面，视觉美化后置。（2026-11-10：新版前端已完成并接入本机服务，旧前端文件原地保留、通过 `/legacy/` 只读对照；接入提交 `016197b` 已于 2026-11-11 合并 `main`，见 [前端接入说明](frontend-integration.md)。）
+- 保持现有前端，补齐功能对接和设置界面，视觉美化后置。（2026-11-10：新版前端已完成并接入本机服务，旧前端文件原地保留、通过 `/legacy/` 只读对照；接入提交 `016197b` 已于 2026-11-11 合并 `main`，见 [前端接入说明](../guides/frontend-integration.md)。）
 - 在现有后端实现轻量工作流，不引入 ComfyUI 作为运行依赖，也不自研节点拖拽编辑器。
 
 保留未来模型替换的接口边界即可，不为后续训练预建完整平台。纲领中的训练、权重交付和按周里程碑不属于本轮验收。
@@ -36,13 +36,13 @@
 
 主要代码入口：
 
-- [云端适配](../backend/app/providers/seedream.py)
-- [配置](../backend/app/config.py)
-- [辅助处理流程](../backend/app/services/assisted_workbench.py)
-- [局部修复流程](../backend/app/services/finishing_workbench.py)
-- [矢量化](../backend/app/services/vector.py)
-- [任务与资产存储](../backend/app/workbench_store.py)
-- [前端逻辑](../frontend/workbench.js)
+- [云端适配](../../backend/app/providers/seedream.py)
+- [配置](../../backend/app/config.py)
+- [辅助处理流程](../../backend/app/services/assisted_workbench.py)
+- [局部修复流程](../../backend/app/services/finishing_workbench.py)
+- [矢量化](../../backend/app/services/vector.py)
+- [任务与资产存储](../../backend/app/workbench_store.py)
+- [前端逻辑](../../frontend/workbench.js)
 
 不要把“代码中存在流程”或“产物生成成功”当作真实素材质量已经达标。
 
@@ -61,7 +61,7 @@
 
 批量处理、复杂实物透视、严重遮挡补全、连续纹样拼接、新增复杂重绘、模型训练、共享服务、多用户权限、通用工作流平台及前端美化。
 
-2026-11-14 范围更新：用户另行确认将批量导入、按原图分组、多分类管理、批量导出浮窗及可保存处理预设纳入本次工作台改进；见[批量工作台契约](batch-workbench-contract.md)。其余后置事项不随之启动，提取和矢量算法仍沿用原实现。
+2026-11-14 范围更新：用户另行确认将批量导入、按原图分组、多分类管理、批量导出浮窗及可保存处理预设纳入本次工作台改进；见[批量工作台契约](../contracts/batch-workbench-contract.md)。其余后置事项不随之启动，提取和矢量算法仍沿用原实现。
 
 ### 质量原则
 

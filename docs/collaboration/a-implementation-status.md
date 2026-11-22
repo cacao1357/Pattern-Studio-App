@@ -1,5 +1,7 @@
 # A 实施与交接记录
 
+当前整理、文件去向及验证见 [2026-11-22 整理记录](maintenance-2026-11-22.md)。
+
 ## 2026-11-16 本地修复图块回填整图
 
 用户反馈裁切修复只得到局部图，本次补齐 A 负责的接受结果与整图集成，不修改成员模型或生成算法。新增 `services/repair_restore.py`，按原尺寸裁切链累计坐标，在接受本地候选时仅回填编辑蒙版内像素，保留完整画布的其余 RGBA；接受资产使用完整尺寸与坐标系，记录来源与局部框，现有前端采纳后自动切到整图。支持连续裁切，来源含旋转/缩放或无效坐标时在提交前明确拒绝，不消耗推理；外部裁切且未上传完整原图的输入无法回填。候选预览保持局部图，原图与旧结果不覆盖。
@@ -8,7 +10,7 @@
 
 ## 2026-11-16 中期报告对应的系统改进
 
-本轮用户确认兼顾效果与演示完整性，仅改系统，沿用现有模型及矢量生成算法。SVG 视觉独立图形选择、移动、删除、撤销重做、保存新版本、按图历史重开及同坐标透明叠加已实现，契约见 [SVG 编辑与核验](svg-editing-contract.md)。原图、既有结果及未跟踪中期报告保留，未提交、推送或合并。
+本轮用户确认兼顾效果与演示完整性，仅改系统，沿用现有模型及矢量生成算法。SVG 视觉独立图形选择、移动、删除、撤销重做、保存新版本、按图历史重开及同坐标透明叠加已实现，契约见 [SVG 编辑与核验](../contracts/svg-editing-contract.md)。原图、既有结果及未跟踪中期报告保留，未提交、推送或合并。
 
 后端新增组件归属和受控编辑服务、GET svg-elements 与 edit-svg 本地任务，复用原有存储、来源链、幂等、历史和 ZIP。曲线仅采样用于归属分析，保存保留原命令与精度；同源同变换的组件合并绘制以保留抗锯齿结果。人工几何编辑明确重置 geometry_verified=false，记录 manual_geometry_edit=true。过于复杂或无法安全拆分的重叠 evenodd 子路径明确拒绝，不改原文件。新增 svg.path 7.0 与 shapely 2.1.2；现有依赖未替换，pip check 通过。
 
@@ -31,7 +33,7 @@
 
 ## 2026-11-14 批量工作台改进
 
-已本地整合批量导入、按原图分组、多分类、批量导出浮窗、可保存预设与持久批次。用户最终选择仅提高本地线稿和已验证 Otsu 上限，不增加 SVG 试验档；原图与工作副本来源保留。接口、测试和 DSH 追溯见[前端接入第 15 节](frontend-integration.md#15-2026-11-14-批量纹样导出与处理浮窗)与[上限实测](local-processing-limits.md)。本批已拆成后端 `2f9ab95`、前端 `f0a4dbb` 和文档提交，推送到 `origin/zgx`，未合并 `main`；未发起付费调用。
+已本地整合批量导入、按原图分组、多分类、批量导出浮窗、可保存预设与持久批次。用户最终选择仅提高本地线稿和已验证 Otsu 上限，不增加 SVG 试验档；原图与工作副本来源保留。接口、测试和 DSH 追溯见[前端接入第 15 节](../guides/frontend-integration.md#15-2026-11-14-批量纹样导出与处理浮窗)与[上限实测](../guides/local-processing-limits.md)。本批已拆成后端 `2f9ab95`、前端 `f0a4dbb` 和文档提交，推送到 `origin/zgx`，未合并 `main`；未发起付费调用。
 
 复跑命令（仓库根目录，`D:\CondaEnvs\pattern-studio\python.exe` 与 Node 26）：
 
@@ -49,7 +51,7 @@ node scripts/validate_v2_integration.mjs D:/CondaEnvs/pattern-studio/python.exe 
 
 - 模型分流、修复前置、Windows DPAPI 密钥保存及此前 Seedream 5.5 / TGS 模型交付，已通过 [PR #4](https://github.com/cacao1357/Pattern-Studio-App/pull/4) 合入远程 `main`，合并提交 `e28d1644fdcf762d4fe8f8c1f6eb078fcb3130b2`。
 - 提交前由非作者独立审查关键差异；与原远程开发分支 `3b58947` 对照，保留已有有效行为。使用账号在仓库规则中已有的管理员合并权限，没有修改规则。
-- 本地继续沿用 `zgx`，已快进同步合并提交；密钥、私有素材、验证产物和交付包不在提交中。后续资产布局调整作为独立提交交付，布局、断点及验证见[前端接入说明第 14 节](frontend-integration.md#14-2026-11-13-独立资产列与工序高度)。
+- 本地继续沿用 `zgx`，已快进同步合并提交；密钥、私有素材、验证产物和交付包不在提交中。后续资产布局调整作为独立提交交付，布局、断点及验证见[前端接入说明第 14 节](../guides/frontend-integration.md#14-2026-11-13-独立资产列与工序高度)。
 
 ## 当前补充：2026-11-13 模型选择、修复前置与安全配置
 
@@ -57,7 +59,7 @@ node scripts/validate_v2_integration.mjs D:/CondaEnvs/pattern-studio/python.exe 
 - 新版改为八步，修复前置且可跳过，提取与 SVG 分开；云端输入支持裁切和已接受修复，刷新恢复修复候选及旧框。另修复同图换工序重复加载导致会话/选层丢失、晚到恢复覆盖勾选等问题。
 - 服务端密钥用 DPAPI 保存，可保持密钥不变迁移旧配置；本机实际设置已加密，重启后读取一致（修订 19），当前服务健康正常。未变更模型权重；保留开始时已有修改。
 - 前端定向 70 项、后端相关 47 项与 2 子测试通过；Chrome 完整本地流程及归档候选闭环、1440/390 宽八步页面检查通过。真实祥云样例执行两次云端调用（修复 + 线稿）；最终内容检查补齐云端白底 → 透明线稿的适配，归档结果本地重矢量化为 69 条路径，无新增云端调用。未作固定数据集全面质量结论。
-- 具体接口、复现入口、DSH 运行追溯与限制见 [接口合同](a-interface-contract.md) 和 [前端接入说明第 13 节](frontend-integration.md#13-2026-11-13-模型分流修复前置与密钥持久化)。真实产物位于被忽略的 `storage/validation/cloud-lineart-20261113/`。本批不进行模型训练；提交及远程合入状态以 Git / PR 记录为准。
+- 具体接口、复现入口、DSH 运行追溯与限制见 [接口合同](../contracts/a-interface-contract.md) 和 [前端接入说明第 13 节](../guides/frontend-integration.md#13-2026-11-13-模型分流修复前置与密钥持久化)。真实产物位于被忽略的 `storage/validation/cloud-lineart-20261113/`。本批不进行模型训练；提交及远程合入状态以 Git / PR 记录为准。
 
 基础交接日期为 2026-11-01。2026-11-08 工作台更新记录见下文。
 
@@ -75,7 +77,7 @@ node scripts/validate_v2_integration.mjs D:/CondaEnvs/pattern-studio/python.exe 
 | 局部恢复 | 复用图层重新合成；复用 PNG 或蒙版修正后代重新矢量化；旧结果不覆盖，分支记录父任务；刷新后可恢复所属流程 |
 | 费用与异常 | 关闭付费可阻止未开始的调用；云端超时/中断保留未知结果，不自动重试；本地失败保留已发布 PNG |
 
-字段与响应以 [接口合同](a-interface-contract.md) 为准。
+字段与响应以 [接口合同](../contracts/a-interface-contract.md) 为准。
 
 ## 使用与生效
 
@@ -109,7 +111,7 @@ node scripts/validate_v2_integration.mjs D:/CondaEnvs/pattern-studio/python.exe 
 
 - 新版工作台已接入按图 `flows` 历史恢复、首次 `continue` 与后续 `rerun` 本地重合成；关闭付费或缺少密钥时归档候选仍可读、可选，恢复和轮询只读已有任务，不重发云端请求。
 - 验证：后端 `tests/` 73 项、`backend/tests/` 23 项及 2 个子测试通过（本机沙箱对 `0o700` 临时目录不可列，使用一次性 shim，未改仓库测试）；前端 25 + 8 + 22 项通过。隔离夹具 live HTTP 完成 health → 上传 → 新模型 CUDA 线稿 + SVG → 平铺 → ZIP 导出 → 历史/设置读取；Chrome 完成归档层 → `continue` → 刷新恢复 → `rerun` 分支，云端调用计数保持 1、页面异常 0。`scripts/validate_v2_integration.mjs` 因本机沙箱 `spawn EPERM` 未整脚本执行，未计为自动化通过。
-- 未接入 `assets`/`jobs` 历史页与修复候选的刷新恢复。接口与细节见 [前端接入说明第 10 节](frontend-integration.md)。
+- 未接入 `assets`/`jobs` 历史页与修复候选的刷新恢复。接口与细节见 [前端接入说明第 10 节](../guides/frontend-integration.md)。
 
 ### 2026-11-13 设置简化与费用门槛移除
 
@@ -144,7 +146,7 @@ node scripts/validate_v2_integration.mjs D:/CondaEnvs/pattern-studio/python.exe 
 
 ### 2026-11-08 工作台回归
 
-工作台默认使用 GPU 优先的一键模型路线，并按标签页记录撤销、重做和清空。处理结果进入现有资产与任务历史。纹样库可加载透明图的关联蒙版，平铺复用处理后的 PNG，并按结果保存接缝观察。操作说明见 [README](../README.md#工作台操作)，接口见 [接口合同](a-interface-contract.md#本地一键处理)。
+工作台默认使用 GPU 优先的一键模型路线，并按标签页记录撤销、重做和清空。处理结果进入现有资产与任务历史。纹样库可加载透明图的关联蒙版，平铺复用处理后的 PNG，并按结果保存接缝观察。操作说明见 [README](../../README.md#工作台操作)，接口见 [接口合同](../contracts/a-interface-contract.md#本地一键处理)。
 
 | 检查 | 结果 | 覆盖 |
 | --- | --- | --- |
@@ -164,7 +166,7 @@ GPU 推理使用当前部署的模型权重和合成图。云端候选使用隔�
 
 ### 2026-11-11 前端接入并合并 main
 
-新版前端（`frontend/next-v2/`）已接入本机服务并纳入版本库：`backend/app/api/frontend.py` 把新界面挂在 `/`，旧前端原文件未改、通过 `/legacy/` 只读对照；接口映射、CSP 与回退方式见 [前端接入说明](frontend-integration.md)。接入提交为 `016197b`，已于 2026-11-11 合并到 `main`。
+新版前端（`frontend/next-v2/`）已接入本机服务并纳入版本库：`backend/app/api/frontend.py` 把新界面挂在 `/`，旧前端原文件未改、通过 `/legacy/` 只读对照；接口映射、CSP 与回退方式见 [前端接入说明](../guides/frontend-integration.md)。接入提交为 `016197b`，已于 2026-11-11 合并到 `main`。
 
 | 检查 | 结果 | 覆盖 |
 | --- | --- | --- |
@@ -187,7 +189,7 @@ node --test frontend/tests/settings.test.mjs frontend/tests/workbench-regression
 
 按「现在这版配色偏 AI 味」的反馈，先在 `frontend/next-v3/` 隔离副本里做评审（正式前端当时零改动）：先只换强调色（被否：像没改）→ 再做浅底/中调三个整屏方案绢白、靛蓝、青瓷（被否：都不如原版）→ 最终把中性近黑整体换成黄橙家族「蜜蜡」，再压一档褐、调暗，定为「蜜蜡 · 沉褐」，方向认可。
 
-评审通过后按「接入新版前端，做好适配」并入 `frontend/next-v2/`，`/` 即为新配色；隔离预览目录与 `/preview/` 脚手架已删除，评审记录迁到 [配色决定记录](palette-review.md)，接入动作见 [前端接入说明](frontend-integration.md) 第 8 节。
+评审通过后按「接入新版前端，做好适配」并入 `frontend/next-v2/`，`/` 即为新配色；隔离预览目录与 `/preview/` 脚手架已删除，评审记录迁到 [配色决定记录](../guides/palette-review.md)，接入动作见 [前端接入说明](../guides/frontend-integration.md) 第 8 节。
 
 | 检查 | 结果 | 覆盖 |
 | --- | --- | --- |
@@ -235,7 +237,7 @@ Edge 结果：`storage/validation/a/browser-checks.json`；同目录保存桌面
 
 ### 2026-11-11 新版可靠性对接（第一批）
 
-本批完成模型前置能力接口、默认模型一键与分步入口、上传/加载/任务会话隔离、接受修复的新资产衔接、失败及取消保留产物说明。独立浏览器验收发现并修复深链在页内重绘时重置当前结果的问题。接口与复现命令见 [前端接入说明第 9 节](frontend-integration.md#9-2026-11-11-第一批可靠性对接)。
+本批完成模型前置能力接口、默认模型一键与分步入口、上传/加载/任务会话隔离、接受修复的新资产衔接、失败及取消保留产物说明。独立浏览器验收发现并修复深链在页内重绘时重置当前结果的问题。接口与复现命令见 [前端接入说明第 9 节](../guides/frontend-integration.md#9-2026-11-11-第一批可靠性对接)。
 
 - 后端定向：19 passed。健康探测不加载 ML 运行时或权重；模型缺失不影响其他本地工具健康状态。
 - 前端：45 passed，含新版 15 项行为回归；语法及差异检查通过。
@@ -262,7 +264,7 @@ Edge 结果：`storage/validation/a/browser-checks.json`；同目录保存桌面
 
 - 令牌换成蜜蜡 · 沉褐，补 `--on-accent`、`--action-*`、`--paper-ink-3`；视图样式里的硬编码色号改为 `color-mix()` 派生，去掉彩色光晕与霓虹阴影，主操作改为「琥珀实心 + 墨字」。
 - 评审覆盖层的结构规则折进 `base/shell/home/workbench/library/settings` 的对应选择器；错误态从强调色剥离（砖红 `#e2a07f`）。
-- 删除 `frontend/next-v3/`、`/preview/` 路由、`PREVIEW_ROOT_NAME`/`PREVIEW_ENABLED`、`js/palette.js` 与 `.gitignore` 的预览条目；对比度工具迁到 `scripts/check_contrast.py`，评审记录迁到 [配色决定记录](palette-review.md)。
+- 删除 `frontend/next-v3/`、`/preview/` 路由、`PREVIEW_ROOT_NAME`/`PREVIEW_ENABLED`、`js/palette.js` 与 `.gitignore` 的预览条目；对比度工具迁到 `scripts/check_contrast.py`，评审记录迁到 [配色决定记录](../guides/palette-review.md)。
 - 设置页警示面板里的金色标签在琥珀底上只有 4.07:1（Lighthouse 首轮 96），已把该面板内标签底改为暗底（6.7:1），复跑 100。
 - 保留 `next-v2` 第一批的 JS 改动（会话身份令牌、深链只加载一次、修复接纳等），配色只动样式与令牌。
 
@@ -289,7 +291,7 @@ Edge 结果：`storage/validation/a/browser-checks.json`；同目录保存桌面
 
 - 首屏改为「上传纹样，导出可编辑 SVG。」加两行功能说明；删除处理版本、云端配置、费用三栏状态条与图版上的浮动统计卡，并移除 `home.css` 中随之失效的 meta / float / vdot 样式。
 - 工序区、费用区、收尾、纹样库、使用说明和设置页的标题、引导语改为描述功能与结果；工序 04「挑一层」改为「选候选层」、06「局部重跑」改为「局部修复」，`data.js`、首页与工作台三处同步。
-- 文档：[新版设计说明](../frontend/next-v2/DESIGN.md) 补充文案原则并更新首页 5.4 段；本条记录。
+- 文档：[新版设计说明](../../frontend/next-v2/DESIGN.md) 补充文案原则并更新首页 5.4 段；本条记录。
 - 旧前端 `/legacy/`、后端、接口合同、数据与既有任务记录均未改。
 
 验证：`node --check` 6 个改动的 JS 文件通过；三个前端测试文件直接以 `node <file>` 运行，共 45 项通过（本机沙箱下 `node --test` 因 `spawn EPERM` 不可用，改为直接执行测试文件）；Chrome 1440 / 1280 / 501 宽核对首页、纹样库、使用说明、设置、工作台和工序导览，无横向溢出。未做真实素材质量与云端调用验收。
@@ -304,7 +306,7 @@ Edge 结果：`storage/validation/a/browser-checks.json`；同目录保存桌面
 - 蒙版笔迹改一条圆头描边路径（宽带 + 细中线），采样按笔刷半径抽稀；提交结构仍是 `{mode, radius, points[]}`。
 - 另有两次布局尝试（三栏宽度按图版高度分配、参数栏三段式）**已按反馈回退**：三栏仍是 `264px | 1fr | 368px`，参数栏仍是「标题 + 控件 + 行内说明」。
 
-文档：新版设计说明 5.1 / 5.4 与 README 的文件表、路由表、截图说明已同步；本条与 [前端接入说明](frontend-integration.md) 第 12 节为本次记录。
+文档：新版设计说明 5.1 / 5.4 与 README 的文件表、路由表、截图说明已同步；本条与 [前端接入说明](../guides/frontend-integration.md) 第 12 节为本次记录。
 
 验证：`node --test` 三个前端测试文件 47 项通过；无头 Chrome 逐页核对首页、纹样库、设置、使用说明与工作台七道工序，
 视口 1081–2560 及 1080 / 1024 / 900 / 820 / 390 均无控制台报错、无横向溢出；回退后三栏宽度与图版尺寸逐档与原版一致。

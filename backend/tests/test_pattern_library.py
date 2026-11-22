@@ -217,6 +217,49 @@ class PatternLibraryTests(unittest.TestCase):
             self.assertIn(other, remaining_keys)
             self.assertFalse(remaining_keys & {target, normalized, derivative, first, second, feedback_id})
 
+    def test_edit_source_and_manual_grade_is_pattern_scoped(self):
+        target = self.images[0]
+        with self.client() as client:
+            saved = client.patch(f"/api/v1/patterns/{target}", json={
+                "grade": "B",
+                "source_type": "博物馆藏品",
+                "source_name": "敦煌研究院",
+                "source_url": "https://example.org/item/1",
+                "source_note": "馆藏编号 001",
+            })
+            self.assertEqual(200, saved.status_code)
+            meta = saved.json()["meta"]
+            self.assertEqual("B", meta["grade"])
+            self.assertEqual("manual-v1", meta["grade_version"])
+            self.assertEqual("declared", meta["provenance_status"])
+            self.assertEqual("馆藏编号 001", saved.json()["source_note"])
+
+            pattern = client.get(f"/api/v1/patterns/{target}").json()
+            self.assertEqual("B", pattern["meta"]["grade"])
+            self.assertEqual("敦煌研究院", pattern["meta"]["source_name"])
+            self.assertEqual("馆藏编号 001", pattern["source_note"])
+
+            partial = client.patch(f"/api/v1/patterns/{target}", json={"grade": "A"}).json()
+            self.assertEqual("敦煌研究院", partial["meta"]["source_name"])
+            self.assertEqual("馆藏编号 001", partial["source_note"])
+            self.assertTrue(self.store.image_meta(target)["content_id"])
+            client.patch(f"/api/v1/patterns/{target}", json={"grade": "B"}).raise_for_status()
+
+            # 空等级表示保留现有等级；清空来源后只回到“未核验”。
+            cleared = client.patch(f"/api/v1/patterns/{target}", json={
+                "grade": "", "source_type": "", "source_name": "", "source_url": "", "source_note": "",
+            }).json()
+            self.assertEqual("B", cleared["meta"]["grade"])
+            self.assertEqual("unverified", cleared["meta"]["provenance_status"])
+
+            self.assertEqual(422, client.patch(f"/api/v1/patterns/{target}", json={
+                "grade": "S", "source_type": "", "source_name": "", "source_url": "", "source_note": "",
+            }).status_code)
+            self.assertEqual(422, client.patch(f"/api/v1/patterns/{target}", json={
+                "grade": "", "source_type": "", "source_name": "", "source_url": "javascript:alert(1)",
+                "source_note": "",
+            }).status_code)
+
     def test_rejects_duplicate_category_ids_and_invalid_names(self):
         with self.client() as client:
             bad = client.post("/api/v1/pattern-categories", json={"name": "   "})

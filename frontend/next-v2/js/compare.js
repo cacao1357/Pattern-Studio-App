@@ -1,7 +1,7 @@
 /* =============================================================================
    compare.js — 对照与透明叠加的来源选择。
-   只做一件事：为当前资产找一张“直接同坐标”的光栅来源，供叠加核对。
-   约定（docs/svg-editing-contract.md）：
+   只做一件事：为当前纹样找一张“直接同坐标”的光栅来源，供叠加核对。
+   约定（docs/contracts/svg-editing-contract.md）：
    - 优先核对当前结果与直接同坐标的光栅来源，而不是把裁切/缩放后的原图铺满图版；
    - 尺寸不同或坐标空间不同时明确拒绝叠加，并在界面说明原因；
    - 这里只做纯数据判断，不读 DOM、不发请求，便于行为测试。
@@ -9,7 +9,7 @@
 
 import { kindLabel } from "./format.js";
 
-/** 可作为叠加底图的光栅资产类型；SVG / ZIP / 蒙版等不能直接作为像素底图。 */
+/** 可作为叠加底图的光栅纹样类型；SVG / ZIP / 蒙版等不能直接作为像素底图。 */
 const RASTER_KINDS = new Set([
   "original",
   "normalized_input",
@@ -32,8 +32,8 @@ const RASTER_KINDS = new Set([
 ]);
 
 /**
- * 直接来源角色优先级：先找生成当前资产的输入，再找同坐标参考。
- * 这些 role 来自现有后端资产登记（见 assets.parents）；未知 role 不参与。
+ * 直接来源角色优先级：先找生成当前纹样的输入，再找同坐标参考。
+ * 这些 role 来自现有后端纹样登记（见 assets.parents）；未知 role 不参与。
  */
 const SOURCE_ROLES = [
   "vector_input",
@@ -61,7 +61,7 @@ const shortId = (value) => {
   return text.length > 8 ? text.slice(0, 8) : text;
 };
 
-/** 按优先顺序收集当前资产可能的光栅来源 id，去重且排除自身。 */
+/** 按优先顺序收集当前纹样可能的光栅来源 id，去重且排除自身。 */
 export function overlaySourceIds(current) {
   if (!current?.asset_id) return [];
   const ids = [];
@@ -115,10 +115,10 @@ export function overlaySourceChain(current, assets, image = null) {
 }
 
 /**
- * 为当前资产挑选可叠加的直接光栅来源。
+ * 为当前纹样挑选可叠加的直接光栅来源。
  * 会沿 svg_edit_source / source_asset_id 链找到最近的光栅图，而不是只看直接父级。
- * @param {object|null} current 当前资产
- * @param {object[]} assets 会话资产
+ * @param {object|null} current 当前纹样
+ * @param {object[]} assets 会话纹样
  * @param {object|null} image 原图记录（含 original / normalized）
  * @returns {{ok:boolean, reference:object|null, reason:string, space:string, spaceUnverified:boolean, near:object|null, depth:number}}
  */
@@ -133,12 +133,12 @@ export function pickOverlayReference(current, assets, image = null) {
     depth: 0,
   };
   if (!current?.asset_id) {
-    result.reason = "还没有打开资产，无法叠加核对。";
+    result.reason = "还没有打开纹样，无法叠加核对。";
     return result;
   }
   const chain = overlaySourceChain(current, assets, image);
   if (!chain.length) {
-    result.reason = "当前资产没有登记直接来源；未找到可叠加的同坐标光栅图。";
+    result.reason = "当前纹样没有登记直接来源；未找到可叠加的同坐标光栅图。";
     return result;
   }
 
@@ -162,7 +162,7 @@ export function pickOverlayReference(current, assets, image = null) {
       const [rw, rh] = dims(reference);
       const [cw, ch] = dims(current);
       problems.push(
-        `同坐标链上的光栅来源 ${rw || "?"} × ${rh || "?"} 与当前资产 ${cw || "?"} × ${
+        `同坐标链上的光栅来源 ${rw || "?"} × ${rh || "?"} 与当前纹样 ${cw || "?"} × ${
           ch || "?"
         } 尺寸不同（可能经过裁切或缩放），不能按同坐标叠加。`
       );
@@ -171,7 +171,7 @@ export function pickOverlayReference(current, assets, image = null) {
     const currentSpace = spaceOf(current);
     const referenceSpace = spaceOf(reference);
     if (currentSpace && referenceSpace && currentSpace !== referenceSpace) {
-      problems.push("同坐标链上的光栅来源与当前资产的坐标空间不同（裁切或工作副本会建立新坐标空间），不能按同坐标叠加。");
+      problems.push("同坐标链上的光栅来源与当前纹样的坐标空间不同（裁切或工作副本会建立新坐标空间），不能按同坐标叠加。");
       continue;
     }
     result.ok = true;
