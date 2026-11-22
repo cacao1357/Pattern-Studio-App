@@ -1,6 +1,6 @@
 # 批量工作台与纹样分类接口
 
-本文定义新版工作台将使用的批量素材、手动分类、流程预设和批次接口。纹样分组沿用已有 `images`、`assets`、来源关系和 `image_id`，不创建第二份素材存储。
+本文定义新版工作台使用的批量素材、手动分类、流程预设和批次接口。纹样分组沿用已有 `images`、`assets`、来源关系和 `image_id`，不创建第二份素材存储。
 
 ## 纹样分页
 
@@ -11,12 +11,18 @@
 - `category_id` 限定为该手动分类中的原图组；不传表示全部。类型筛选、搜索和分类可组合。
 - 筛选后按原图登记顺序从新到旧分页，游标表示最后返回的原图组。后端必须先确定哪些**组**匹配，再分页，不能先分页资产后临时分组。
 - 响应：`{ "items": [...], "next_cursor": string | null }`。
-- 每个组：`image_id`、`original_asset_id`、`normalized_asset_id`、`name`、`created_at`、`assets`、`categories`、`category_ids`、`revision`。`assets` 包含原图、规范输入以及现有按图来源/父子关系找到的所有衍生资产元数据；`categories` 项为 `{category_id,name,revision}`；`revision` 是该组分类集合修订号，初值 0。
+- 每个组：`image_id`、`original_asset_id`、`normalized_asset_id`、`name`、`created_at`、`assets`、`categories`、`category_ids`、`meta`、`source_note`、`revision`。`assets` 包含原图、规范输入以及现有按图来源/父子关系找到的所有衍生资产元数据；`categories` 项为 `{category_id,name,revision}`；`meta` 是该原图组的等级与来源（`grade`、`grade_version`、`source_type`、`source_name`、`source_url`、`license`、`provenance_status`）；`revision` 是该组分类集合修订号，初值 0。
 - 缺少来源链且没有 `image_id` 的孤立旧资产不会被猜测归属。此接口只列出已登记的 `images` 原图组。
 
 `GET /api/v1/patterns/{image_id}` 返回同一组结构。不存在时 404。
 
+`PATCH /api/v1/patterns/{image_id}` 修改整张纹样的等级与来源，JSON：`{"grade":"A|B|C|U|","source_type":"","source_name":"","source_url":"","source_note":""}`。省略字段会保留原值；来源字段可用空字符串清除，`grade` 为空时保留原等级。对缺少 P0 资料的旧纹样，首次保存会根据原图和规范输入补齐档案。手动等级写入 `grade_version=manual-v1`，覆盖按清晰度/对比度的自动评定。来源字段重新计算 `provenance_status`（来源、许可或采集任一已声明即 `declared`），`source_url` 只接受 http(s) 地址。成功返回 `{image_id,source_note,meta}`；未知原图 404，等级不在允许值内由请求校验返回 422，非法来源 422 `INVALID_PROVENANCE`。资料属于原图组，已生成的版本保留各自的生成记录。
+
 ## 工作台纹样选择
+
+通过工作台入口进入或刷新页面时，如果有上次的纹样，用户可以继续上次或开始新的工作。直接从纹样库打开指定纹样时进入对应纹样。原图和已生成的版本在处理时已存入纹样库。
+
+- `DELETE /api/v1/workbench/items/all` 一次移出全部工作台成员，返回 `{removed}`。接口可重复调用，只更新工作台成员表。前端成功后清空当前会话和工作台列表，旧纹样可从纹样库重新打开。
 
 工作台「纹样」列不是纹样库的镜像：它只显示用户明确加入的原图组。成员关系单独存储（`workbench_items`），加入/移出不删除纹样库记录。
 
@@ -55,7 +61,7 @@
 
 继续使用 `POST /api/v1/exports`，请求含显式 `asset_ids`（1..500 个不同资产）、`license_acknowledged` 和可选 `layout`。`layout: "flat"` 为兼容默认；`layout: "by_image"` 在 ZIP 中按 `images/{image_id}/{kind}-{asset_id}.{原后缀}` 分目录。不猜测孤立旧资产的原图归属，独立放入对应 `unlinked` 目录。`manifest.json` 中的 `archive_name` 对应实际文件名并保留来源链。
 
-只打包所选的现有原始文件、PNG 或 SVG，不自动生成缺失格式，不加入未选择的祖先文件，不嵌套 ZIP。总输入上限仍为 128 MiB；来源许可未确认时仍需明确确认。前端“全选”必须标明作用于当前已载入的纹样，按处理类型及整组选择均转成显式资产列表。
+只打包所选的现有原始文件、PNG 或 SVG，不自动生成缺失格式，不加入未选择的祖先文件，不嵌套 ZIP。单次最多 500 个版本、总输入 128 MiB。界面要求用户显式确认许可后提交，后端继续检查未确认授权的文件。前端“全选”必须标明作用于当前已载入的纹样，按处理类型及整组选择均转成显式资产列表。
 
 ## 流程预设
 
@@ -73,7 +79,7 @@
 
 初始内置预设的 `extract` 使用现有默认值；本地/云端线稿使用黑白矢量化；颜色提取使用颜色矢量化。预设默认不缩放大图；用户可显式设定工作副本像素上限，系统会在配置的步骤中生成并记录副本。每一步通过现有作业队列执行并保存产物，超过既有像素上限时该图片明确失败。
 
-各路线的实测上限与未验证范围见[本地处理上限](local-processing-limits.md)。SVG 维持原有限制，不提供高分辨率试验档。
+各路线的实测上限与未验证范围见[本地处理上限](../guides/local-processing-limits.md)。SVG 维持原有限制，不提供高分辨率试验档。
 
 `POST /api/v1/workflow-presets` JSON 为 `{"name":"...","options":{...}}`，成功返回预设对象。`PUT /api/v1/workflow-presets/{preset_id}` 使用相同字段并附 `revision`，成功后修订加一；旧修订返回 409。`DELETE /api/v1/workflow-presets/{preset_id}?revision=...` 删除用户预设，不能删除内置预设。修改或删除预设不会改动已提交批次的配置快照。
 

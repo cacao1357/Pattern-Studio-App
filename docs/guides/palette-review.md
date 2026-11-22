@@ -98,7 +98,7 @@
   设置页首轮 96，原因是警示面板里 `chip--gold` 叠在琥珀底上只有 4.07:1；
   已把该面板内的标签底改为暗底（实测 6.7:1）后复跑 100。`best-practices`／`seo` 同为 100。
 - **浏览器复核**（Chrome，1440×900 与 390×844）：五个页面与七道工序导览浮层渲染正常、无横向溢出、控制台无报错、
-  请求全部同源；截图见 `frontend/next-v2/review/`（本批重出）。
+  请求全部同源；截图可在 Git 历史 `9dc0613:frontend/next-v2/review/` 中查看。
 - **前端模块测试**：`node --test frontend/tests/next-v2-integration.test.mjs frontend/tests/settings.test.mjs frontend/tests/workbench-regressions.test.mjs` 全通过。
 - **后端**：删除 `/preview/` 脚手架后，隔离实例上 `/` 200（studio CSP 不变）、`/preview/` 404、`/legacy/` 200；
   `tests/` 69 项通过（本机沙箱下 `tmp_path` 需要一次性 shim，见接入记录）。

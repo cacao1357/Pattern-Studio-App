@@ -6,6 +6,7 @@ __pycache__/
 .env.*
 !.env.example
 storage/
+/docs/local/
 /model/*
 !/model/inference.json
 !/model/model.pt
