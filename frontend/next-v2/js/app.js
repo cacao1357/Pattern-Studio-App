@@ -127,7 +127,7 @@ const api = {
     const tone = kind === "warn" || kind === "done" ? kind : "info";
     const el = document.createElement("div");
     el.className = `toast toast--${tone}`;
-    el.innerHTML = `${icon(tone === "warn" ? "alert" : tone === "done" ? "check" : "info")}<span>${message}</span>`;
+    el.innerHTML = `${icon(tone === "warn" ? "alert" : tone === "done" ? "check" : "info")}<span>${escapeHtml(message)}</span>`;
     stack.append(el);
     setTimeout(() => {
       el.classList.add("is-out");
@@ -309,11 +309,14 @@ function renderStatusbar() {
   const health = store.health;
   const online = Boolean(health && health.status === "ok");
   const asset = store.currentAsset();
-  const cloud = store.seedream?.enabled ? "云端已连接" : "云端未配置";
+  const cloud = store.seedream?.enabled ? "云端已启用" : "云端未启用";
   const isWorkbench = state.route === "workbench";
+  // 先留住处理批次入口，再重建状态条：innerHTML 一替换，原节点就脱离文档，
+  // 之后按 id 查会拿到 null，入口会在刷新/重绘后消失。
+  const batchDock = document.getElementById("pf-dock");
   bar.innerHTML = `
     <span class="statusbar__item" title="${online ? "数据库、存储与后台任务均正常" : escapeHtml(store.healthError || "尚未连接本机服务")}">
-      <span class="svc__dot${online ? "" : " is-off"}" aria-hidden="true"></span>${online ? "本机服务正常" : "本机服务未连接"}
+      <span class="svc__dot${online ? "" : " is-off"}" aria-hidden="true"></span><span class="${online ? "sr-only" : ""}">${online ? "本机服务正常" : "本机服务未连接"}</span>
     </span>
     ${
       isWorkbench
@@ -323,7 +326,11 @@ function renderStatusbar() {
     }
     <span class="statusbar__item statusbar__item--hide-sm">${cloud}</span>
     <span class="statusbar__item statusbar__item--grow"></span>
+    <span class="statusbar__batch" data-batch-slot></span>
   `;
+  // 处理批次的入口常驻状态条：它在工作台布局之外，不叠浮块遮住画布。
+  const batchSlot = bar.querySelector("[data-batch-slot]");
+  if (batchSlot && batchDock) batchSlot.append(batchDock);
 }
 
 
@@ -349,6 +356,8 @@ function renderView() {
     if (!state.workbenchEntry) applyParams(params, route);
   }
   state.route = route;
+  // 顶栏动作按页面收敛：有本页主入口的页面不再显示重复的顶栏「上传纹样」。
+  document.body.dataset.route = route;
   syncNav(route);
   renderStatusbar();
 
@@ -712,15 +721,6 @@ function showDuplicateDrawer(result, duplicates, api) {
   });
 }
 
-function renderServiceChip() {
-  const chip = document.querySelector(".svc");
-  if (!chip) return;
-  const online = store.health?.status === "ok";
-  chip.classList.toggle("is-off", !online);
-  chip.innerHTML = `<span class="svc__dot${online ? "" : " is-off"}" aria-hidden="true"></span>${online ? "本机服务就绪" : "本机服务未连接"}`;
-  chip.title = online ? "数据库、存储与后台任务均正常" : store.healthError || "尚未连接本机服务";
-}
-
 /* ------------------------------------------------------------------ 外壳事件 */
 
 function bindShell() {
@@ -809,10 +809,7 @@ export function boot() {
   bindShell();
   // 批次浮窗与预设入口挂在外壳上：换页不卸载，刷新后从服务端批次列表恢复。
   initProcessingUI(api);
-  store.subscribe(() => {
-    renderStatusbar();
-    renderServiceChip();
-  });
+  store.subscribe(() => renderStatusbar());
   store.loadHealth();
   store.loadSettings();
   store.loadRecent();

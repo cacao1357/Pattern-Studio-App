@@ -6,12 +6,12 @@
 import { icon } from "../icons.js";
 
 const STAGE_GUIDE = [
-  ["01 来源", "上传 PNG / JPEG，保留原件并生成规范输入；同时记录评级、来源与指纹。", "原图、规范输入"],
-  ["02 裁切", "在真实图版上框出纹样单元；大图先创建工作副本可避免整页超限。", "裁切图、工作副本"],
-  ["03 修复", "圈出问题区域后调用云端生成修复候选；纹样完整时可以明确跳过。", "修复候选、接受记录"],
-  ["04 候选", "配置云端后按提示词拆分图层，勾选后在本地合成；这一步不生成线稿。", "候选层、合成候选"],
-  ["05 处理", "明确选择本地模型或云端模型生成线稿 PNG；也可用 OpenCV 或颜色提取。", "线稿 PNG、透明 PNG"],
-  ["06 蒙版", "对透明 PNG 补前景或擦除杂点，提交后生成新的透明 PNG。", "修正后的透明 PNG"],
+  ["01 来源", "上传 PNG / JPEG，保留原件并生成规范输入；记录评级、来源与指纹。", "原图、规范输入"],
+  ["02 裁切", "在真实图版上框出纹样单元；大图可先创建工作副本，避免超过像素上限。", "裁切图、工作副本"],
+  ["03 修复", "可选：云端修复会上传当前整张输入与框坐标，并按次计费；本地 LeftRefill 在本机执行、不上传、不计费。生成候选后接受或拒绝，纹样完整可直接跳过。", "修复候选、接受记录"],
+  ["04 候选", "云端按提示词拆分图层，提交会上传并按次计费；勾选后在本地合成，不生成线稿。", "候选层、合成候选"],
+  ["05 处理", "选本地模型、云端线稿（上传并按次计费）、OpenCV 或颜色提取；颜色提取生成带透明背景的 PNG。", "线稿 PNG、透明 PNG"],
+  ["06 蒙版", "线稿先「准备蒙版」得到可编辑透明 PNG；用笔刷补前景或擦除杂点，提交后生成新的透明 PNG。", "修正后的透明 PNG"],
   ["07 矢量化", "把线稿或透明 PNG 转成可编辑 SVG；颜色与细节在这一步调整。", "矢量 SVG"],
   ["08 平铺", "选单元生成 2×2 / 3×3 排列，记录接缝观察，并把成果打包成 ZIP。", "平铺预览、ZIP 包"],
 ];
@@ -55,7 +55,7 @@ export default {
                   `<div class="notes-table__row" role="row"><span role="cell" class="notes-table__k">${stage}</span><span role="cell">${what}</span><span role="cell">${out}</span></div>`
               ).join("")}
             </div>
-            <p class="notes-foot">处理任务在后台队列串行执行；页面会轮询任务状态。失败或取消的任务保留原因。</p>
+            <p class="notes-foot">到「任务」查看进度和失败原因。</p>
           </div>
         </section>
 
@@ -65,15 +65,16 @@ export default {
               <div class="sec-head__main">
                 <h2 class="section-title">常用的几个动作</h2>
               </div>
-              <p class="sec-head__aside">顶部「上传纹样」随时可用；工作台左栏的纹样轨决定当前画布显示哪一个纹样。</p>
+              <p class="sec-head__aside">单张上传在工作台顶栏；「从库选图」与「批量导入」在纹样列。</p>
             </header>
             <div class="notes-why">
               <article class="card notes-why__card" data-reveal>
                 <p class="label">页面</p>
                 <ul class="notes-list">
                   <li><a href="#/home">首页</a>：最近成果、接着上次、八道工序与云端说明</li>
-                  <li><a href="#/workbench">工作台</a>：三栏——文档与工序、图版、参数</li>
-                  <li><a href="#/library">纹样库</a>：真实纹样的分页、筛选与档案</li>
+                  <li><a href="#/workbench">工作台</a>：四栏——文档与工序、纹样、图版、参数</li>
+                  <li><a href="#/library">纹样库</a>：纹样的分页、筛选与档案</li>
+                  <li><a href="#/tasks">任务</a>：本机任务索引与详情</li>
                   <li><a href="#/settings">设置</a>：云端 API Key、本机状态与版本</li>
                 </ul>
               </article>
@@ -110,8 +111,8 @@ export default {
                 ["运行方式", "只监听 127.0.0.1:8765；同源、无登录，只适合本机使用"],
                 ["数据位置", "图片、任务、纹样与 SQLite 历史都在 storage/api/；保留该目录即可保留数据"],
                 ["密钥", "保存在本机服务配置里，接口只返回「是否已配置」，不回显明文"],
-                ["云端", "03 修复、04 候选与 05 云端线稿会调用云端；提交即上传当前输入并按次计费"],
-                ["旧前端", "原文件仍在 frontend/ 根目录，可通过 /legacy/ 只读打开对照；不参与新界面"],
+                ["云端", "03 云端修复、04 候选与 05 云端线稿会调用云端：提交即上传当前输入并按次计费；本地 LeftRefill、本地模型线稿、OpenCV 与颜色提取不调用云端"],
+                ["旧前端", "旧版页面连接同一个本机服务与 storage/api/ 数据；它不是只读副本，在旧版里的改动同样写入这份数据"],
               ]
                 .map(
                   ([k, v]) =>
@@ -149,7 +150,7 @@ export default {
                 <span class="stops__no">03</span>
                 <div class="stops__body">
                   <h3 class="h3">云端生成不可用</h3>
-                  <p class="stops__text">到设置里填写 API Key 并开启云端调用；保存只做本地校验，不会发起调用。云端线稿、修复与候选提交即上传当前输入并按次计费。</p>
+                  <p class="stops__text">到设置里填写 API Key、开启云端调用并确认价格；保存只做本地校验，不会发起调用。云端修复、候选与线稿提交即上传并按次计费；云端不可用时仍可用本地 LeftRefill、本地线稿、OpenCV 与颜色提取。</p>
                 </div>
               </li>
               <li class="stops__item" data-reveal>
@@ -163,17 +164,15 @@ export default {
           </div>
         </section>
 
-        <section class="section section--closing">
+        <section class="section">
           <div class="wrap wrap--tight">
             <div class="notes-known card" data-reveal>
               <div>
-                <p class="label">已知限制</p>
+                <p class="label">处理前准备</p>
                 <ul class="notes-list">
-                  <li>「本地线稿模型」需要本机已安装 torch、分割模型库与 model/ 权重；没有这些依赖时请用 OpenCV 线稿或颜色提取。</li>
-                  <li>云端线稿、修复与候选失败或结果未知时不会自动重发。</li>
-                  <li>大图（接近 100 万像素）在部分机器的矢量化阶段可能触及内存上限，先创建工作副本更稳。</li>
-                  <li>页面按 Chrome 验证；未做完整的屏幕阅读器人工走查（已有焦点环、aria 状态与减少动态效果适配）。</li>
-                  <li>字体依赖本机 Noto Serif SC、Noto Sans SC、Bahnschrift、Cascadia Code；缺字体会回退。</li>
+                  <li>本地线稿模型未安装时，可选 OpenCV 线稿或颜色提取。</li>
+                  <li>本地 LeftRefill 需要 NVIDIA 显卡、512 × 512 的目标图和一张已保存的参考图。</li>
+                  <li>大图超过处理上限时，可在「裁切」创建工作副本。</li>
                 </ul>
               </div>
               <div class="notes-compare">
@@ -181,7 +180,7 @@ export default {
                 <a class="notes-compare__link" href="/legacy/" target="_blank" rel="noreferrer noopener">
                   打开旧版工作台 ${icon("external")}
                 </a>
-                <p class="notes-compare__note">旧版界面 · 只读对照</p>
+                <p class="notes-compare__note">旧版界面 · 共用本机服务与数据</p>
               </div>
             </div>
             <div class="notes-actions">
@@ -196,7 +195,7 @@ export default {
 
   mount(root, state, api) {
     root.querySelectorAll('a[target="_blank"]').forEach((link) => {
-      link.addEventListener("click", () => api.toast("将在新标签页打开旧版工作台", "info"));
+      link.addEventListener("click", () => api.toast("将在新标签页打开旧版工作台（与本页共用本机数据）", "info"));
     });
   },
 };

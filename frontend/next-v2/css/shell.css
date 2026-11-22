@@ -145,19 +145,11 @@
   gap: 10px;
 }
 
-.svc {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 30px;
-  padding-inline: 12px;
-  border: 1px solid var(--line-1);
-  border-radius: var(--r-pill);
-  font-size: 12px;
-  letter-spacing: 0.02em;
-  color: var(--text-3);
-  white-space: nowrap;
+/* 纹样库使用页头的上传按钮。 */
+body[data-route="library"] .topbar [data-action="upload"] {
+  display: none;
 }
+
 .svc__dot {
   width: 6px;
   height: 6px;
@@ -170,10 +162,6 @@
   background: var(--cinnabar);
   box-shadow: 0 0 0 3px var(--cinnabar-soft);
   animation: none;
-}
-.svc.is-off {
-  color: var(--cinnabar-hi);
-  border-color: color-mix(in srgb, var(--cinnabar) 36%, transparent);
 }
 .btn.is-busy {
   opacity: 0.6;
@@ -486,12 +474,6 @@
 }
 
 /* ------------------------------------------------------------------ 响应式 */
-
-@media (max-width: 1120px) {
-  .svc {
-    display: none;
-  }
-}
 
 @media (max-width: 900px) {
   .brand {

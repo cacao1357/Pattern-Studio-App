@@ -238,6 +238,10 @@ class PatternLibraryTests(unittest.TestCase):
             self.assertEqual("B", pattern["meta"]["grade"])
             self.assertEqual("敦煌研究院", pattern["meta"]["source_name"])
             self.assertEqual("馆藏编号 001", pattern["source_note"])
+            for query in ("敦煌研究院", "博物馆藏品", target):
+                with self.subTest(query=query):
+                    matches = client.get("/api/v1/patterns", params={"q": query}).json()["items"]
+                    self.assertEqual([target], [item["image_id"] for item in matches])
 
             partial = client.patch(f"/api/v1/patterns/{target}", json={"grade": "A"}).json()
             self.assertEqual("敦煌研究院", partial["meta"]["source_name"])

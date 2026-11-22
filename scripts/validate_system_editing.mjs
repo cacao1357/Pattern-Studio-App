@@ -296,6 +296,8 @@ try {
     document.querySelectorAll('[data-svg-element]').length===1`, "reopen saved version from a fresh route");
   await evaluate("window.__beforeSavedReload=true");
   await cdpCall("Page.reload", { ignoreCache: true });
+  await waitFor("!window.__beforeSavedReload && document.querySelector('[data-entry=continue]')", "resume saved SVG after refresh");
+  await evaluate("document.querySelector('[data-entry=continue]').click()");
   await waitFor(`(async()=>{if(window.__beforeSavedReload || document.readyState!=='complete')return false;
     const {store}=await import('/js/store.js');
     return store.session.currentAssetId===${JSON.stringify(saved.asset_id)} &&

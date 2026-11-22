@@ -211,6 +211,61 @@ test("输入资产：优先当前兼容版本，其次规范输入，绝不使�
   );
 });
 
+test("启动浮窗逐组可用性：与勾选无关，取消后可再选回，真不兼容才禁用", () => {
+  const options = processingModule.normalizePresetOptions({ recipe: "color" });
+  const compatible = {
+    imageId: "image-a",
+    name: "A 图",
+    normalizedAssetId: "a-normalized",
+    assets: [asset("a-original", "original"), asset("a-normalized", "normalized_input"), asset("a-crop", "cropped")],
+  };
+  const incompatible = {
+    imageId: "image-b",
+    name: "B 图",
+    normalizedAssetId: "",
+    assets: [asset("b-original", "original")],
+  };
+  const preferred = {
+    imageId: "image-c",
+    name: "C 图",
+    normalizedAssetId: "c-normalized",
+    assets: [asset("c-normalized", "normalized_input"), asset("c-crop", "cropped")],
+  };
+  const groups = [compatible, incompatible, preferred];
+
+  const available = processingModule.runInputAvailability(groups, options, { "image-c": "c-crop" });
+  assert.equal(available.get("image-a").asset_id, "a-normalized");
+  assert.equal(available.get("image-b"), null, "只有确实没有兼容版本的组才不可用");
+  assert.equal(available.get("image-c").asset_id, "c-crop", "当前输入优先于规范输入");
+
+  // 取消全选不会改变逐组可用性：这正是之前会误禁用、无法勾回的位置。
+  assert.deepEqual(
+    processingModule.batchInputs(groups, options, new Set()),
+    { inputs: [], missing: [] }
+  );
+  assert.ok(available.get("image-a"));
+
+  const reselected = processingModule.batchInputs(groups, options, new Set(["image-a"]));
+  assert.deepEqual(reselected.inputs.map((entry) => entry.asset.asset_id), ["a-normalized"]);
+  assert.equal(reselected.missing.length, 0);
+});
+
+test("进度计数只列非零状态，避免堆砌", () => {
+  const waiting = processingModule.batchProgress(batchPayload());
+  assert.equal(processingModule.progressCountsText(waiting), "成功 0 · 等待 1 · 失败 0");
+
+  const busy = processingModule.batchProgress(
+    batchPayload({
+      progress: {
+        total: 4,
+        completed: 2,
+        counts: { succeeded: 1, waiting: 1, running: 1, queued: 1, failed: 0, cancelled: 0, cancelling: 0 },
+      },
+    })
+  );
+  assert.equal(processingModule.progressCountsText(busy), "成功 1 · 等待 1 · 处理中 1 · 排队 1 · 失败 0");
+});
+
 test("运行校验：至少一张图、云端双同意且不默认勾选", () => {
   const options = processingModule.normalizePresetOptions({ recipe: "cloud_lineart" });
   const groups = [group("a-normalized", [asset("a-original", "original"), asset("a-normalized", "normalized_input")])];
@@ -472,6 +527,28 @@ test("人工续接提交当前批次修订与所选后代资产", async () => {
   };
   const batch = await processingModule.resumeItem("batch-1", "item-1", 3, "a-cropped");
   assert.equal(batch.revision, 4);
+});
+
+test("切换批次后，旧详情、错误与取消回执均不覆盖当前批次", async () => {
+  for (const action of ["read", "failed-read", "cancel"]) {
+    const first = batchPayload({ batch_id: "first", items: [] });
+    const next = batchPayload({ batch_id: "next", items: [] });
+    processing.selectedBatchId = first.batch_id;
+    processing.detail = first;
+    processing.batches = [first, next];
+    let finishOld;
+    network.handler = ({path}) => path.endsWith("/next") ? json(next) :
+      new Promise(resolve => { finishOld = resolve; });
+    const pending = action === "cancel" ? processingModule.cancelBatch(first.batch_id, first.revision) :
+      processingModule.loadBatch(first.batch_id);
+    await processingModule.selectBatch(next.batch_id);
+    finishOld(action === "failed-read" ? json({}, 503) : json({ ...first, revision: 4 }));
+    await pending;
+    assert.equal(processing.selectedBatchId, next.batch_id);
+    assert.equal(processing.detail.batch_id, next.batch_id);
+    assert.equal(processing.detailError, "");
+    assert.equal(processing.detailLoading, false);
+  }
 });
 
 test("取消批次只提交修订号，由服务端返回准确状态", async () => {

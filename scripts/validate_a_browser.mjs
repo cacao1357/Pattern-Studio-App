@@ -81,7 +81,7 @@ try {
   // Since 016197b the studio shell (frontend/next-v2) owns "/", and this legacy
   // A-flow check drives the preserved workbench under "/legacy/".
   await call("Page.navigate", { url: info.url + "/legacy/" });
-  await waitFor("document.getElementById('health-label')?.textContent.includes('就绪') || document.getElementById('health-label')?.textContent.includes('正常') || document.getElementById('health-label')?.textContent.includes('可用')", "initial application");
+  await waitFor("document.querySelector('#health-chip.is-ok')", "initial application");
   await click("open-settings");
   await waitFor("document.getElementById('settings-dialog').open && document.getElementById('settings-model').value.length > 0", "settings loaded");
   assert.equal(await evaluate("document.getElementById('settings-key-input').value"), "");

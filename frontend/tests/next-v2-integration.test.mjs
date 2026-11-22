@@ -181,6 +181,28 @@ test("resetSession 让仍在途的 openAsset 失效且不写入", async () => {
   assert.equal(store.session.currentAssetId, "");
 });
 
+test("打开已保存裁切后，同图参考可选，移出后换版本不会补回", async () => {
+  const imageId = "repair-pair";
+  const crops = ["target", "reference"].map((asset_id) => ({
+    asset_id, image_id: imageId, kind: "cropped", width: 512, height: 512,
+  }));
+  const history = `/api/v1/images/${imageId}/history`;
+  setHandler(({ path }) => {
+    if (path === history) return json({ items: crops, next_cursor: null });
+    if (path === `/api/v1/images/${imageId}`) return imageHandler(imageId);
+    if (path === "/api/v1/assets/target") return json(crops[0]);
+    throw new Error(`unexpected fetch: ${path}`);
+  });
+  store.resetSession();
+  await store.openAsset("target");
+  assert.equal(store.session.currentAssetId, "target");
+  assert.ok(workbench.leftRefillReferenceAssets(store.session.assets).some((entry) => entry.asset_id === "reference"));
+  store.removeAsset("reference");
+  await store.openAsset("target");
+  assert.equal(store.assetById("reference"), null);
+  assert.equal(countCalls(history), 1);
+});
+
 /* ------------------------------------------------------------------ 2. ensureSession / startFromImage */
 
 test("ensureSession 慢响应不覆盖后发请求", async () => {
@@ -960,6 +982,92 @@ test("八道工序都能渲染，处理工序明确提供本地/云端线稿，�
   }
 });
 
+test("单图线稿：05 给 06 准备入口，06 只有一个准备动作；准备后可画笔并去 07", () => {
+  const originalWindow = globalThis.window;
+  const originalSession = store.session;
+  const originalSeedream = store.seedream;
+  const originalHealth = store.health;
+  globalThis.window = {
+    matchMedia: () => ({ matches: false }),
+    clearTimeout() {},
+    setTimeout() {
+      return 0;
+    },
+  };
+  const params = new URLSearchParams();
+  const state = (stage) => ({ stage, tile: "2x2", zoom: "fit", brush: 24, compare: false });
+  const base = {
+    imageId: "image-mask",
+    image: {
+      image_id: "image-mask",
+      meta: { source_name: "线稿样例" },
+      normalized: { asset_id: "norm-mask", kind: "normalized_input", width: 800, height: 600 },
+      original: { asset_id: "orig-mask", kind: "original", width: 800, height: 600 },
+    },
+    jobs: [],
+    busy: false,
+    activeJob: null,
+    error: "",
+  };
+  const lineart = { asset_id: "line-mask", kind: "lineart", width: 800, height: 600 };
+  try {
+    store.health = { limits: { working_pixels: 1_000_000 } };
+    store.seedream = { enabled: false, blockers: [] };
+
+    // 05：生成线稿后直接给 06 的准备入口。
+    store.session = { ...base, assets: [lineart], currentAssetId: "line-mask" };
+    const process = workbench.default.render(state(5), { state: {} }, params);
+    assert.match(process, /data-act="go-mask"/);
+
+    // 06：线稿可点「准备蒙版」，且只有一个准备入口；不再提示只能先做颜色提取。
+    const mask = workbench.default.render(state(6), { state: {} }, params);
+    assert.equal((mask.match(/data-act="prepare-lineart-mask"/g) || []).length, 1);
+    assert.match(mask, /data-act="run-mask"/);
+    assert.match(mask, /阈值 0/);
+    assert.ok(!mask.includes("请先在 05 用颜色提取生成透明 PNG"), "线稿不应被误判成只能颜色提取");
+
+    // 已有可靠配对：复用入口取代重复准备，切到透明 PNG 后可直接画笔并去 07。
+    const foreground = {
+      asset_id: "fg-mask",
+      kind: "foreground_mask",
+      width: 800,
+      height: 600,
+      source_rgb_asset_id: "line-mask",
+    };
+    const transparent = {
+      asset_id: "tp-mask",
+      kind: "transparent_png",
+      width: 800,
+      height: 600,
+      source_rgb_asset_id: "line-mask",
+      source_mask_asset_id: "fg-mask",
+    };
+    store.session = { ...base, assets: [lineart, foreground, transparent], currentAssetId: "line-mask" };
+    const paired = workbench.default.render(state(6), { state: {} }, params);
+    assert.ok(!paired.includes('data-act="prepare-lineart-mask"'), "已准备时不应再出现重复准备入口");
+    assert.match(paired, /data-act="use-asset" data-id="tp-mask"/);
+
+    store.session = { ...base, assets: [lineart, foreground, transparent], currentAssetId: "tp-mask" };
+    const painting = workbench.default.render(state(6), { state: {} }, params);
+    assert.match(painting, /data-act="run-mask"/);
+    assert.match(painting, /data-act="go-vector"/);
+    const vector = workbench.default.render(state(7), { state: {} }, params);
+    assert.match(vector, /data-act="run-vectorize"/);
+
+    // 彩色透明 PNG 不走线稿准备，避免把彩色图当黑线稿补画。
+    const colored = { asset_id: "color-mask", kind: "transparent_png", width: 800, height: 600 };
+    store.session = { ...base, assets: [colored], currentAssetId: "color-mask" };
+    const unsupported = workbench.default.render(state(6), { state: {} }, params);
+    assert.ok(!unsupported.includes('data-act="prepare-lineart-mask"'));
+    assert.match(unsupported, /只有线稿能用「准备蒙版」/);
+  } finally {
+    store.session = originalSession;
+    store.seedream = originalSeedream;
+    store.health = originalHealth;
+    globalThis.window = originalWindow;
+  }
+});
+
 test("像素上限从 health 读取：本地模型 25MP、矢量颜色 250k，超限提供显式工作副本", () => {
   const originalWindow = globalThis.window;
   const originalSession = store.session;
@@ -1065,9 +1173,7 @@ test("LeftRefill 不可用时禁用本地路线并给出通俗原因，未知不
     const unavailable = render();
     assert.match(localButton(unavailable), /disabled/);
     assert.match(unavailable, /缺少基础模型权重/);
-    // 解释“上传的小模型只是提示向量，需要匹配的基础网络”，且不暴露内部接口/字段名。
-    assert.match(unavailable, /提示向量/);
-    assert.match(unavailable, /SD2/);
+    // 缺少依赖时给出原因；正常时可直接选择，不要求用户先阅读模型原理。
     assert.doesNotMatch(unavailable, /\/health|capabilities\.leftrefill/);
 
     store.leftrefillModel = { available: null, reason: "", checked: "" };
@@ -1384,6 +1490,61 @@ test("云端输入不默默换回原图，未接受的修复候选不可作为�
   assert.equal(workbench.vectorInput([tall], tall).asset.asset_id, "tall");
 });
 
+test("线稿进入 06：alpha 准备配对、只认连续来源链、复用已准备版本不重复提交", () => {
+  const cap = 1_000_000;
+  const lineart = { asset_id: "line", kind: "lineart", width: 800, height: 600, image_id: "img-1" };
+
+  // 线稿本身可准备；请求体只有 alpha + 阈值 0（保留半透明边缘），不带清理参数或云端同意。
+  const ready = workbench.lineartMaskPrep([lineart], lineart, { cap });
+  assert.equal(ready.error, "");
+  assert.equal(ready.pair, null);
+  assert.deepEqual(workbench.buildLineartMaskPayload("line"), {
+    input_asset_id: "line",
+    mode: "alpha",
+    threshold: 0,
+  });
+
+  // 线稿沿连续的 cropped → working_copy 直链仍算线稿。
+  const crop = { asset_id: "crop", kind: "cropped", width: 700, height: 500, source_asset_id: "line" };
+  const copy = { asset_id: "copy", kind: "working_copy", width: 640, height: 480, source_asset_id: "crop" };
+  assert.equal(workbench.derivedFromLineart([lineart, crop, copy], copy), true);
+  assert.equal(workbench.lineartMaskPrep([lineart, crop, copy], copy, { cap }).error, "");
+
+  // 来源链中间夹着颜色提取的透明 PNG：不再当线稿补画。
+  const colorPng = { asset_id: "color", kind: "transparent_png", width: 800, height: 600, source_asset_id: "line" };
+  const afterColor = { asset_id: "after-color", kind: "working_copy", width: 640, height: 480, source_asset_id: "color" };
+  assert.equal(workbench.derivedFromLineart([lineart, colorPng, afterColor], afterColor), false);
+  assert.equal(workbench.lineartMaskPrep([lineart, colorPng, afterColor], afterColor, { cap }).error, "unsupported");
+  const plainColorPng = { asset_id: "plain", kind: "transparent_png", width: 800, height: 600 };
+  assert.equal(workbench.lineartMaskPrep([plainColorPng], plainColorPng, { cap }).error, "unsupported");
+
+  // 超过本机上限：只给显式工作副本路线，不隐式缩放。
+  const big = { asset_id: "big", kind: "lineart", width: 1400, height: 1000 };
+  const over = workbench.lineartMaskPrep([big], big, { cap });
+  assert.equal(over.error, "pixels");
+  assert.equal(over.cap, cap);
+
+  // 已有的可靠配对可直接复用：带齐 refine-mask 需要的源图与基础蒙版记录，且仍是矢量化输入。
+  const mask = { asset_id: "mask", kind: "foreground_mask", width: 800, height: 600, source_rgb_asset_id: "line" };
+  const transparent = {
+    asset_id: "tp",
+    kind: "transparent_png",
+    width: 800,
+    height: 600,
+    source_rgb_asset_id: "line",
+    source_mask_asset_id: "mask",
+  };
+  const pair = workbench.lineartMaskPrep([lineart, mask, transparent], lineart, { cap });
+  assert.equal(pair.error, "");
+  assert.equal(pair.pair.asset_id, "tp");
+  assert.equal(pair.pair.source_rgb_asset_id, "line");
+  assert.equal(pair.pair.source_mask_asset_id, "mask");
+  assert.equal(workbench.vectorInput([lineart, mask, transparent], transparent).asset.asset_id, "tp");
+
+  // 只有蒙版、没有配对透明 PNG 时仍要准备。
+  assert.equal(workbench.lineartMaskPrep([lineart, mask], lineart, { cap }).pair, null);
+});
+
 test("按图恢复修复任务：优先当前会话输入，只恢复成功的 repair", () => {
   const jobs = [
     { job_id: "repair-new-other", kind: "repair", state: "succeeded", input_asset_id: "other" },
@@ -1681,7 +1842,7 @@ test("修复请求只含契约字段并把框裁到规范输入范围", () => {
   assert.equal(payload.consent_to_charge, true);
 });
 
-test("本地 LeftRefill 只接受 512×512 输入；参考图必须显式选择且不超过像素上限", () => {
+test("本地 LeftRefill 只接受 512×512 输入，参考图遵守类型和像素上限", () => {
   const assets = [
     { asset_id: "in-512", kind: "cropped", width: 512, height: 512 },
     { asset_id: "in-1024", kind: "cropped", width: 1024, height: 1024 },
@@ -1766,7 +1927,7 @@ test("本地 LeftRefill 请求体只含本地字段，且不会静默改为云�
   );
 });
 
-test("本地 LeftRefill 面板要求 512×512 目标和显式参考图，不出现云端同意项", () => {
+test("本地 LeftRefill 面板默认使用规范输入作参考，允许改选并提示目标尺寸", () => {
   const originalWindow = globalThis.window;
   const originalSession = store.session;
   const originalSeedream = store.seedream;
@@ -1784,7 +1945,7 @@ test("本地 LeftRefill 面板要求 512×512 目标和显式参考图，不出�
       image: { image_id: "image-panel", meta: { source_name: "本地修复面板" } },
       assets: [
         { asset_id: "in-512", kind: "cropped", width: 512, height: 512 },
-        { asset_id: "ref-512", kind: "cropped", width: 512, height: 512 },
+        { asset_id: "ref-512", kind: "normalized_input", width: 512, height: 512 },
         { asset_id: "in-1024", kind: "cropped", width: 1024, height: 1024 },
       ],
       currentAssetId: "in-512",
@@ -1802,22 +1963,73 @@ test("本地 LeftRefill 面板要求 512×512 目标和显式参考图，不出�
     assert.match(html, /目标输入/);
     assert.match(html, /512 × 512/);
     assert.match(html, /data-select="repairReference"/);
-    assert.match(html, /请选择已保存的参考图/);
+    assert.match(html, /<option value="ref-512" selected>/);
     assert.doesNotMatch(html, /同意把当前输入上传/);
     assert.doesNotMatch(html, /同意本次云端调用/);
-    assert.match(html, /不上传 · 不计费/);
-    assert.match(html, /不会自动改用云端/);
+    assert.match(html, /不上传.{0,4}不计费/);
+    assert.doesNotMatch(html, /不保证|不等于真实推理成功|本地条件核验/);
+
+    const alternatives = store.session.assets;
+    store.session.assets = [alternatives[1]];
+    store.session.currentAssetId = "ref-512";
+    workbench.default.render(state, { state: {} }, new URLSearchParams());
+    const singleReference = workbench.repairPanel(state, "leftrefill");
+    assert.doesNotMatch(singleReference, /data-select="repairReference"/);
+    assert.match(singleReference, /规范输入/);
+    // 大图的规范输入超出参考图上限时，512 裁切是唯一合法来源。
+    const oversized = { ...alternatives[1], width: 1536, height: 1024 };
+    store.session = { ...store.session, imageId: "large-import", image: { normalized: oversized },
+      assets: [oversized, alternatives[0]], currentAssetId: "in-512" };
+    const localState = { ...state };
+    workbench.default.render(localState, { state: localState }, new URLSearchParams());
+    const soleCrop = workbench.repairPanel(localState, "leftrefill");
+    assert.doesNotMatch(soleCrop, /data-select="repairReference"/);
+    store.session.assets = alternatives;
 
     store.session.currentAssetId = "in-1024";
     workbench.default.render(state, { state: {} }, new URLSearchParams());
     const wrongSize = workbench.repairPanel(state, "leftrefill");
-    assert.match(wrongSize, /不会自动缩放/);
+    assert.match(wrongSize, /1024 × 1024/);
+    assert.match(wrongSize, /裁切/);
     assert.doesNotMatch(wrongSize, /目标输入/);
   } finally {
     store.session = originalSession;
     store.seedream = originalSeedream;
     store.leftrefillModel = originalLeft;
     globalThis.window = originalWindow;
+  }
+});
+
+test("同一单元有多个平铺版本时打开指定版本，切换规格只显示匹配的结果", () => {
+  const previousWindow = globalThis.window;
+  const previousSession = store.session;
+  globalThis.window = { matchMedia: () => ({ matches: false }), clearTimeout() {} };
+  try {
+    const unit = { asset_id: "unit", kind: "cropped", width: 512, height: 512 };
+    const preview = { kind: "tile_preview", unit_asset_id: unit.asset_id, rows: 2, cols: 2, width: 1024, height: 1024 };
+    store.session = {
+      ...previousSession, imageId: "tile-history", currentAssetId: "older",
+      assets: [unit, { ...preview, asset_id: "older", seam_observation: "visible" }, { ...preview, asset_id: "newer" }], jobs: [],
+    };
+    const state = { stage: 8, tile: "2x2", zoom: "fit" };
+    const render = () => workbench.default.render(state, { state }, new URLSearchParams());
+    const history = render();
+    assert.match(history, /class="wb-media__img" src="[^"]*\/older\/preview"/);
+    assert.match(history, /data-seg="tileSeam" data-val="visible" aria-pressed="true"/);
+    assert.doesNotMatch(history, /data-select="tileUnit"/);
+    assert.match(history, /data-act="save-seam">/);
+    state.tile = "3x3";
+    const pending = render();
+    assert.match(pending, /data-act="save-seam" disabled/);
+    assert.doesNotMatch(pending, /class="wb-media__img" src="[^"]*\/(older|newer)\/preview"/);
+    store.session.assets = store.session.assets.filter(asset => asset.asset_id !== unit.asset_id);
+    state.tile = "2x2";
+    const archived = render();
+    assert.match(archived, /class="wb-media__img" src="[^"]*\/older\/preview"/);
+    assert.match(archived, /data-act="run-tile" disabled/);
+  } finally {
+    globalThis.window = previousWindow;
+    store.session = previousSession;
   }
 });
 

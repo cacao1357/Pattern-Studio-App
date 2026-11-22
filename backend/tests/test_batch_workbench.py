@@ -9,9 +9,11 @@ from unittest.mock import patch
 
 from PIL import Image
 
+from app.schemas.assisted import RefineMaskRequest
 from app.schemas.batch_workbench import BatchCreate, PresetCreate, PresetOptions, PresetUpdate
+from app.services.assisted_workbench import AssistedWorkbench
 from app.services.batch_workbench import BatchWorkbench
-from app.services.local_workbench import LocalWorkbench
+from app.services.local_workbench import LocalWorkbench, execute_local
 from app.storage import ServiceError, png_bytes
 from app.workbench_store import WorkbenchStore
 
@@ -84,6 +86,41 @@ class BatchWorkbenchTests(unittest.TestCase):
         self.assertEqual(resumed["items"][0]["steps"][0]["state"], "succeeded")
         self.assertEqual(resumed["items"][0]["steps"][1]["name"], "model_lineart")
         self.assertTrue(resumed["items"][0]["job_id"])
+
+    def test_real_mask_correction_resumes_only_its_own_batch_version(self):
+        source, _ = self.upload("brush")
+        preset = self.preset("adjust foreground", recipe="color", extract={"mode": "alpha"}, mask=True)
+
+        def run_job(expected):
+            job, token = self.store.claim()
+            self.assertEqual(job["job_id"], expected)
+            execute_local(self.store, expected, token)
+            self.store.finish_job(expected, token)
+            return self.store.get_job(expected)["result"]["assets"]
+
+        def waiting_batch():
+            batch = self.make_batch(preset, [source])
+            run_job(batch["items"][0]["job_id"])
+            self.batches.advance()
+            return self.batches.get_batch(batch["batch_id"])
+
+        batch = waiting_batch()
+        sibling = waiting_batch()
+        item = batch["items"][0]
+        self.assertEqual(item["waiting_for"], "mask")
+        base, _ = self.store.get_asset(item["current_asset_id"])
+        edit = AssistedWorkbench(self.store).refine(RefineMaskRequest(
+            source_rgb_asset_id=source, base_mask_asset_id=base["source_mask_asset_id"],
+            strokes=[{"mode": "erase", "radius": 2, "points": [{"x": 32, "y": 32}]}]), uuid4().hex)
+        png = next(a for a in run_job(edit["job_id"]) if a["kind"] == "transparent_png")
+        with self.assertRaises(ServiceError) as error:
+            self.batches.resume(sibling["batch_id"], sibling["items"][0]["item_id"], sibling["revision"], png["asset_id"])
+        self.assertEqual(error.exception.code, "BATCH_RESUME_ASSET_MISMATCH")
+        resumed = self.batches.resume(batch["batch_id"], item["item_id"], batch["revision"], png["asset_id"])
+        svg = next(a for a in run_job(resumed["items"][0]["job_id"]) if a["kind"] == "svg")
+        self.assertEqual(svg["source_asset_id"], png["asset_id"])
+        self.batches.advance()
+        self.assertEqual(self.batches.get_batch(batch["batch_id"])["state"], "succeeded")
 
     def test_failure_on_one_image_does_not_stop_other_items(self):
         first, _ = self.upload("one")
@@ -234,6 +271,7 @@ class BatchWorkbenchTests(unittest.TestCase):
         prepared = self.batches._submit_step(fake_batch, fake_item, "prepare_mask")
         job = self.store.get_job(prepared["job_id"])
         self.assertEqual((job["kind"], job["parameters"]["mode"]), ("extract", "alpha"))
+        self.assertEqual(job["parameters"]["threshold"], 0)
 
     def test_cancelled_child_job_stays_cancelled_after_coordinator_restart(self):
         source, _ = self.upload("cancel-child")

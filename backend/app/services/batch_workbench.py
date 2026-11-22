@@ -275,7 +275,7 @@ class BatchWorkbench:
             expected = MANUAL_STEPS[step_name][1]
             if metadata.get("image_id") != item["image_id"] or metadata.get("kind") not in expected:
                 raise ServiceError("BATCH_RESUME_ASSET_MISMATCH", "Choose a saved result of the required type from this same source image", 422)
-            if not self._descends_from(str(input_asset_id), item["current_asset_id"]):
+            if not self._matches_manual_input(item, metadata):
                 raise ServiceError("BATCH_RESUME_ASSET_MISMATCH", "Choose a result derived from the current image version", 422)
             step = item["steps"][item["cursor"]]
             step.update(state="succeeded", output_asset_id=str(input_asset_id), confirmed=True)
@@ -487,7 +487,7 @@ class BatchWorkbench:
             # Line-art generators preserve alpha but the mask editor consumes a
             # foreground_mask paired with transparent_png. Extracting the existing
             # alpha produces that pair without thresholding or changing pixels.
-            request = ExtractRequest.model_validate({"input_asset_id": source_id, "mode": "alpha"})
+            request = ExtractRequest.model_validate({"input_asset_id": source_id, "mode": "alpha", "threshold": 0})
             return self.local.submit("extract", request, key)
         if name == "working_copy":
             requested_max = options["working_max_pixels"]
@@ -503,6 +503,20 @@ class BatchWorkbench:
             request = TileRequest(unit_asset_id=tile_source_id)
             return self.finishing.tile(request, key)
         raise ServiceError("BATCH_STEP_UNSUPPORTED", "This preset step is not available yet")
+
+    def _matches_manual_input(self, item, result):
+        if self._descends_from(result["asset_id"], item["current_asset_id"]):
+            return True
+        if item["waiting_for"] != "mask":
+            return False
+        # A brush revision derives from the paired foreground mask, not the
+        # preview PNG. Match that exact mask branch, including repeated edits.
+        current, _ = self.store.get_asset(item["current_asset_id"])
+        base_mask = current.get("source_mask_asset_id")
+        edited_mask = result.get("source_mask_asset_id")
+        return bool(base_mask and edited_mask
+                    and current.get("source_rgb_asset_id") == result.get("source_rgb_asset_id")
+                    and self._descends_from(edited_mask, base_mask))
 
     def _descends_from(self, asset_id, ancestor_id):
         if asset_id == ancestor_id:

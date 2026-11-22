@@ -833,49 +833,6 @@
   margin-top: 2px;
 }
 
-/* ------------------------------------------------------------------ 结束区 */
-
-.section--closing {
-  padding-block: clamp(56px, 7vw, 100px);
-}
-.closing {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  text-align: center;
-  align-items: center;
-  padding: clamp(30px, 5vw, 56px);
-  border: 1px solid var(--line-1);
-  border-radius: var(--r-xl);
-  background: radial-gradient(80% 100% at 50% 0%, color-mix(in srgb, var(--gold) 7%, transparent), transparent 70%);
-}
-.closing .eyebrow {
-  color: var(--text-4);
-}
-.closing .eyebrow::before {
-  background: var(--gold);
-}
-.closing__title {
-  font-size: clamp(26px, 3.2vw, 40px);
-}
-.closing .copy {
-  text-align: center;
-}
-.closing__actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  margin-top: 10px;
-}
-.closing__meta {
-  font-size: 12.5px;
-  color: var(--text-4);
-  letter-spacing: 0.08em;
-}
-
 /* ------------------------------------------------------------------ 档案抽屉里的共享块 */
 
 .kv {
@@ -1253,14 +1210,6 @@
 .gate__budget-note {
   font-size: 12.5px;
   color: var(--text-3);
-}
-
-/* --- 结束区 --- */
-.closing__meta {
-  font-family: var(--font-sans);
-  font-size: 12.5px;
-  color: var(--text-3);
-  letter-spacing: 0.02em;
 }
 
 /* --- 抽屉共享块 --- */

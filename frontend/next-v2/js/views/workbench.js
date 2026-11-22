@@ -8,6 +8,10 @@
      store.runJob 提交并轮询，期间维护 busy 与产物纹样。
    - 修复排在线稿提取之前；完整纹样可明确跳过修复。矢量化从提取中分离，蒙版修改
      完再矢量化，平铺/导出最后。云端线稿只生成 lineart PNG，不自动矢量化。
+    - 线稿 PNG 没有前景蒙版记录：06 先用「准备蒙版」按 alpha 提取
+      （POST /jobs/extract mode=alpha、阈值 0）发布配对的 foreground_mask 与
+      transparent_png，再画笔修正；与批量路线 prepare_mask 同一语义，不改 RGB、
+      不重新描线、不调用云端，原线稿保留。
    - 未提交的界面参数（选区、阈值、笔迹、导出勾选等）放在模块内 draft，
      api.patch / api.refresh 重绘后仍在；高频输入用局部 DOM 更新。
    - 云端未配置时（store.seedream.enabled === false）新的生成入口受门禁约束；
@@ -68,6 +72,7 @@ import { openRunDialog } from "./processing-panel.js";
 import {
   formatPixels,
   healthPixelLimits,
+  pixelLimitForExtractMode,
   pixelLimitForProcessRoute,
   pixelLimitForVectorMode,
 } from "../processing.js";
@@ -97,6 +102,9 @@ const MIN_SCALE = 0.2;
 const MAX_SCALE = 3;
 const CROP_MIN_PX = 4;
 const MASK_MAX_POINTS = 2048;
+/** 线稿蒙版准备：与批量路线 prepare_mask 同一语义（alpha 提取发布配对蒙版与透明 PNG）。 */
+const LINE_MASK_CHAIN_KINDS = new Set(["cropped", "working_copy", "prepared", "enhanced"]);
+const LINE_MASK_PREP_KINDS = new Set(["lineart", ...LINE_MASK_CHAIN_KINDS]);
 
 /** 会话底座：原件与规范输入不能从工作台移除。 */
 const SESSION_BASE_KINDS = new Set(["original", "normalized", "normalized_input"]);
@@ -164,14 +172,14 @@ const LEFTREFILL_INPUT_KINDS = LEFTREFILL_RASTER_KINDS;
 const LEFTREFILL_REFERENCE_KINDS = LEFTREFILL_RASTER_KINDS;
 
 const STAGE_COPY = {
-  source: { title: "放入纹样", note: "原件与规范输入各留一份", desc: "原件只用于对照与重新导出，后续工序产出的是新纹样。" },
-  crop: { title: "框定纹样", note: "坐标使用当前纹样真实像素", desc: "在纸面上拖框，或直接填写像素坐标。right / bottom 是开区间终点。" },
-  repair: { title: "局部修复", note: "可跳过；完整纹样直接下一步", desc: "框出问题区域，用云端或本地 LeftRefill 生成修复候选；接受或拒绝都在右侧完成。纹样完整时可明确跳过。" },
-  candidate: { title: "选候选层", note: "按提示词拆分（可选）", desc: "云端按层拆分，勾选后合成一张候选；这一步不生成线稿。" },
-  process: { title: "生成线稿", note: "本地模型 / 云端模型", desc: "明确选择本地模型或云端模型；也可以改用 OpenCV 或颜色提取。这里只出 PNG，矢量化在 07。" },
-  mask: { title: "修正前景", note: "只改透明 PNG", desc: "在源图上补前景或擦除杂点；修正完成后再到 07 矢量化。" },
+  source: { title: "放入纹样", note: "PNG / JPEG", desc: "原图会保留，可随时对照。" },
+  crop: { title: "框定纹样", note: "坐标使用当前纹样真实像素", desc: "拖动选框，或输入像素坐标。" },
+  repair: { title: "局部修复", note: "可选", desc: "框出破损区域，生成候选后对比效果。" },
+  candidate: { title: "选候选层", note: "按提示词拆分（可选）", desc: "勾选要保留的图层，再合成一张图。" },
+  process: { title: "生成线稿", note: "本地模型 / 云端模型", desc: "选择处理方式，生成线稿或透明 PNG。" },
+  mask: { title: "修正前景", note: "线稿先准备蒙版", desc: "在源图上补前景或擦除杂点；修正完成后再到 07 矢量化。" },
   vector: { title: "转成矢量", note: "PNG → SVG", desc: "把线稿或透明 PNG 转成可编辑 SVG；颜色与细节在这一步调整。" },
-  tile: { title: "检查接缝", note: "2×2 / 3×3", desc: "从会话纹样选一个单元做整数重复；接缝观察写入纹样元数据。导出可勾选多个纹样。" },
+  tile: { title: "检查接缝", note: "2×2 / 3×3", desc: "选择平铺单元，检查接缝后导出。" },
 };
 
 const EXTRACT_MODES = [
@@ -355,6 +363,8 @@ function defaultDraft() {
     repair: null,
     repairMethod: "cloud",
     repairReferenceId: "",
+    /* 用户或历史记录明确指定过参考图后，不再用规范输入自动补默认值。 */
+    repairReferenceTouched: false,
     repairIntent: "restore_small_gap",
     repairFeather: 0,
     repairSize: "1K",
@@ -410,6 +420,8 @@ let viewState = null;
 let expectedImage = "";
 let lastCurrentId = "";
 let lastImageId = "";
+/* 当前接缝控件对应的平铺预览；切换预览时用它同步已保存的接缝观察。 */
+let lastSeamTarget = "";
 let lastSessionToken = null;
 let lastHealthCapability = "";
 let panelPref = null;
@@ -441,6 +453,7 @@ const currentStage = (state) => STAGES[clamp(Number(state.stage) || 1, 1, STAGES
 const stageCopy = (stage) => STAGE_COPY[stage.key] || STAGE_COPY.source;
 const currentAsset = () => store.currentAsset();
 const sessionImage = () => store.session.image;
+const sessionIsEmpty = () => !sessionImage() && !(store.session.assets || []).length;
 const imageMeta = () => sessionImage()?.meta || {};
 const brushRadius = () => clamp(Math.round(Number(viewState?.brush) || 24), 1, 128);
 
@@ -499,7 +512,7 @@ function lineartCapability() {
 function lineartCapabilityText() {
   const cap = lineartCapability();
   if (cap.available === true) {
-    return "前置检查通过：模型文件与依赖已就绪。";
+    return "";
   }
   if (cap.available === false) {
     return LINEART_REASON_TEXT[cap.reason] || "模型前置检查未通过。";
@@ -551,7 +564,7 @@ function leftrefillReasonText(reason) {
 function leftrefillCapabilityText() {
   const cap = leftrefillCapability();
   if (cap.available === true) {
-    return "本地修复模型已就绪：基础网络、模型文件与运行依赖都能找到；这只说明可以尝试运行，不保证这次修复一定成功。";
+    return "";
   }
   if (cap.available === false) {
     return `暂不可用：${leftrefillReasonText(cap.reason)} 云端修复不受影响，也不会自动改用云端。`;
@@ -580,11 +593,16 @@ export function leftRefillReferenceAssets(assets) {
   });
 }
 
-/** 用户明确选中的参考图；未选择、已移除或超出上限都返回 null，不自动挑一张。 */
-function selectedLeftRefillReference() {
-  const id = String(draft.repairReferenceId || "");
-  if (!id) return null;
-  return leftRefillReferenceAssets(store.session.assets).find((asset) => asset.asset_id === id) || null;
+/** 参考图随当前纹样解析；手动选择和恢复的历史选择优先。 */
+function selectedLeftRefillReference(references = leftRefillReferenceAssets(store.session.assets)) {
+  if (draft.repairReferenceTouched) {
+    return references.find(asset => asset.asset_id === draft.repairReferenceId) || null;
+  }
+  if (references.length === 1) return references[0];
+  const normalizedId = store.session.image?.normalized?.asset_id;
+  return references.find(asset => normalizedId
+    ? asset.asset_id === normalizedId
+    : asset.kind === "normalized_input") || null;
 }
 
 /**
@@ -628,7 +646,7 @@ export function leftRefillBlockReason({ capability, input, referenceId, box } = 
     if (input?.error === "missing") return "先打开一张纹样，或从纹样库打开一组纹样。";
     return "当前纹样不能作为本地 LeftRefill 输入；请先准备 512 × 512 的光栅纹样（如裁切图）。";
   }
-  if (!referenceId) return "请选择一张已保存的参考图；本地 LeftRefill 不会自动改用当前纹样。";
+  if (!referenceId) return "请选择一张已保存的参考图。";
   if (!box || Number(box.width) <= 0 || Number(box.height) <= 0) return "请设置修复区域。";
   return "";
 }
@@ -659,7 +677,7 @@ export function matchingDamageMasks(assets, inputAsset) {
 
 /**
  * 本地 LeftRefill 的显式条件清单：目标 512×512、显式参考图、正面积修复框、
- * 损伤蒙版记录与模型前置检查。当前界面提交修复框，不自动选用蒙版。
+ * 损伤蒙版记录与模型前置检查。界面只提交修复框，不会自动选用已登记的损伤蒙版。
  */
 export function leftRefillConditions({
   capability,
@@ -674,7 +692,7 @@ export function leftRefillConditions({
   const rows = [];
   const target = inputAsset || input?.asset || null;
   if (cap.available === true) {
-    rows.push({ key: "capability", label: "本地模型", state: "ok", detail: "前置检查通过（文件与依赖存在），但这只表示可以尝试，不保证本次推理成功。" });
+    rows.push({ key: "capability", label: "本地模型", state: "ok", detail: "检查通过（基础网络、模型文件与依赖存在）。" });
   } else if (cap.available === false) {
     rows.push({
       key: "capability",
@@ -754,9 +772,7 @@ export function leftRefillConditions({
       key: "box",
       label: "修复区域",
       state: "ok",
-      detail: `${Math.round(box.width)} × ${Math.round(box.height)} px · 原点 (${Math.round(
-        box.left
-      )}, ${Math.round(box.top)})；框外像素保持不变。`,
+      detail: repairRegionDescription(box),
     });
   }
 
@@ -768,23 +784,17 @@ export function leftRefillConditions({
             key: "damage_mask",
             label: "缺损蒙版",
             state: "info",
-            detail: `找到 ${masks.length} 张相关损伤蒙版记录（#${masks.map((mask) => shortId(mask.asset_id)).join("、#")}）；当前界面不会自动选用这些蒙版，这次仍按修复框推断缺损区域，框内非缺损像素也会进入修复范围。`,
+            detail: `找到 ${masks.length} 张相关损伤蒙版记录；这次不会自动选用。`,
           }
         : {
             key: "damage_mask",
             label: "缺损蒙版",
             state: "info",
-            detail: "没有找到同坐标损伤蒙版；这次按修复框推断缺损区域，框内非缺损像素也会进入修复范围。",
+            detail: "没有登记同坐标损伤蒙版；这次按修复框处理。",
           }
     );
   }
 
-  rows.push({
-    key: "reality",
-    label: "结果核验",
-    state: "info",
-    detail: "前置条件通过、模型能发现区域，都不等于真实推理成功；生成后仍需接受或拒绝并人工核对。",
-  });
   return rows;
 }
 
@@ -796,17 +806,8 @@ export function repairConditionSummary(rows) {
   return "条件已满足；可以提交本地修复。";
 }
 
-function repairChecklist(rows) {
-  if (!rows?.length) return "";
-  return `<ul class="wb-checklist">${rows
-    .map(
-      (row) =>
-        `<li class="wb-checklist__item" data-state="${esc(row.state)}">
-          <span class="wb-checklist__dot" aria-hidden="true"></span>
-          <span class="wb-checklist__body"><strong>${esc(row.label)}</strong><span>${esc(row.detail)}</span></span>
-        </li>`
-    )
-    .join("")}</ul>`;
+function repairRegionDescription(box) {
+  return `${Math.round(box.width)} × ${Math.round(box.height)} px · 原点 (${Math.round(box.left)}, ${Math.round(box.top)})；框外像素保持不变。`;
 }
 
 function mediaStyle(asset) {
@@ -899,9 +900,7 @@ function tileUnitAssets() {
 
 function tileUnit() {
   const list = tileUnitAssets();
-  const selected = list.find((asset) => asset.asset_id === draft.tileUnitId);
-  if (selected) return selected;
-  return list[list.length - 1] || null;
+  return list.find(asset => asset.asset_id === draft.tileUnitId) || null;
 }
 
 function tilePreviewFor(unitId, n) {
@@ -909,18 +908,46 @@ function tilePreviewFor(unitId, n) {
   for (let i = assets.length - 1; i >= 0; i -= 1) {
     const asset = assets[i];
     if (asset.kind !== "tile_preview") continue;
-    const sameUnit = (asset.unit_asset_id || asset.parameters?.unit_asset_id) === unitId;
-    const rows = asset.rows || asset.parameters?.rows;
-    const cols = asset.cols || asset.parameters?.cols;
-    if (sameUnit && Number(rows) === n && Number(cols) === n) return asset;
+    const settings = tilePreviewSettings(asset);
+    if (settings.unitId === unitId && settings.n === n) return asset;
   }
   return null;
 }
 
-function tilePreviewLatest() {
-  const assets = store.session.assets || [];
-  for (let i = assets.length - 1; i >= 0; i -= 1) if (assets[i].kind === "tile_preview") return assets[i];
-  return null;
+/** 当前单元与规格对应的平铺预览；没有就返回 null，不用旧预览或其它规格顶替。 */
+function tilePreviewForCurrent(state) {
+  const unitId = draft.tileUnitId;
+  if (!unitId) return null;
+  const current = currentAsset();
+  if (current?.kind === "tile_preview") {
+    const settings = tilePreviewSettings(current);
+    // 明确选中的旧预览只要与当前单元和规格一致，就继续显示它本身，
+    // 不换成同单元同规格的更新预览，避免接缝记录写到另一张结果。
+    if (settings.unitId === unitId && settings.n === tileN(state)) return current;
+  }
+  return tilePreviewFor(unitId, tileN(state));
+}
+
+/** 平铺预览记录的单元与规格；旧记录缺少字段时返回空值。 */
+function tilePreviewSettings(preview) {
+  const unitId = String(preview?.unit_asset_id || preview?.parameters?.unit_asset_id || preview?.source_asset_id || "");
+  const rows = Number(preview?.rows ?? preview?.parameters?.rows);
+  const cols = Number(preview?.cols ?? preview?.parameters?.cols);
+  const n = rows === 2 && cols === 2 ? 2 : rows === 3 && cols === 3 ? 3 : 0;
+  return { unitId, n };
+}
+
+/**
+ * 查看历史平铺结果时，把单元与规格切到该预览记录的值，
+ * 让画布、参数面板与接缝写入都指向同一张预览。
+ */
+function alignTileViewToPreview(state, preview) {
+  const { unitId, n } = tilePreviewSettings(preview);
+  if (unitId) {
+    draft.tileUnitId = unitId;
+    draft.tileUnitTouched = true;
+  }
+  if (n) state.tile = n === 3 ? "3x3" : "2x2";
 }
 
 function compareInfo(stage) {
@@ -983,9 +1010,14 @@ function syncDrafts(state) {
     repairState.info = null;
     repairState.loading = false;
     repairState.error = "";
+    lastSeamTarget = "";
     resetMaskStrokes();
     draft.repairSkipped = false;
-    draft.repairReferenceId = "";
+    // 同图深链可能在用户改选后才完成加载；仅无图归属的旧记录按会话隔离。
+    if (!store.session.imageId) {
+      draft.repairReferenceId = "";
+      draft.repairReferenceTouched = false;
+    }
     lastRestoredRepairKey = "";
     if (sessionTimer) {
       window.clearTimeout(sessionTimer);
@@ -1010,9 +1042,11 @@ function syncDrafts(state) {
     cand.selectionTouched = false;
     draft.repairSkipped = false;
     draft.repairReferenceId = "";
+    draft.repairReferenceTouched = false;
     lastRestoredRepairKey = "";
     repairState.info = null;
     repairState.error = "";
+    lastSeamTarget = "";
   }
   if (expectedImage && imageId === expectedImage) ui.sessionError = "";
   if (id !== lastCurrentId) {
@@ -1029,18 +1063,28 @@ function syncDrafts(state) {
       draft.repair = { ...pendingRepairBox.box };
       pendingRepairBox = null;
     }
+    // 打开历史平铺结果时，让单元与规格跟随该预览，画布和接缝写入才不会错位。
+    if (asset?.kind === "tile_preview" && currentStage(state).key === "tile") {
+      alignTileViewToPreview(state, asset);
+    }
     resetMaskStrokes();
     ui.error = "";
     ui.errorDetail = "";
     cand.selected = [];
   }
   const units = tileUnitAssets();
-  if (!units.length) {
-    draft.tileUnitId = "";
-  } else {
-    const exists = units.some((asset) => asset.asset_id === draft.tileUnitId);
-    const newest = units[units.length - 1].asset_id;
-    if (!exists || (!draft.tileUnitTouched && newest !== draft.tileUnitId)) draft.tileUnitId = newest;
+  const viewingSavedUnit = asset?.kind === "tile_preview" && tilePreviewSettings(asset).unitId === draft.tileUnitId;
+  if (!viewingSavedUnit && (!draft.tileUnitTouched || !units.some(unit => unit.asset_id === draft.tileUnitId))) {
+    const preferred = TILE_UNIT_KINDS.has(asset?.kind) ? asset : units.at(-1);
+    draft.tileUnitId = preferred?.asset_id || "";
+  }
+  // 接缝控件跟随当前单元与规格匹配的预览；只在该预览切换时同步已保存值，
+  // 不覆盖用户正在选择但尚未保存的接缝观察。
+  const activeTilePreview = tilePreviewForCurrent(state);
+  const seamTarget = activeTilePreview?.asset_id || `${draft.tileUnitId}:${tileN(state)}`;
+  if (seamTarget !== lastSeamTarget) {
+    draft.seam = activeTilePreview?.seam_observation || "not_reviewed";
+    lastSeamTarget = seamTarget;
   }
 }
 
@@ -1211,18 +1255,15 @@ function loadingBox() {
 }
 
 function noAssetPanel() {
-  return `
-  ${sec(
+  return sec(
     "开始",
     "",
-    `<div class="wb-note">${icon("info")}<span>先打开一张纹样，再进入这一步。</span></div>
-     <button class="wb-drop" type="button" data-act="upload">
-       ${icon("upload")}
-       <span class="wb-drop__title">上传原件</span>
-       <span class="mono wb-drop__hint">PNG / JPEG · 单张 ≤ 20 MB</span>
-     </button>
-     <button class="btn btn--ghost btn--sm btn--block" type="button" data-act="library">${icon("gallery")}去纹样库挑一件</button>`
-  )}`;
+    `<p class="field__hint">${
+      sessionIsEmpty()
+        ? "请先打开一张纹样。"
+        : "从左侧纹样列选择一张。"
+    }</p>`
+  );
 }
 
 /* ------------------------------------------------------------------ 纹样分组 */
@@ -1415,7 +1456,7 @@ function railHtml(state) {
 
   return `
   <aside class="wb-rail" aria-label="文档与工序">
-    <div class="wb-doc">
+    ${image || asset ? `<div class="wb-doc">
       <div class="wb-doc__top">
         <span class="label">文档</span>
         ${grade ? `<span class="stamp ${stampClass}" title="评级">${esc(grade)}</span>` : ""}
@@ -1432,12 +1473,9 @@ function railHtml(state) {
                <div><dt>来源</dt><dd>${esc(sourceText())}</dd></div>
                <div><dt>许可证</dt><dd>${esc(licenseLabel(meta.license || image.original?.license))}</dd></div>
                <div><dt>创建</dt><dd class="mono">${esc(createdText())}</dd></div>`
-            : asset
-            ? `<div><dt>纹样</dt><dd>${esc(kindLabel(asset.kind))}</dd></div>
+            : `<div><dt>纹样</dt><dd>${esc(kindLabel(asset.kind))}</dd></div>
                <div><dt>尺寸</dt><dd class="mono">${esc(dimsOf(asset))}</dd></div>
                <div><dt>创建</dt><dd class="mono">${esc(formatTime(asset.created_at, { withDate: true }))}</dd></div>`
-            : `<div><dt>状态</dt><dd>尚未打开纹样</dd></div>
-               <div><dt>方式</dt><dd>上传或从纹样库打开</dd></div>`
         }
       </dl>
       ${
@@ -1447,7 +1485,7 @@ function railHtml(state) {
              </button>`
           : ""
       }
-    </div>
+    </div>` : ""}
 
     <section class="wb-rail__sec wb-rail__sec--steps">
       <header class="wb-rail__head">
@@ -1626,11 +1664,7 @@ function emptyPlate() {
     <div class="wb-empty-state">
       <span class="wb-empty-state__icon">${icon("image")}</span>
       <h3>还没有打开纹样</h3>
-      <p>上传一张 PNG 或 JPEG，或从纹样库挑一件已经处理过的纹样。</p>
-      <div class="wb-empty-state__actions">
-        <button class="btn btn--primary btn--sm" type="button" data-act="upload">${icon("upload")}上传纹样</button>
-        <button class="btn btn--ghost btn--sm" type="button" data-act="library">去纹样库</button>
-      </div>
+      <p>用顶栏「上传纹样」开始。</p>
     </div>
   </div>`;
 }
@@ -1640,25 +1674,15 @@ function loadingPlate() {
 }
 
 function tilePlate(state, stage) {
-  const asset = currentAsset();
   const n = tileN(state);
   const unit = tileUnit();
-  const preview = unit ? tilePreviewFor(unit.asset_id, n) : null;
+  const preview = tilePreviewForCurrent(state);
   if (preview) {
     return mediaFrame(
       preview.width || 1,
       preview.height || 1,
       assetPreview(preview),
       `<span class="wb-badge mono">平铺结果 ${n} × ${n}</span>`,
-      "wb-media--tile"
-    );
-  }
-  if (asset && asset.kind === "tile_preview" && (!unit || !tilePreviewFor(unit.asset_id, n))) {
-    return mediaFrame(
-      asset.width || 1,
-      asset.height || 1,
-      assetPreview(asset),
-      `<span class="wb-badge mono">平铺结果</span>`,
       "wb-media--tile"
     );
   }
@@ -1778,7 +1802,7 @@ function captionFor(stage, state) {
   if (expectedImage && store.session.imageId !== expectedImage) {
     return ui.sessionError || "正在读取本机纹样…";
   }
-  if (!asset) return ui.sessionError || "上传一张纹样开始";
+  if (!asset) return ui.sessionError || "—";
   if (state.compare) {
     const info = compareInfo(stage);
     if (info.ok) {
@@ -1814,13 +1838,13 @@ function captionFor(stage, state) {
       if (draft.repairSkipped) return "已跳过修复 · 纹样完整，不调用云端";
       if (repairMethod() === "leftrefill") {
         const cap = leftrefillCapability();
-        const capText =
-          cap.available === true ? "前置检查通过" : cap.available === false ? "前置检查未通过" : "能力未知";
+        const capNote =
+          cap.available === false ? " · 本地模型不可用" : cap.available === null ? " · 模型能力未知" : "";
         const input = leftRefillInput(store.session.assets, asset);
         const reference = selectedLeftRefillReference();
-        if (!input.asset) return `本地 LeftRefill · ${capText} · 需要 512 × 512 输入`;
+        if (!input.asset) return `本地 LeftRefill${capNote} · 需要 512 × 512 输入`;
         const box = draft.repair;
-        return `本地 LeftRefill · ${capText} · 输入 ${kindLabel(input.asset.kind)} ${dimsOf(
+        return `本地 LeftRefill${capNote} · 输入 ${kindLabel(input.asset.kind)} ${dimsOf(
           input.asset
         )} · 参考 ${reference ? dimsOf(reference) : "未选"}${
           box ? ` · 修复框 ${Math.round(box.width)} × ${Math.round(box.height)}` : ""
@@ -1846,9 +1870,9 @@ function captionFor(stage, state) {
     case "process": {
       if (draft.processRoute === "local") {
         const cap = lineartCapability();
-        return `本地模型 · ${
-          cap.available === true ? "前置检查通过" : cap.available === false ? "前置检查未通过" : "能力未知"
-        } · 当前 ${kindLabel(asset.kind)}`;
+        const capNote =
+          cap.available === false ? " · 本地模型不可用" : cap.available === null ? " · 模型能力未知" : "";
+        return `本地模型${capNote} · 当前 ${kindLabel(asset.kind)}`;
       }
       if (draft.processRoute === "cloud") {
         const input = cloudLineartInput(store.session.assets, asset);
@@ -1889,15 +1913,21 @@ function processJobMatches(job, route) {
   return false;
 }
 
+function repairAppliesToAsset(info, asset) {
+  if (!info || !asset?.asset_id) return false;
+  return [info.input_asset_id, info.candidate_asset?.asset_id, info.composited_asset?.asset_id,
+    info.decision?.accepted_asset_id].includes(asset.asset_id);
+}
+
 function statusFor(stage, state) {
   const asset = currentAsset();
-  if (!asset) return ui.sessionError || "未打开纹样";
+  if (!asset) return ui.sessionError || "";
   if (ui.running) return `任务运行中：${ui.job?.kind ? jobKindLabel(ui.job.kind) : "提交中"} · ${progressOf(ui.job)}%`;
   if (ui.error) return ui.error;
   const done = ui.job && ui.jobStage === stageNo(stage) && ui.job.state === "succeeded";
   switch (stage.key) {
     case "source":
-      return "无需提交";
+      return "";
     case "crop":
       return done
         ? "裁切完成 · 可在纹样轨切换结果"
@@ -1907,17 +1937,22 @@ function statusFor(stage, state) {
           )}, ${Math.round(draft.crop.top)})`
         : "未设置选区";
     case "repair": {
+      const info = repairAppliesToAsset(repairState.info, asset) ? repairState.info : null;
       if (draft.repairSkipped) return "已跳过修复 · 不会调用云端，也不产生新纹样";
-      if (done) return "修复任务完成 · 在右侧接受或拒绝候选";
-      if (repairMethod() === "leftrefill") {
+      const method = repairMethod();
+      if (method === "leftrefill") {
         const cap = leftrefillCapability();
         const input = leftRefillInput(store.session.assets, asset);
         const reference = selectedLeftRefillReference();
         if (cap.available === false) return "本地 LeftRefill 前置检查未通过；可显式改用云端修复或跳过";
         if (!input.asset) return input.error === "size" ? "本地 LeftRefill 需要 512 × 512 输入；请先裁切" : "先选择 512 × 512 修复输入";
         if (!reference) return "先选择一张已保存的参考图";
-        return "LeftRefill 候选未生成";
       }
+      if (info?.state === "accepted") return "修复已接受 · 可继续下一步";
+      if (info?.state === "rejected") return "修复已拒绝 · 可重新生成或跳过";
+      if (info?.state === "waiting_user") return "修复候选已生成 · 请接受或拒绝";
+      if (done) return "修复任务完成 · 在右侧接受或拒绝候选";
+      if (method === "leftrefill") return "LeftRefill 候选未生成";
       if (!store.seedream?.enabled) return "云端未配置，修复不可用；完整纹样可直接跳过";
       return "修复候选未生成";
     }
@@ -1962,7 +1997,7 @@ function statusFor(stage, state) {
     }
     case "tile": {
       const unit = tileUnit();
-      if (done) return "平铺预览完成 · 可在纹样轨查看结果";
+      if (tilePreviewForCurrent(state)) return "平铺预览完成 · 可在纹样轨查看结果";
       return unit
         ? `${kindLabel(unit.kind)} ${dimsOf(unit)} · 接缝${SEAM_LABELS[draftSeam()]}`
         : "没有可平铺的单元";
@@ -1976,20 +2011,15 @@ function statusShort(stage, state) {
   if (ui.running) return "任务运行中";
   if (ui.error) return "上一步失败";
   const asset = currentAsset();
-  if (!asset) return "未打开纹样";
+  if (!asset) return "";
   const done = ui.job && ui.jobStage === stageNo(stage) && ui.job.state === "succeeded";
   switch (stage.key) {
     case "source":
-      return "无需提交";
+      return "";
     case "crop":
       return done ? "裁切完成" : "裁切未提交";
     case "repair":
-      if (draft.repairSkipped) return "已跳过修复";
-      if (done) return "修复任务完成";
-      if (repairMethod() === "leftrefill") {
-        return leftrefillCapability().available === false ? "LeftRefill 前置检查未通过" : "LeftRefill 未提交";
-      }
-      return store.seedream?.enabled ? "候选未生成" : "云端未配置 · 可跳过";
+      return "";
     case "candidate":
       return store.seedream?.enabled ? `${cand.selected.length} 层已选` : "云端未配置 · 可跳过";
     case "process":
@@ -1998,8 +2028,14 @@ function statusShort(stage, state) {
       if (draft.processRoute === "cloud") return "云端线稿未提交";
       if (draft.processRoute === "opencv") return "OpenCV 线稿未提交";
       return "颜色提取未提交";
-    case "mask":
-      return done ? "蒙版修正完成" : maskState.strokes.length ? `${maskState.strokes.length} 笔未提交` : "还没有笔迹";
+    case "mask": {
+      if (done) return "蒙版修正完成";
+      if (maskState.strokes.length) return `${maskState.strokes.length} 笔未提交`;
+      const prep = lineartMaskPrep(store.session.assets, asset, { cap: maskPrepCap() });
+      if (prep.error === "") return prep.pair ? "已准备 · 切到透明 PNG 再画笔" : "待准备蒙版";
+      if (prep.error === "pixels") return "线稿超限 · 先创建工作副本";
+      return "还没有笔迹";
+    }
     case "vector":
       if (currentAsset()?.kind === "svg") {
         const svgDraft = currentSvgDraft();
@@ -2009,7 +2045,11 @@ function statusShort(stage, state) {
       return done ? "矢量化完成" : "未矢量化";
     case "tile": {
       const unit = tileUnit();
-      return done ? "平铺预览已生成" : unit ? `${tileSpec(state)} 未生成` : "没有平铺单元";
+      return tilePreviewForCurrent(state)
+        ? "平铺预览已生成"
+        : unit
+        ? `${tileSpec(state)} 未生成`
+        : "没有平铺单元";
     }
     default:
       return "";
@@ -2020,7 +2060,7 @@ function statusShort(stage, state) {
 
 function mainHtml(stage, state) {
   const asset = currentAsset();
-  const tilePreview = stage.key === "tile" ? (tilePreviewFor(tileUnit()?.asset_id || "", tileN(state)) || (asset?.kind === "tile_preview" ? asset : null)) : null;
+  const tilePreview = stage.key === "tile" ? tilePreviewForCurrent(state) : null;
   const dims = stage.key === "tile" ? tilePreview || tileUnit() : asset;
   const zoom = zoomMode(state);
   const compare = compareInfo(stage);
@@ -2128,7 +2168,7 @@ const vectorModeLabel = (mode) => (VECTOR_MODES.find(([value]) => value === mode
  */
 export function vectorModeCaveat(mode) {
   if (mode !== "contour") return "";
-  return "轮廓模式只保留外轮廓与细线：微小孔洞、断笔和接近像素级的细节可能被合并或丢失。要保留这些结构，请改用彩色模式并提高细节等级；本提示不改变算法。";
+  return "要保留微小孔洞和细线，可选彩色模式并提高细节等级。";
 }
 const repairIntentLabel = (intent) => (REPAIR_INTENTS.find(([value]) => value === intent) || ["", intent])[1];
 
@@ -2141,22 +2181,7 @@ function sourcePanel(state) {
   const meta = imageMeta();
   const asset = currentAsset();
   if (!image && !asset) {
-    return `
-    ${sec(
-      "放入纹样",
-      "单张",
-      `<button class="wb-drop" type="button" data-act="upload">
-        ${icon("upload")}
-        <span class="wb-drop__title">上传原件或点击选择</span>
-        <span class="mono wb-drop__hint">PNG / JPEG · 单张 ≤ 20 MB</span>
-      </button>
-      <p class="field__hint">上传后保存原件、规范输入、aHash 与来源记录。</p>`
-    )}
-    ${sec(
-      "或从纹样库开始",
-      "",
-      `<button class="btn btn--ghost btn--sm btn--block" type="button" data-act="library">${icon("gallery")}去纹样库挑一件</button>`
-    )}`;
+    return `<p class="field__hint">PNG / JPEG · 单张 ≤ 20 MB</p>`;
   }
   const original = image?.original || null;
   const normalized = image?.normalized || null;
@@ -2190,11 +2215,7 @@ function sourcePanel(state) {
       sessionAssets.length
         ? assetChoices(sessionAssets, { currentId: store.session.currentAssetId })
         : `<p class="field__hint">当前会话没有登记原始纹样。</p>`
-    }
-     <div class="wb-inline">
-       <button class="btn btn--ghost btn--sm" type="button" data-act="upload">${icon("upload")}重新上传</button>
-       <button class="btn btn--quiet btn--sm" type="button" data-act="library">换一件</button>
-     </div>`
+    }`
   )}
   ${
     normalized
@@ -2237,7 +2258,7 @@ function cropPanel(state) {
     <p class="wb-crop-summary mono" data-live="crop-summary">${Math.round(crop.width)} × ${Math.round(
       crop.height
     )} · 原点 (${Math.round(crop.left)}, ${Math.round(crop.top)})</p>
-    <p class="field__hint">坐标使用当前纹样真实像素：right = left + width，bottom = top + height，均为开区间终点。也可以直接在纸面上拖一个框。</p>`
+    <p class="field__hint">在图上拖出要保留的区域，也可以输入像素值微调。</p>`
   )}
   ${sec(
     "比例预设",
@@ -2311,6 +2332,11 @@ function processPanel(state) {
   const cap = lineartCapability();
   const outputs = (ui.job && ui.jobStage === stageNo(stage) ? ui.job.result?.assets || [] : []).filter(Boolean);
   const lastProcess = lastJob(["lineart", "cloud-lineart", "extract", "pipeline"]);
+  const inkRatio = asset.kind === "lineart" ? asset.parameters?.ink_ratio : null;
+  const device = asset.parameters?.inference_device;
+  const lineartStats = Number.isFinite(inkRatio)
+    ? `当前线稿的线条像素约占 ${(inkRatio * 100).toFixed(2)}%${device ? ` · 推理设备 ${String(device).toUpperCase()}` : ""}`
+    : "";
   const jobAssets = outputs.length
     ? outputs
     : (store.session.assets || []).filter((entry) => lastProcess && entry.generated_by_job_id === lastProcess.job_id);
@@ -2388,16 +2414,22 @@ function processPanel(state) {
   ${pixelCapSection(input.asset, routeCap, capLabel)}
   ${
     route === "local"
-      ? `${sec(
+      ? cap.available === true ? "" : sec(
           "本地模型",
-          cap.available === true ? "前置检查通过" : cap.available === false ? "前置检查未通过" : "能力未知",
-          `${noteBox(esc(lineartCapabilityText()), cap.available === false ? "error" : "info")}
+          cap.available === false ? "不可用" : "状态未知",
+          `${
+            cap.available === false
+              ? noteBox(esc(lineartCapabilityText()), "error")
+              : cap.available === null
+              ? noteBox(esc(lineartCapabilityText()), "info")
+              : ""
+          }
           <p class="field__hint">${
             cap.available === false
-              ? "这条路线暂不可用；请改用「云端模型」「OpenCV」或「颜色提取」。"
+              ? "请改用「云端模型」「OpenCV」或「颜色提取」。"
               : "只生成线稿 PNG，不自动矢量化。"
           }</p>`
-        )}`
+        )
       : route === "cloud"
       ? cloudEnabled
         ? `${sec(
@@ -2428,13 +2460,13 @@ function processPanel(state) {
   ${sec(
     "最新产物",
     jobAssets.length ? `${jobAssets.length} 个` : "暂无",
-    `${
+    `${lineartStats ? `<p class="field__hint">${esc(lineartStats)}</p>` : ""}${
       jobAssets.length
         ? `${assetChoices(jobAssets, { currentId: store.session.currentAssetId })}
            <div class="wb-inline">
              <button class="btn btn--ghost btn--sm" type="button" data-act="go-vector">${icon("spark")}去 07 矢量化</button>
            </div>`
-        : `<p class="field__hint">提交后这里会列出线稿 PNG、前景蒙版与透明 PNG；矢量化请到 07。</p>`
+        : `<p class="field__hint">提交后可在这里查看提取结果；需要修线时到 06，直接矢量化到 07。</p>`
     }`
   )}`;
 }
@@ -2554,6 +2586,41 @@ function candidatePanel(state) {
   )}`;
 }
 
+/**
+ * 06 里“当前纹样还不能直接画”的来源处理（操作按钮统一在底部动作栏）：
+ * - 线稿（lineart / 线稿直链派生的光栅）：提示先准备蒙版，或切到已准备好的透明 PNG；
+ * - 线稿超过本机上限：给显式工作副本入口，不隐式缩放；
+ * - 其它类型：不把彩色透明图当黑线稿补画，只提示先做颜色提取或选已有透明 PNG。
+ */
+function maskSourceBody(asset, prep, usable) {
+  if (prep.error === "pixels") {
+    return `${noteBox(
+      `这张线稿 ${esc(dimsOf(asset))} 超过本机准备蒙版的上限；请先创建显式工作副本，不会自动缩放。`,
+      "error"
+    )}
+    ${pixelCapSection(asset, prep.cap, "线稿蒙版准备")}`;
+  }
+  if (prep.error === "") {
+    if (prep.pair) {
+      return `${noteBox(
+        `这张线稿已准备好透明 PNG ${esc(shortId(prep.pair.asset_id))}；切过去即可继续画笔修正，不会重复提交。`
+      )}
+      ${assetChoices([prep.pair], { currentId: store.session.currentAssetId })}`;
+    }
+    return `${noteBox(
+      "线稿没有蒙版记录：先用「准备蒙版」按 alpha 方式发布配对的透明 PNG（阈值 0，保留半透明边缘）。只在本机执行，不改线稿像素、不重新描线、不调用云端，原线稿保留。"
+    )}
+    <p class="field__hint">准备好后直接画笔：补前景在透明处写入黑线，擦除去掉杂点。</p>`;
+  }
+  return `${noteBox(
+    prep.error === "unsupported"
+      ? "当前纹样不是线稿，也不是可修正的透明 PNG（或缺少来源蒙版）。只有线稿能用「准备蒙版」；其它纹样请先在 05 用颜色提取生成透明 PNG，或从下面选择一个透明 PNG。"
+      : "先打开一张纹样。",
+    "error"
+  )}
+  ${usable.length ? assetChoices(usable, { currentId: store.session.currentAssetId }) : ""}`;
+}
+
 function maskPanel(state) {
   const stage = currentStage(state);
   const asset = currentAsset();
@@ -2565,6 +2632,14 @@ function maskPanel(state) {
       (entry.source_rgb_asset_id || (entry.parents || []).some((parent) => parent.role === "source_rgb")) &&
       (entry.source_mask_asset_id || (entry.parents || []).some((parent) => parent.role === "foreground_mask"))
   );
+  const prep = lineartMaskPrep(store.session.assets, asset, { cap: maskPrepCap() });
+  const sourceStatus = source?.sourceId
+    ? `源图 ${esc(shortId(source.sourceId))}`
+    : prep.pair
+    ? "已准备"
+    : prep.error === ""
+    ? "待准备"
+    : "缺少记录";
   const points = maskState.strokes.reduce((sum, stroke) => sum + stroke.points.length, 0);
   const error = maskError();
   return `
@@ -2573,7 +2648,7 @@ function maskPanel(state) {
   ${noticeBox()}
   ${sec(
     "蒙版来源",
-    source?.sourceId ? `源图 ${esc(shortId(source.sourceId))}` : "缺少记录",
+    sourceStatus,
     source?.sourceId && source?.maskId
       ? `<dl class="kv wb-kv">
           <div class="kv__row"><dt>源图</dt><dd class="mono">${esc(source.sourceId)}</dd></div>
@@ -2581,11 +2656,7 @@ function maskPanel(state) {
           <div class="kv__row"><dt>画布</dt><dd class="mono">${esc(dimsOf(asset))}</dd></div>
         </dl>
         <p class="field__hint">画笔坐标使用源图 RGB 像素；提交后生成新的透明 PNG，修正完成再到 07 矢量化。</p>`
-      : `${noteBox(
-          "当前纹样不是可修正的透明 PNG（或缺少来源蒙版）。请先在 05 用颜色提取生成透明 PNG，或从下面选择一个透明 PNG。",
-          "error"
-        )}
-        ${usable.length ? assetChoices(usable, { currentId: store.session.currentAssetId }) : ""}`
+      : maskSourceBody(asset, prep, usable)
   )}
   ${sec(
     "模式",
@@ -2784,27 +2855,15 @@ function repairPanel(state, methodOverride = repairMethod()) {
     : "";
   const localProblem = !localInput.asset
     ? localInput.error === "size"
-      ? `本地 LeftRefill 固定 512 × 512；当前纹样是 ${localInput.width} × ${localInput.height}，不会自动缩放。请先在 02 裁切出 512 × 512 的图块。`
+      ? `当前纹样是 ${localInput.width} × ${localInput.height}；本地修复需要 512 × 512，请先在 02 裁切。`
       : localInput.error === "missing"
       ? "先打开一张纹样，或从纹样库打开一组纹样。"
       : `当前纹样是「${kindLabel(asset?.kind || "纹样")}」，不能作为本地 LeftRefill 输入。请先准备 512 × 512 的光栅纹样（如裁切图）。`
     : "";
   const references = leftRefillReferenceAssets(store.session.assets);
-  const reference = selectedLeftRefillReference();
-  const localConditions =
-    method === "leftrefill"
-      ? leftRefillConditions({
-          capability: cap,
-          input: localInput,
-          referenceId: String(draft.repairReferenceId || ""),
-          references,
-          box,
-          inputAsset: localInput.asset,
-          assets: store.session.assets,
-        })
-      : [];
+  const reference = selectedLeftRefillReference(references);
   const referenceOptions = [
-    ["", "请选择已保存的参考图"],
+    ...(!reference ? [["", "选择参考图"]] : []),
     ...references.map((entry) => [entry.asset_id, `${kindLabel(entry.kind)} · ${dimsOf(entry)} · #${shortId(entry.asset_id)}`]),
   ];
   const boxSection = (hint) =>
@@ -2829,7 +2888,7 @@ function repairPanel(state, methodOverride = repairMethod()) {
   ${noticeBox()}
   ${sec(
     "修复方式",
-    method === "leftrefill" ? "本地 · 不上传" : "云端 · 需逐次确认",
+    method === "leftrefill" ? "本地 · 不上传、不计费" : "云端 · 需逐次确认",
     `${segField(
       "repairMethod",
       "修复方式",
@@ -2839,29 +2898,26 @@ function repairPanel(state, methodOverride = repairMethod()) {
       ],
       method
     )}
-    ${noteBox(esc(leftrefillCapabilityText()), cap.available === false ? "error" : "info")}
     ${
       cap.available === false
-        ? `<p class="field__hint">本地修复模型不是一张可以直接修复图片的独立模型：上传的小模型只是学习到的提示向量，必须配合匹配的 SD2 基础网络才能生成图像。基础网络缺失时，这一路线不可用。</p>`
+        ? `${noteBox(esc(leftrefillCapabilityText()), "error")}
+           ${
+             cap.reason === "base_model_missing"
+               ? `<p class="field__hint">本地路线还需要匹配的 SD2 基础网络；缺少时只能改用云端修复或跳过。</p>`
+               : ""
+           }`
+        : cap.available === null
+        ? noteBox(esc(leftrefillCapabilityText()), "info")
         : ""
-    }
-    <p class="field__hint">这里只显示本机启动时对本地修复模型的检查结果：确认基础网络、模型文件与运行依赖是否存在，不加载模型，也不保证推理一定成功。</p>`
+    }`
   )}
   ${
     skipped
-      ? noteBox("已跳过修复：纹样按完整处理，不生成修复候选，也不会调用云端。", "info")
+      ? noteBox("已跳过修复：按完整纹样继续，不生成候选，也不调用云端。", "info")
       : method === "cloud" && !cloudEnabled
-      ? noteBox("云端新生成已关闭；这次修复的候选仍可接受或拒绝，不会新增云端调用。纹样完整也可以直接跳过。", "info")
+      ? noteBox("云端新生成已关闭；已有候选仍可接受或拒绝，不会新增调用。", "info")
       : ""
   }
-  ${sec(
-    "修复可跳过",
-    skipped ? "已跳过" : "完整纹样不必做",
-    `<p class="field__hint">修复排在线稿提取之前；纹样完整、没有明显缺口或断线时，可以明确跳过，不产生纹样与调用。</p>
-     <button class="btn btn--ghost btn--sm" type="button" data-act="skip-repair">${
-       skipped ? "继续修复" : "完整，跳过修复"
-     }</button>`
-  )}
   ${
     skipped
       ? ""
@@ -2882,6 +2938,7 @@ function repairPanel(state, methodOverride = repairMethod()) {
                 })}`
               )}
           ${boxSection("区域使用当前输入的像素坐标；云端的全图候选可能改变整幅画面，接受前需额外确认。")}
+          <p class="field__hint">提交会上传当前整张输入与框坐标到云端服务商，并按次计费；失败不会自动重发。需要不上传、不计费的修复时，切到「本地 LeftRefill」。</p>
           ${sec(
             "修复参数",
             `262,144–1,048,576 px`,
@@ -2893,22 +2950,20 @@ function repairPanel(state, methodOverride = repairMethod()) {
           ? sec(
               "目标输入",
               `512 × 512 · ${esc(kindLabel(localInput.asset.kind))}`,
-              `<p class="field__hint">本地目标固定 512 × 512；当前 ${esc(
-                dimsOf(localInput.asset)
-              )} · #${esc(shortId(localInput.asset.asset_id))}。不会缩放原图或当前纹样。要换输入，直接在左栏纹样轨切换。</p>`
+              ""
             )
           : sec(
               "可用输入",
-              "需要 512 × 512",
+              "",
               `${noteBox(esc(localProblem), "error")}${assetChoices(localInput.candidates, {
                 currentId: store.session.currentAssetId,
               })}`
             )}
-        ${sec(
-          "参考图",
-          reference ? esc(dimsOf(reference)) : `${references.length} 张可选`,
-          `${
-            references.length
+        <section class="wb-sec">
+          ${
+            references.length === 1 && reference
+              ? `<header class="wb-sec__head"><span class="label">参考图</span><span class="wb-sec__extra">${esc(kindLabel(reference.kind))} · ${esc(dimsOf(reference))}</span></header>`
+              : references.length
               ? selectField("repairReference", "参考图", referenceOptions, reference?.asset_id || "", `${references.length} 张`)
               : noteBox("当前工作台没有可作参考图的已保存光栅纹样（最多 1,048,576 像素）。请先处理或保存一张参考图。", "error")
           }
@@ -2917,41 +2972,21 @@ function repairPanel(state, methodOverride = repairMethod()) {
               ? noteBox("之前选择的参考图已不在当前工作台或超过像素上限，请重新选择。", "error")
               : ""
           }
-          <p class="field__hint">${
-            reference
-              ? `当前参考：${kindLabel(reference.kind)} ${dimsOf(reference)} · ${(
-                  Number(reference.width || 0) * Number(reference.height || 0)
-                ).toLocaleString("zh-CN")} 像素 · #${shortId(reference.asset_id)}。`
-              : ""
-          }必须明确选一张已保存参考图，不会自动使用当前纹样。推理时参考图会显式缩放到 512 × 512 并记录该变换；它只引导生成，不构成保真保证，也不会上传或计费。</p>`
-        )}
-        ${boxSection("框外原始像素保持不变；已有落在框内的同坐标二值损伤蒙版时后端优先使用，否则按此框处理。")}
-        ${sec(
-          "本地条件核验",
-          repairConditionSummary(localConditions),
-          `${repairChecklist(localConditions)}
-           <p class="field__hint">这些是本次本地修复的显式前置条件；缺哪一项会在上方写明。条件满足不代表推理一定成功，失败也不会自动改用云端。</p>`
-        )}
+          ${reference && (reference.width !== 512 || reference.height !== 512)
+            ? '<p class="field__hint">参考图将缩放至 512 × 512。</p>' : ""}
+        </section>
+        ${dims ? boxSection("只修复选框内的区域。") : ""}
         ${sec(
           "本地参数",
-          "不上传 · 不计费",
-          `${rangeField("repairFeather", "羽化", 0, 64, 1, draft.repairFeather, "只影响框边过渡，不改变目标尺寸。")}
-          <p class="field__hint">本地执行，不调用云端、不产生费用；失败不会自动改用云端。需要云端修复时请显式切换修复方式。</p>`
+          "",
+          `${rangeField("repairFeather", "羽化", 0, 64, 1, draft.repairFeather, "只影响框边过渡，不改变目标尺寸。")}`
         )}`
   }
-  ${sec(
-    "修复候选",
+  ${info || repairState.loading || repairState.error ? sec(
+    info && asset && !repairAppliesToAsset(info, asset) ? "同图其他版本的修复记录" : "修复候选",
     info
       ? `${infoMethod === "leftrefill" ? "本地 LeftRefill" : "云端修复"} · ${esc(
-          jobStateLabel(
-            info.state === "waiting_user"
-              ? "running"
-              : info.state === "accepted"
-              ? "succeeded"
-              : info.state === "rejected"
-              ? "cancelled"
-              : info.state
-          )
+          ({ waiting_user: "待选择", accepted: "已接受", rejected: "已拒绝" })[info.state] || jobStateLabel(info.state)
         )}`
       : "",
     `${
@@ -2962,15 +2997,14 @@ function repairPanel(state, methodOverride = repairMethod()) {
         : info
         ? `${repairCandidateList(info, infoMethod)}
            ${recordText ? `<p class="field__hint">${esc(recordText)}</p>` : ""}
-           ${info.decision ? `<p class="field__hint">已${info.decision.action === "accept" ? "接受" : "拒绝"}这次修复。</p>` : ""}
            ${
              infoMethod === "leftrefill"
-               ? `<p class="field__hint">本地候选只改修复框内；接受后仍走原有接受/拒绝与历史恢复流程，不会提交云端调用。</p>`
+               ? `<p class="field__hint">只改修复框内，不调用云端。</p>`
                : checkRow("acceptFull", "接受全图 AI 候选前，我确认它可能改变整个画面", draft.acceptFull)
            }`
-        : `<p class="field__hint">提交后这里会显示修复候选与本地局部合成；刷新后会按这张图的修复任务恢复，不重新提交。</p>`
+        : ""
     }`
-  )}`;
+  ) : ""}`;
 }
 
 function exportsSection(state) {
@@ -2989,9 +3023,7 @@ function tilePanel(state) {
   const stage = currentStage(state);
   const units = tileUnitAssets();
   const unit = tileUnit();
-  const n = tileN(state);
-  const preview = unit ? tilePreviewFor(unit.asset_id, n) : null;
-  const previewAsset = preview || (currentAsset()?.kind === "tile_preview" ? currentAsset() : null);
+  const previewAsset = tilePreviewForCurrent(state);
   const revision = previewAsset?.seam_observation_revision ?? 0;
   return `
   ${jobBox(stage)}
@@ -2999,19 +3031,13 @@ function tilePanel(state) {
   ${noticeBox()}
   ${sec(
     "平铺单元",
-    unit ? esc(kindLabel(unit.kind)) : "无",
-    units.length
-      ? `${selectField(
-          "tileUnit",
-          "单元来源",
-          units.map((entry) => [
-            entry.asset_id,
-            `${kindLabel(entry.kind)} · ${dimsOf(entry)} · ${shortId(entry.asset_id)}`,
-          ]),
-          draft.tileUnitId
-        )}
-        <p class="field__hint">只有裁切、透明 PNG、线稿 PNG 与已接受的修复图能作为平铺单元。</p>`
-      : `<p class="field__hint">还没有可平铺的单元：先做 02 裁切，或在 05 生成透明 PNG / 线稿 PNG。</p>`
+    units.length === 1 && unit ? esc(kindLabel(unit.kind) + " · " + dimsOf(unit)) : "",
+    units.length === 1 && unit ? "" : units.length
+      ? selectField("tileUnit", "单元来源", [
+          ...(!unit ? [[draft.tileUnitId, "原单元已移出工作台"]] : []),
+          ...units.map(entry => [entry.asset_id, `${kindLabel(entry.kind)} · ${dimsOf(entry)} · ${shortId(entry.asset_id)}`]),
+        ], draft.tileUnitId)
+      : `<p class="field__hint">${previewAsset ? "原单元已移出工作台，仍可查看此预览。" : "先裁切纹样，或生成透明 PNG、线稿 PNG。"}</p>`
   )}
   ${sec(
     "规格",
@@ -3037,8 +3063,7 @@ function tilePanel(state) {
         previewAsset ? "" : " disabled"
       }>${icon("history")}保存接缝观察</button>
       <span class="mono wb-inline__note">修订 ${revision}</span>
-    </div>
-    <p class="field__hint">观察结果与单元、规格一起写入平铺纹样元数据；冲突时会重新读取后再提示。</p>`
+    </div>`
   )}
   ${exportsSection(state)}`;
 }
@@ -3078,10 +3103,14 @@ function stageActions(stage, state) {
   const asset = currentAsset();
   const busy = ui.running;
   const disabled = (condition) => busy || condition;
+  if (!asset) {
+    return sessionIsEmpty() && stage.key !== "source"
+      ? `<button class="btn btn--primary btn--sm" type="button" data-act="stage" data-n="1">${icon("arrow")}去 01 放入纹样</button>`
+      : "";
+  }
+  // 来源工序不提交任务；上传入口留在顶栏，避免在面板底部重复一次。
+  if (stage.key === "source") return "";
   switch (stage.key) {
-    case "source":
-      return `${primaryButton("upload", asset ? "重新上传" : "上传纹样", "upload")}
-        <button class="btn btn--ghost btn--sm" type="button" data-act="library">${icon("gallery")}纹样库</button>`;
     case "crop":
       return `<button class="btn btn--quiet btn--sm" type="button" data-act="reset-crop"${
         disabled(!asset) ? " disabled" : ""
@@ -3168,13 +3197,18 @@ function stageActions(stage, state) {
       const goVector = vectorInput(store.session.assets, asset).asset
         ? `<button class="btn btn--ghost btn--sm" type="button" data-act="go-vector">${icon("spark")}去 07 矢量化</button>`
         : "";
+      // 线稿本身没有蒙版记录：这里显式给 06 的准备入口，避免用户以为 06 坏了。
+      const goMask =
+        lineartMaskPrep(store.session.assets, asset, { cap: maskPrepCap() }).error === ""
+          ? `<button class="btn btn--ghost btn--sm" type="button" data-act="go-mask">${icon("mask")}去 06 准备蒙版</button>`
+          : "";
       if (draft.processRoute === "local") {
         return `${primaryButton(
           "run-model-lineart",
           cap.available === false ? "本地模型暂不可用" : "本地模型生成线稿",
           "flask",
           disabled(!localInput || cap.available === false)
-        )}${goVector}`;
+        )}${goMask}${goVector}`;
       }
       if (draft.processRoute === "cloud") {
         return `${primaryButton(
@@ -3186,22 +3220,27 @@ function stageActions(stage, state) {
               !cloudInput.asset ||
               Boolean(cloudInput.error)
           )
-        )}${goVector}`;
+        )}${goMask}${goVector}`;
       }
       if (draft.processRoute === "opencv") {
-        return `${primaryButton("run-opencv-lineart", "OpenCV 生成线稿", "brush", disabled(!localInput))}${goVector}`;
+        return `${primaryButton("run-opencv-lineart", "OpenCV 生成线稿", "brush", disabled(!localInput))}${goMask}${goVector}`;
       }
-      return `${primaryButton("run-extract", "开始颜色提取", "flask", disabled(!localInput))}${goVector}`;
+      return `${primaryButton("run-extract", "开始颜色提取", "flask", disabled(!localInput))}${goMask}${goVector}`;
     }
     case "mask": {
       const error = maskError();
+      const prep = lineartMaskPrep(store.session.assets, asset, { cap: maskPrepCap() });
       const goVector = vectorInput(store.session.assets, asset).asset
         ? `<button class="btn btn--ghost btn--sm" type="button" data-act="go-vector">${icon("spark")}去 07 矢量化</button>`
         : "";
+      const prepare =
+        prep.error === "" && !prep.pair
+          ? primaryButton("prepare-lineart-mask", "准备线稿蒙版", "mask", busy)
+          : "";
       return `<button class="btn btn--quiet btn--sm" type="button" data-act="undo-stroke"${
         disabled(!maskState.strokes.length) ? " disabled" : ""
       }>撤销上一笔</button>
-        ${primaryButton("run-mask", "提交蒙版修正", "mask", disabled(Boolean(error)))}${goVector}`;
+        ${prepare}${primaryButton("run-mask", "提交蒙版修正", "mask", disabled(Boolean(error)))}${goVector}`;
     }
     case "vector": {
       if (asset?.kind === "svg") return svgActionsHtml(asset, { busy });
@@ -3230,10 +3269,10 @@ function panelHtml(stage, state) {
         </button>
       </div>
       <h2 class="wb-panel__title">${esc(stage.name)} · ${esc(stageCopy(stage).title)}</h2>
-      <p class="wb-panel__desc">${esc(stageCopy(stage).desc)}</p>
+      ${sessionIsEmpty() ? "" : `<p class="wb-panel__desc">${esc(stageCopy(stage).desc)}</p>`}
     </header>
     <div class="wb-panel__body" id="wb-panel-body">${panelBody(stage, state)}</div>
-    <footer class="wb-panel__foot">
+    ${stage.key !== "source" || ui.running ? `<footer class="wb-panel__foot">
       <p class="mono wb-panel__status" data-live="panel-status">${
         busyElsewhere ? "另一道工序的任务正在运行…" : esc(statusShort(stage, state))
       }</p>
@@ -3242,7 +3281,7 @@ function panelHtml(stage, state) {
           ? `<button class="btn btn--ghost btn--sm" type="button" data-act="cancel">${icon("close")}取消任务</button>`
           : stageActions(stage, state)
       }</div>
-    </footer>
+    </footer>` : ""}
   </aside>`;
 }
 
@@ -3291,8 +3330,13 @@ function applyRepairToDom(root) {
   if (!root) return;
   const marker = root.querySelector("[data-repair-overlay] .wb-repair__region");
   const dims = currentDims(repairInputAsset());
-  if (!marker || !dims || !draft.repair) return;
+  if (!dims || !draft.repair) return;
   const box = draft.repair;
+  for (const [key, value] of Object.entries(box)) {
+    const field = root.querySelector(`[data-field="repair${key[0].toUpperCase()}${key.slice(1)}"]`);
+    if (field && Number(field.value) !== value) field.value = String(value);
+  }
+  if (!marker) return;
   marker.style.left = `${(box.left / dims.width) * 100}%`;
   marker.style.top = `${(box.top / dims.height) * 100}%`;
   marker.style.width = `${(box.width / dims.width) * 100}%`;
@@ -3701,9 +3745,6 @@ async function resumeCandidateJob(api, flow, token) {
     const fresh = await refreshCandidateFlow(api, flow.pipeline_id, token);
     if (!fresh) return;
     await adoptCandidateFlow(api, fresh, token, { selection: true });
-    if (flowCanCompose(fresh)) {
-      ui.notice = "已恢复云端候选流程，可继续选层并本地合成；没有新增云端调用。";
-    }
   });
 }
 
@@ -3735,10 +3776,7 @@ async function restoreCandidateFlow(api) {
     if (!store.isSessionCurrent(token)) return;
     if (historyWarning && !cand.error) cand.error = historyWarning;
     if (flowActiveJobId(flow) && !cand.error) {
-      ui.notice = "正在恢复上一次云端流程，只轮询已有任务，不会重新提交。";
       await resumeCandidateJob(api, flow, token);
-    } else if (flowCanCompose(flow) && !cand.error) {
-      ui.notice = "已恢复云端候选流程：可继续选层并本地合成，不会新增云端调用。";
     }
   } catch (error) {
     if (store.isSessionCurrent(token)) cand.error = errorText(error);
@@ -3824,8 +3862,12 @@ async function restoreRepairState(api) {
     // 让界面默认方式与恢复的记录一致：本地记录不会因为界面还停在云端而误发付费请求。
     draft.repairMethod = repairMethodOf(info);
     if (draft.repairMethod === "leftrefill") {
-      const referenceId = String(info.parameters?.reference_asset_id || "");
-      draft.repairReferenceId = referenceId && store.assetById(referenceId) ? referenceId : "";
+      // 历史参考图只在用户尚未手动改选时恢复；手动选择（包括清空）优先。
+      if (!draft.repairReferenceTouched) {
+        const referenceId = String(info.parameters?.reference_asset_id || "");
+        draft.repairReferenceId = referenceId;
+      }
+      draft.repairReferenceTouched = true;
     }
     let inputAsset = (store.session.assets || []).find((asset) => asset.asset_id === info.input_asset_id) || null;
     if (!inputAsset && info.input_asset_id) {
@@ -3858,7 +3900,7 @@ async function restoreRepairState(api) {
       const restored = boxApplied ? "候选与旧修复框" : "候选";
       ui.notice =
         ui.notice ||
-        `已按这张图的修复任务恢复${restored}；只读取记录，没有重新提交云端调用。`;
+        `已恢复上次${restored}；没有重新提交任务。`;
     }
   } catch (error) {
     if (store.isSessionCurrent(token)) repairState.error = errorText(error);
@@ -3900,11 +3942,19 @@ function maskSource() {
   };
 }
 
+/** 线稿蒙版准备的入口上限：alpha 提取按 working_pixels 计，与 refine-mask 的源图上限一致。 */
+const maskPrepCap = () => pixelLimitForExtractMode("alpha", healthPixelLimits());
+
 function maskError() {
   const asset = currentAsset();
   if (!asset) return "先打开一个纹样";
   const source = maskSource();
-  if (!source?.sourceId || !source?.maskId) return "当前纹样缺少源图或蒙版记录";
+  if (!source?.sourceId || !source?.maskId) {
+    const prep = lineartMaskPrep(store.session.assets, asset, { cap: maskPrepCap() });
+    if (prep.error === "" && !prep.pair) return "先准备蒙版：把线稿的透明像素发布成前景蒙版与透明 PNG";
+    if (prep.error === "pixels") return `线稿超过本机准备上限 ${formatPixels(prep.cap)} 像素，请先创建工作副本`;
+    return "当前纹样缺少源图或蒙版记录";
+  }
   const points = maskState.strokes.reduce((sum, stroke) => sum + stroke.points.length, 0);
   if (!points) return "先在纸面上画几笔";
   return "";
@@ -3963,6 +4013,71 @@ export function vectorInput(assets, current) {
   return resolveCloudInput(assets, current, VECTOR_INPUT_KINDS);
 }
 
+/**
+ * 纹样是否线稿：只认 lineart 本身，或沿连续的 cropped / working_copy / prepared /
+ * enhanced 的 source_asset_id 直链回溯到 lineart。中间夹着别的类型（例如颜色提取
+ * 的透明 PNG）就按“不是线稿”处理，避免把彩色透明图当黑线稿补画。
+ * 只在同一会话的纹样里查；找不到记录不猜测归属。
+ */
+export function derivedFromLineart(assets, asset) {
+  const byId = new Map((assets || []).filter((entry) => entry?.asset_id).map((entry) => [entry.asset_id, entry]));
+  let current = asset || null;
+  const visited = new Set();
+  while (current && !visited.has(current.asset_id)) {
+    if (current.kind === "lineart") return true;
+    if (!LINE_MASK_CHAIN_KINDS.has(current.kind)) return false;
+    visited.add(current.asset_id);
+    const parentId = String(current.source_asset_id || "");
+    current = parentId ? byId.get(parentId) || null : null;
+  }
+  return false;
+}
+
+/** 同一张线稿上已经准备好的配对透明 PNG；后出现的覆盖前面的，用于避免重复提交准备任务。 */
+function preparedMaskPair(assets, sourceId) {
+  if (!sourceId) return null;
+  const roleId = (entry, role) => (entry?.parents || []).find((parent) => parent?.role === role)?.asset_id || "";
+  return (assets || []).reduce((found, entry) => {
+    if (entry?.kind !== "transparent_png") return found;
+    const source = entry.source_rgb_asset_id || roleId(entry, "source_rgb");
+    const mask = entry.source_mask_asset_id || roleId(entry, "foreground_mask");
+    return source === sourceId && mask ? entry : found;
+  }, null);
+}
+
+/**
+ * 线稿 → 06 蒙版修正的准备状态。只有 lineart，或沿 cropped / working_copy /
+ * prepared / enhanced 直链回到 lineart 的纹样可准备：颜色提取的透明 PNG、
+ * 候选合成、已接受修复都不能当成黑线稿再补画。
+ * `cap` 是 alpha 提取的本机入口上限（来自 /health，不在界面写死）。
+ * 返回 error：""（可准备/已准备）、"missing"、"unsupported"、"pixels"。
+ */
+export function lineartMaskPrep(assets, current, { cap = null } = {}) {
+  const capValue = Number(cap) > 0 ? Math.floor(Number(cap)) : null;
+  const state = { asset: null, error: "", cap: capValue, pixels: 0, pair: null };
+  if (!current?.asset_id) return { ...state, error: "missing" };
+  const width = Math.max(0, Number(current.width) || 0);
+  const height = Math.max(0, Number(current.height) || 0);
+  const pixels = width * height;
+  state.pixels = pixels;
+  if (!LINE_MASK_PREP_KINDS.has(current.kind) || !derivedFromLineart(assets, current)) {
+    return { ...state, error: "unsupported" };
+  }
+  const pair = preparedMaskPair(assets, current.asset_id);
+  if (pair) return { ...state, asset: current, pair };
+  if (capValue && pixels > capValue) return { ...state, asset: current, error: "pixels" };
+  return { ...state, asset: current };
+}
+
+/**
+ * 准备蒙版的请求体：只提交 alpha 方式与阈值 0。
+ * 阈值 0 = 任何可见像素都算前景，保留半透明边缘；不带清理参数、
+ * 不带云端同意，也不改 RGBA 像素（后端 alpha_policy=preserve_existing）。
+ */
+export function buildLineartMaskPayload(assetId) {
+  return { input_asset_id: assetId, mode: "alpha", threshold: 0 };
+}
+
 function cloudRepairInput() {
   return cloudEditInput(store.session.assets, currentAsset(), REPAIR_MAX_PIXELS);
 }
@@ -4019,6 +4134,10 @@ function stageClick(root, api, el) {
   ui.error = "";
   ui.errorDetail = "";
   ui.notice = "";
+  if (target.key === "tile") {
+    const asset = currentAsset();
+    if (asset?.kind === "tile_preview") alignTileViewToPreview(api.state, asset);
+  }
   patchStage(api, root, { stage: n, ...(target.key === "tile" ? { compare: false } : {}) });
 }
 
@@ -4031,8 +4150,19 @@ function confirmSvgDraftBeforeSwitch(label = "切换") {
 }
 
 function switchAsset(api, root, assetId) {
-  if (!assetId || store.session.currentAssetId === assetId) return;
+  if (!assetId) return;
+  const next = store.assetById(assetId);
+  if (store.session.currentAssetId === assetId) {
+    // 再点一次同一张历史预览：按它的单元/规格重新对齐，便于从其它规格切回查看。
+    if (next?.kind === "tile_preview" && currentStage(api.state).key === "tile") {
+      alignTileViewToPreview(api.state, next);
+      api.syncUrl?.();
+      api.refresh();
+    }
+    return;
+  }
   if (!confirmSvgDraftBeforeSwitch("切换纹样")) return;
+  ui.notice = "";
   store.setCurrentAsset(assetId);
   api.syncUrl?.();
 }
@@ -4063,6 +4193,7 @@ function cycleAsset(root, api, delta) {
   const next = assets[(index + delta + assets.length) % assets.length];
   if (!next || next.asset_id === store.session.currentAssetId) return;
   if (!confirmSvgDraftBeforeSwitch("切换纹样")) return;
+  ui.notice = "";
   store.setCurrentAsset(next.asset_id);
   api.syncUrl?.();
   api.toast(`${delta < 0 ? "上一个" : "下一个"}纹样：${kindLabel(next.kind)} ${shortId(next.asset_id)}`, "info");
@@ -4093,11 +4224,6 @@ function removeSessionAsset(api, assetId) {
   const removed = store.removeAsset(assetId);
   if (!removed) return;
   forgetGroupAsset(store.session.imageId || "", assetId);
-  if (draft.tileUnitId === assetId) {
-    draft.tileUnitId = "";
-    draft.tileUnitTouched = false;
-  }
-  if (draft.repairReferenceId === assetId) draft.repairReferenceId = "";
   api.toast(`已从工作台移除${kindLabel(removed.kind)}；可随时从纹样库重新打开。`, "info");
 }
 
@@ -4982,7 +5108,7 @@ function lineartNotice(asset, sourceLabelText) {
   if (meta.method === "cloud") bits.push("云端模型");
   if (meta.promptVersion) bits.push(`提示词 ${meta.promptVersion}`);
   if (meta.providerCallId) bits.push(`调用 ${shortId(meta.providerCallId)}`);
-  return `${sourceLabelText}线稿 PNG 已生成${bits.length ? `（${bits.join(" · ")}）` : ""}，已设为当前纹样；请人工核对，确认后到 07 矢量化。`;
+  return `${sourceLabelText}线稿 PNG 已生成${bits.length ? `（${bits.join(" · ")}）` : ""}，已设为当前纹样；请人工核对，需要局部修正就到 06 准备蒙版，确认后到 07 矢量化。`;
 }
 
 /** 本地模型线稿：POST /jobs/lineart method=model，只出 PNG，不自动矢量化。 */
@@ -5305,6 +5431,58 @@ async function composeLayers(api) {
   });
 }
 
+/**
+ * 线稿 → 蒙版准备：POST /jobs/extract mode=alpha、threshold=0。
+ * 与批量路线 prepare_mask 同一语义：以线稿现有的透明像素发布配对的
+ * foreground_mask 与 transparent_png（alpha_policy=preserve_existing），
+ * 不改 RGB、不重新描线、不调用云端；原线稿与来源记录保留。
+ * 已有配对时只切换当前纹样，不重复提交同一张线稿的准备任务。
+ */
+async function runPrepareLineartMask(api) {
+  const asset = currentAsset();
+  const prep = lineartMaskPrep(store.session.assets, asset, { cap: maskPrepCap() });
+  if (prep.error === "missing" || !asset) {
+    api.toast("先打开一张纹样。", "warn");
+    return;
+  }
+  if (prep.error === "unsupported") {
+    api.toast("只有线稿 PNG（或沿裁切/工作副本/预处理直连到线稿的纹样）能这样准备蒙版；其它纹样请先用颜色提取，或选择已有的透明 PNG。", "warn");
+    return;
+  }
+  if (prep.pair) {
+    store.setCurrentAsset(prep.pair.asset_id);
+    resetMaskStrokes();
+    ui.notice = `已切到这张线稿的透明 PNG（${shortId(prep.pair.asset_id)}）：没有重复提交，原线稿与蒙版都保留。`;
+    api.toast("已切到已准备的透明 PNG。", "info");
+    return;
+  }
+  if (prep.error === "pixels") {
+    api.toast(
+      `线稿 ${dimsOf(asset)} 超过本机蒙版准备上限 ${formatPixels(prep.cap)} 像素；请先创建工作副本，不会自动缩放。`,
+      "warn"
+    );
+    return;
+  }
+  const lineartId = asset.asset_id;
+  await startJob(api, () => http.extract(buildLineartMaskPayload(lineartId)), (final) => {
+    const produced = (final.result?.assets || []).filter(Boolean);
+    const transparent = produced.find((entry) => entry.kind === "transparent_png") || null;
+    const mask = produced.find((entry) => entry.kind === "foreground_mask") || null;
+    if (!transparent || !mask) {
+      ui.notice = "蒙版准备任务完成，但没有返回配对的透明 PNG 与前景蒙版；线稿保持不变。";
+      api.toast("没有返回配对的蒙版与透明 PNG。", "warn");
+      return;
+    }
+    // 只切换同一会话里刚发布的透明 PNG；线稿、蒙版与来源记录都留在会话中。
+    store.setCurrentAsset(transparent.asset_id);
+    resetMaskStrokes();
+    ui.notice = `线稿蒙版已准备好（alpha、阈值 0，保留半透明边缘）：透明 PNG ${shortId(
+      transparent.asset_id
+    )} 已设为当前纹样，可以补黑线或擦除，完成后再到 07 矢量化。原线稿 ${shortId(lineartId)} 保留。`;
+    api.toast("线稿蒙版已准备好，可以画笔修正。", "done");
+  });
+}
+
 async function runMask(api) {
   const error = maskError();
   if (error) {
@@ -5532,9 +5710,9 @@ async function decideRepair(api, action, assetId = "", full = false) {
 }
 
 async function saveSeam(api) {
-  const asset = tilePreviewFor(tileUnit()?.asset_id || "", tileN(api.state)) || tilePreviewLatest();
+  const asset = tilePreviewForCurrent(api.state);
   if (!asset) {
-    api.toast("先生成平铺预览，再记录接缝观察。", "warn");
+    api.toast("当前单元与规格还没有平铺预览，先生成预览再记录接缝观察。", "warn");
     return;
   }
   const revision = asset.seam_observation_revision ?? 0;
@@ -5546,6 +5724,7 @@ async function saveSeam(api) {
     const index = store.session.assets.findIndex((entry) => entry.asset_id === updated.asset_id);
     if (index >= 0) store.session.assets[index] = updated;
     store.notify("session");
+    if (tilePreviewForCurrent(api.state)?.asset_id !== updated.asset_id) return;
     draft.seam = updated.seam_observation;
     ui.notice = `接缝观察已保存为「${SEAM_LABELS[updated.seam_observation] || updated.seam_observation}」。`;
     api.toast(ui.notice, "done");
@@ -5795,6 +5974,13 @@ function handleClick(root, state, api, event) {
       patchStage(api, root, { stage: 5 });
       api.toast("在 05 明确选择本地模型或云端模型生成线稿。", "info");
       break;
+    case "go-mask":
+      patchStage(api, root, { stage: 6 });
+      api.toast("在 06 先「准备蒙版」，再用画笔补前景或擦除；完成后到 07 矢量化。", "info");
+      break;
+    case "prepare-lineart-mask":
+      runPrepareLineartMask(api);
+      break;
     case "skip-repair":
       draft.repairSkipped = !draft.repairSkipped;
       ui.error = "";
@@ -6036,8 +6222,9 @@ function handleChange(root, state, api, event) {
       draft.repairSize = value;
       break;
     case "repairReference":
-      // 必须显式选择；空值保持“未选”，不会自动挑一张参考图。
+      // 手动选择（包括清空）优先；自动默认值不会再覆盖。
       draft.repairReferenceId = value;
+      draft.repairReferenceTouched = true;
       break;
     case "tileUnit":
       draft.tileUnitId = value;

@@ -238,8 +238,7 @@ function emptyHtml() {
     return `<div class="tk-empty">
       ${icon("history")}
       <p class="tk-empty__title">还没有任务</p>
-      <p class="tk-empty__copy">上传纹样或运行一道工序后，处理与云端记录会出现在这里。</p>
-      <button class="btn btn--primary btn--sm" type="button" data-tk-act="upload">${icon("upload")}上传纹样</button>
+      <p class="tk-empty__copy">处理纹样后，可在这里查看进度和结果。</p>
     </div>`;
   }
   return `<div class="tk-empty">${icon("search")}
@@ -516,11 +515,6 @@ export default {
       const act = action.dataset.tkAct;
       if (act === "retry-load") {
         void loadTasks(true);
-        return;
-      }
-      if (act === "upload") {
-        api.closeDrawer();
-        document.querySelector('[data-action="upload"]')?.click();
         return;
       }
       const job = items.find((item) => item.job_id === action.dataset.tkJob);

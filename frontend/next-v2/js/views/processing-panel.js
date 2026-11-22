@@ -36,16 +36,19 @@ import {
   manualCandidates,
   manualStage,
   manualStepLabel,
+  isBatchActive,
   normalizePresetOptions,
   patternFor,
   presetById,
   presetSteps,
   presetValidation,
   processing,
+  progressCountsText,
   recipeLabel,
   resultAssetIds,
   resultGroups,
   resumeItem,
+  runInputAvailability,
   runValidation,
   selectBatch,
   startProcessingPolling,
@@ -58,7 +61,6 @@ import {
   deletePreset,
   copyPreset,
   cancelBatch,
-  activeBatchCount,
 } from "../processing.js";
 import { openBatchExport } from "./batch-export.js";
 
@@ -98,7 +100,6 @@ let presetsPainted = false;
 
 const ui = {
   windowOpen: false,
-  collapsed: false,
   zoomAsset: "",
   run: null,
   runBusy: false,
@@ -170,9 +171,21 @@ export function initProcessingUI(api) {
     if (ui.presetMode && reason === "presets") paintPresets();
   });
   document.addEventListener("keydown", onGlobalKey);
+  // 换页时把浮窗收回状态条：工作台等页面只保留内嵌的状态条入口，不叠浮块。
+  window.addEventListener("hashchange", () => {
+    if (ui.windowOpen) closeProcessingWindow({ focus: false });
+  });
   loadPresets({ silent: true });
   loadBatches({ silent: true }).then(() => paintDock());
   startProcessingPolling();
+}
+
+function dockHost() {
+  return (
+    document.querySelector("[data-batch-slot]") ||
+    document.querySelector(".statusbar") ||
+    document.querySelector(".app")
+  );
 }
 
 function ensureDock() {
@@ -182,27 +195,35 @@ function ensureDock() {
   dockEl.className = "pf-dock";
   dockEl.id = "pf-dock";
   dockEl.hidden = true;
+  dockEl.setAttribute("aria-controls", "pf-window");
   dockEl.addEventListener("click", () => {
     if (ui.windowOpen) closeProcessingWindow();
     else openProcessingWindow();
   });
-  document.querySelector(".app")?.append(dockEl);
+  dockHost()?.append(dockEl);
   paintDock();
   return dockEl;
 }
 
 function paintDock() {
   if (!dockEl) return;
-  const active = activeBatchCount();
+  const host = dockHost();
+  if (host && dockEl.parentElement !== host) host.append(dockEl);
   const total = processing.batches.length;
+  const activeBatches = processing.batches.filter(isBatchActive);
+  const active = activeBatches.length;
+  const progress = activeBatches.length ? batchProgress(activeBatches[0]) : null;
   dockEl.hidden = total === 0;
   dockEl.setAttribute("aria-expanded", String(ui.windowOpen));
   dockEl.innerHTML = `
     <span class="pf-dock__dot${active ? " is-active" : ""}" aria-hidden="true"></span>
     <span class="pf-dock__label">处理批次</span>
-    <span class="pf-dock__meta mono">${active ? `${active} 个进行中` : total ? `${total} 个记录` : ""}</span>
+    <span class="pf-dock__meta mono">${
+      active ? `${active} 个进行中${progress ? ` · ${progress.percent}%` : ""}` : total ? `${total} 个记录` : ""
+    }</span>
   `;
-  dockEl.title = active ? "有批次正在处理；打开进度浮窗" : "打开处理批次";
+  dockEl.title = active ? `查看处理进度，${active} 个批次进行中` : `查看 ${total} 个批次记录`;
+  dockEl.setAttribute("aria-label", dockEl.title);
 }
 
 /* ------------------------------------------------------------------ 进度浮窗 */
@@ -211,8 +232,9 @@ function ensureWindow() {
   if (windowEl) return windowEl;
   windowEl = document.createElement("section");
   windowEl.className = "pf-window";
-  windowEl.setAttribute("role", "dialog");
-  windowEl.setAttribute("aria-label", "批量处理进度");
+  windowEl.id = "pf-window";
+  windowEl.setAttribute("role", "region");
+  windowEl.setAttribute("aria-labelledby", "pf-window-title");
   windowEl.hidden = true;
   windowEl.addEventListener("click", onWindowClick);
   windowEl.addEventListener("change", onWindowChange);
@@ -220,11 +242,10 @@ function ensureWindow() {
   return windowEl;
 }
 
-/** 打开进度浮窗；不传 batchId 时恢复服务端最近的批次。 */
+/** 打开完整进度浮窗；只由用户主动点状态条入口时调用，不自动弹出。 */
 export async function openProcessingWindow({ batchId = "" } = {}) {
   ensureWindow();
   ui.windowOpen = true;
-  ui.collapsed = false;
   windowEl.hidden = false;
   if (!processing.presets.length) loadPresets({ silent: true });
   if (batchId) {
@@ -238,18 +259,18 @@ export async function openProcessingWindow({ batchId = "" } = {}) {
   windowEl.querySelector("[data-pf-close-window]")?.focus({ preventScroll: true });
 }
 
-export function closeProcessingWindow() {
+export function closeProcessingWindow({ focus = true } = {}) {
   ui.windowOpen = false;
   ui.zoomAsset = "";
   if (windowEl) windowEl.hidden = true;
   paintDock();
+  if (focus) dockEl?.focus({ preventScroll: true });
 }
 
 function paintWindow() {
   if (!windowEl) return;
   const body = windowEl.querySelector(".pf-window__body");
   const scrollTop = body?.scrollTop || 0;
-  windowEl.classList.toggle("is-collapsed", ui.collapsed);
   windowEl.innerHTML = windowHtml();
   const next = windowEl.querySelector(".pf-window__body");
   if (next) next.scrollTop = scrollTop;
@@ -263,7 +284,7 @@ function windowHtml() {
   <header class="pf-window__head">
     <div class="pf-window__title">
       <span class="label">批量处理</span>
-      <h2>${batch ? esc(batch.snapshot?.name || "处理批次") : "处理批次"}</h2>
+      <h2 id="pf-window-title">${batch ? esc(batch.snapshot?.name || "处理批次") : "处理批次"}</h2>
       <p class="mono pf-window__meta">${
         batch
           ? `${esc(state)} · ${batch.progress?.completed ?? 0}/${batch.progress?.total ?? batch.items?.length ?? 0} 张 · ${esc(
@@ -273,33 +294,15 @@ function windowHtml() {
       }</p>
     </div>
     <div class="pf-window__head-acts">
-      <button class="icon-btn" type="button" data-pf-collapse aria-label="${ui.collapsed ? "展开进度浮窗" : "收起进度浮窗"}"
-        aria-expanded="${ui.collapsed ? "false" : "true"}">${icon("chevron")}</button>
-      <button class="icon-btn" type="button" data-pf-close-window aria-label="关闭批次浮窗">${icon("close")}</button>
+      <button class="icon-btn" type="button" data-pf-close-window aria-label="收起进度浮窗；处理会在后台继续">${icon("close")}</button>
     </div>
   </header>
-  ${
-    ui.collapsed
-      ? `<p class="pf-window__collapsed" data-pf-collapsed-summary>${
-          batch
-            ? `${esc(state)} · ${progress.percent}% · 待确认 ${progress.waiting} · 失败 ${progress.failed}`
-            : "未选择批次"
-        }</p>`
-      : `<div class="pf-window__body">
-          ${windowToolbarHtml(batch)}
-          ${
-            processing.listError
-              ? `<p class="pf-error" role="alert">${esc(processing.listError)}</p>`
-              : ""
-          }
-          ${
-            processing.detailError
-              ? `<p class="pf-error" role="alert">${esc(processing.detailError)}</p>`
-              : ""
-          }
-          ${batch ? batchDetailHtml(batch, progress) : emptyWindowHtml()}
-        </div>`
-  }
+  <div class="pf-window__body">
+    ${windowToolbarHtml(batch)}
+    ${processing.listError ? `<p class="pf-error" role="alert">${esc(processing.listError)}</p>` : ""}
+    ${processing.detailError ? `<p class="pf-error" role="alert">${esc(processing.detailError)}</p>` : ""}
+    ${batch ? batchDetailHtml(batch, progress) : emptyWindowHtml()}
+  </div>
   ${windowZoomHtml()}`;
 }
 
@@ -307,7 +310,7 @@ function emptyWindowHtml() {
   return `
   <div class="pf-empty">
     <p>最近还没有处理批次。</p>
-    <p class="field__hint">从工作台「一键处理」或纹样库「批量处理」发起；提交后进度保存在本机服务，刷新页面也能从这里恢复。</p>
+    <p class="field__hint">从工作台「一键处理」或纹样库「批量处理」发起；提交后进度保存在本机服务，刷新后从底部状态条打开。</p>
   </div>`;
 }
 
@@ -349,6 +352,7 @@ function windowToolbarHtml(batch) {
 function batchDetailHtml(batch, progress) {
   const options = normalizePresetOptions(batch.snapshot?.options);
   const steps = presetSteps(options);
+  const cloudCalls = Number(batch.snapshot?.planned_provider_calls) || 0;
   return `
   <div class="pf-summary">
     <div class="pf-progress" role="group" aria-label="整体进度">
@@ -356,15 +360,14 @@ function batchDetailHtml(batch, progress) {
         <span>${esc(batchStateLabel(batch.state))}</span>
         <span class="mono">${progress.completed}/${progress.total} · ${progress.percent}%</span>
       </div>
-      <div class="pf-meter" aria-hidden="true"><span style="width:${Math.max(2, progress.percent)}%"></span></div>
-      <p class="pf-progress__counts mono">成功 ${progress.succeeded} · 待确认 ${progress.waiting} · 处理中 ${progress.running} · 排队 ${progress.queued} · 失败 ${progress.failed} · 取消 ${progress.cancelled}</p>
+      <div class="pf-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress.percent}" aria-label="整体进度 ${progress.percent}%"><span style="width:${Math.max(2, progress.percent)}%"></span></div>
+      <p class="pf-progress__counts mono">${esc(progressCountsText(progress))}</p>
     </div>
     <p class="pf-snapshot">
       预设「${esc(batch.snapshot?.name || "")}」· ${esc(recipeLabel(options.recipe))} · 修订 ${Number(
         batch.snapshot?.preset_revision || 0
       )}<br />
-      快照固定于提交时：之后修改预设不会改变这一批。预计自动云端调用
-      <span class="mono">${Number(batch.snapshot?.planned_provider_calls) || 0}</span> 次；人工门里的云端操作另计。
+      预计自动云端调用 <span class="mono">${cloudCalls}</span> 次${cloudCalls ? "，按次计费" : ""}；人工门里的云端操作另计。
     </p>
     <div class="pf-steps" aria-label="预设步骤">
       ${steps
@@ -384,12 +387,12 @@ function batchDetailHtml(batch, progress) {
     <button class="btn btn--ghost btn--sm" type="button" data-pf-export-results${
       resultAssetIds(batch).length ? "" : " disabled"
     }>${icon("download")}导出结果</button>
-    <span class="pf-foot-note">${ui.resultBusy ? "正在准备结果…" : "结果导出按原图分组，可选整组或同处理类型。"}</span>
+    <span class="pf-foot-note">${ui.resultBusy ? "正在准备结果…" : "按原图分组导出，可选整组或同类型。"}</span>
     <button class="btn btn--quiet btn--sm" type="button" data-pf-cancel-batch${
       canCancelBatch(batch) ? "" : " disabled"
     }>取消批次</button>
   </footer>
-  <p class="pf-window__hint">批次由本机服务后台推进，页面关闭或刷新都不会停止；这里只读取状态。失败不会自动重试，尤其云端结果未知时请先在任务记录核对。</p>`;
+  <p class="pf-window__hint">批次由本机服务后台推进，刷新或关闭页面不会停止；失败不会自动重试，云端结果未知时先到任务记录核对。</p>`;
 }
 
 function itemHtml(batch, item) {
@@ -440,10 +443,10 @@ function waitingHtml(batch, item, { candidates, patternEntry, busy }) {
   return `
   <div class="pf-gate">
     <p class="pf-gate__title">${icon("alert")}等待「${esc(manualStepLabel(item.waiting_for))}」的人工确认</p>
-    <p class="pf-gate__copy">这一步不会自动生成结果。请到既有工作台完成「${esc(
+    <p class="pf-gate__copy">到工作台完成「${esc(
       manualStepLabel(item.waiting_for)
-    )}」，再回到这里选择这次生成的后代版本；不能用旧结果自动通过。</p>
-    <p class="pf-gate__hint">人工门里的云端操作可能产生额外费用，按工作台的提交方式处理，不计入本批次的预计云端调用。</p>
+    )}」，再从底部「处理批次」回来，选择刚保存的版本继续。</p>
+    <p class="pf-gate__hint">如果在工作台选择云端工具，费用另计。</p>
     <div class="pf-gate__acts">
       <button class="btn btn--ghost btn--sm" type="button" data-pf-workbench="${esc(item.item_id)}"${
         busy ? " disabled" : ""
@@ -527,7 +530,7 @@ function windowZoomHtml() {
 /* ------------------------------------------------------------------ 进度浮窗事件 */
 
 async function onWindowClick(event) {
-  const target = event.target.closest("[data-pf-close-window], [data-pf-collapse], [data-pf-refresh], [data-pf-more-batches], [data-pf-open-presets], [data-pf-workbench], [data-pf-refresh-item], [data-pf-resume], [data-pf-cancel-batch], [data-pf-export-results], [data-pf-zoom], [data-pf-zoom-close]");
+  const target = event.target.closest("[data-pf-close-window], [data-pf-refresh], [data-pf-more-batches], [data-pf-open-presets], [data-pf-workbench], [data-pf-refresh-item], [data-pf-resume], [data-pf-cancel-batch], [data-pf-export-results], [data-pf-zoom], [data-pf-zoom-close]");
   if (!target) return;
   if (target.dataset.pfMoreBatches !== undefined) {
     target.disabled = true;
@@ -537,11 +540,6 @@ async function onWindowClick(event) {
   }
   if (target.dataset.pfCloseWindow !== undefined) {
     closeProcessingWindow();
-    return;
-  }
-  if (target.dataset.pfCollapse !== undefined) {
-    ui.collapsed = !ui.collapsed;
-    paintWindow();
     return;
   }
   if (target.dataset.pfOpenPresets !== undefined) {
@@ -575,9 +573,9 @@ async function onWindowClick(event) {
     const stage = manualStage(item.waiting_for);
     const query = { image: item.image_id, stage };
     if (item.current_asset_id) query.asset = item.current_asset_id;
-    ui.collapsed = true;
-    paintWindow();
-    appApi?.toast(`已打开工作台：完成「${manualStepLabel(item.waiting_for)}」后回到批次浮窗，选择这次生成的后代版本续接。`, "info");
+    // 回工作台先收起浮窗，只留状态条入口；处理进程不受影响。
+    closeProcessingWindow({ focus: false });
+    appApi?.toast("已打开工作台；完成这一步后从底部状态条的「处理批次」回到批次进度续接。", "info");
     appApi?.go("workbench", { query });
     return;
   }
@@ -723,7 +721,7 @@ function presetLayerHtml() {
       <div>
         <span class="label">流程预设</span>
         <h2>预设管理</h2>
-        <p class="pf-modal__lead">预设保存处理步骤与参数；提交批次时冻结为快照，之后修改不会改变已有批次。</p>
+        <p class="pf-modal__lead">将常用步骤和参数存为预设，下次可直接选用。</p>
       </div>
       <button class="icon-btn" type="button" data-pf-close-presets aria-label="关闭预设管理">${icon("close")}</button>
     </header>
@@ -769,7 +767,7 @@ function presetEditorHtml(selected) {
   const effectiveText = effective.complete ? `${formatPixels(effective.value)} 像素` : "未知（本机服务未报告全部上限）";
   const copyText =
     options.working_max_pixels === null
-      ? "未设置显式副本：不会自动缩放；超过路线有效上限时该步会失败，可在工作台手动创建工作副本。"
+      ? "按原尺寸处理。图片较大时，建议先建工作副本。"
       : effective.complete
       ? `实际副本上限 = min(设置 ${formatPixels(options.working_max_pixels)}, 路线 ${formatPixels(
           effective.value
@@ -909,7 +907,7 @@ function presetEditorHtml(selected) {
       }
       <button class="btn btn--quiet btn--sm" type="button" data-pf-close-presets>关闭</button>
     </div>
-    <p class="pf-form__hint">保存不会改变已经提交的批次；已提交批次使用提交时的快照。</p>
+    <p class="pf-form__hint">更改只对之后提交的批次生效。</p>
   </div>`;
 }
 
@@ -1131,21 +1129,27 @@ function runLayerHtml() {
   const run = ui.run;
   const preset = presetById(run.presetId);
   const options = preset ? presetOptions(preset) : defaultPresetOptions();
-  const { inputs, missing } = batchInputs(run.groups, options, run.selected, run.preferredInputs);
-  const missingIds = new Set(missing.map((group) => group.imageId));
+  // 逐组判断兼容性，不依赖当前勾选：取消勾选后该行仍可再选回，真不兼容才禁用。
+  const availability = runInputAvailability(run.groups, options, run.preferredInputs);
   const cloud = isCloud(options);
   const estimate = estimateProviderCalls(options, run.selected.size);
   const steps = presetSteps(options);
   const limits = healthPixelLimits();
   const effective = effectiveWorkingLimit(options, limits);
-  const routeCapText = effective.complete ? `${formatPixels(effective.value)} 像素` : "未知（服务未报告完整上限）";
+  const routeCapText = effective.complete ? `${formatPixels(effective.value)} 像素` : "未知";
   const pngOnly = !options.vectorize && !options.tile;
   const copyText =
     options.working_max_pixels === null
-      ? "未设置显式副本（不会自动缩放）"
+      ? "不自动缩放"
       : effective.complete
-      ? `显式副本 ${formatPixels(options.working_max_pixels)} → 实际 ≤ ${formatPixels(effective.copy)} 像素`
-      : "显式副本实际值由服务端按整条路线取较小值";
+      ? `副本 ≤ ${formatPixels(effective.copy)} 像素`
+      : "副本由服务端取较小值";
+  const overCount = run.groups.filter((group) => {
+    if (!run.selected.has(group.imageId)) return false;
+    const asset = availability.get(group.imageId);
+    const pixels = Number(asset?.width) * Number(asset?.height);
+    return Boolean(effective.complete && pixels && pixels > effective.value);
+  }).length;
   const problem = runValidation({
     presetId: run.presetId,
     groups: run.groups,
@@ -1162,7 +1166,7 @@ function runLayerHtml() {
       <div>
         <span class="label">${esc(run.sourceLabel || "批量处理")}</span>
         <h2>开始批量处理</h2>
-        <p class="pf-modal__lead">先核对预设步骤、图片与预计云端调用；提交后由本机服务持久推进。</p>
+        <p class="pf-modal__lead">选好处理方式和图片，开始后可在底部「处理批次」查看结果。</p>
       </div>
       <button class="icon-btn" type="button" data-pf-close-run aria-label="关闭">${icon("close")}</button>
     </header>
@@ -1186,14 +1190,16 @@ function runLayerHtml() {
               : `<option value="">还没有预设</option>`
           }
         </select>
-        <p class="pf-run__meta">${esc(recipeLabel(options.recipe))} · ${steps.length} 步 · 批次路线有效上限 ${esc(
+        <p class="pf-run__meta">${esc(recipeLabel(options.recipe))} · ${steps.length} 步 · 路线上限 ${esc(
           routeCapText
         )} · ${esc(copyText)}</p>
-        <p class="field__hint">${
+        ${
           pngOnly
-            ? "当前关闭矢量化与平铺：批次只生成 PNG 提取结果，不产出 SVG/平铺。"
-            : "超过路线有效上限的单图会在该步失败；可在预设里设置显式副本，或先在工作台手动创建工作副本。"
-        }</p>
+            ? `<p class="field__hint">只生成提取 PNG，不产出 SVG/平铺。</p>`
+            : overCount
+            ? `<p class="field__hint">${overCount} 张图片超过建议尺寸。${options.working_max_pixels === null ? "可先建工作副本，减少内存占用。" : "将按预设创建较小的副本。"}</p>`
+            : ""
+        }
         <div class="pf-steps-preview">
           ${steps
             .map(
@@ -1206,7 +1212,7 @@ function runLayerHtml() {
         </div>
         ${
           steps.some((step) => step.manual)
-            ? `<p class="pf-gate__hint">裁切 / 修复 / 候选 / 蒙版是人工确认门：不会自动生成结果，该图会暂停，其余图片继续。届时从进度浮窗打开工作台处理，再回来选择后代版本续接。人工步骤里的云端操作可能另计费用。</p>`
+            ? `<p class="pf-gate__hint">需要你处理时，只暂停这一张。到工作台完成这一步，再回来选择新版本继续。</p>`
             : ""
         }
       </div>
@@ -1224,15 +1230,15 @@ function runLayerHtml() {
             ? `<ul class="pf-picklist">
                 ${run.groups
                   .map((group) => {
-                    const asset = inputs.find((entry) => entry.group.imageId === group.imageId)?.asset;
-                    const unavailable = missingIds.has(group.imageId) || !asset;
+                    const asset = availability.get(group.imageId) || null;
+                    const unavailable = !asset;
                     const checked = run.selected.has(group.imageId) && !unavailable;
                     const pixels = Number(asset?.width) * Number(asset?.height);
                     const over = Boolean(effective.complete && pixels && pixels > effective.value);
                     const overNote = over
                       ? options.working_max_pixels === null
-                        ? " · 超出路线有效上限，会在此步失败；请设置显式副本"
-                        : ` · 超出路线有效上限，会先创建工作副本 ≤ ${formatPixels(effective.copy)} 像素`
+                        ? " · 建议先建工作副本"
+                        : ` · 超出上限，会先建副本 ≤ ${formatPixels(effective.copy)} 像素`
                       : "";
                     return `<li>
                       <label class="pf-pick${unavailable ? " is-disabled" : ""}">
@@ -1244,8 +1250,8 @@ function runLayerHtml() {
                             esc(shortId(group.imageId))
                           } · ${group.assets.length} 个版本 · ${
                             unavailable
-                              ? "这个预设没有兼容的输入版本"
-                              : `输入：${esc(kindLabel(asset.kind))} · ${esc(dimsOf(asset))}${esc(overNote)}`
+                              ? "没有兼容的输入版本"
+                              : `输入 ${esc(kindLabel(asset.kind))} · ${esc(dimsOf(asset))}${esc(overNote)}`
                           }</span>
                         </span>
                       </label>
@@ -1258,22 +1264,17 @@ function runLayerHtml() {
       </div>
 
       <div class="pf-run__cloud">
-        <p class="pf-run__estimate">预计自动云端调用 <b class="num">${estimate}</b> 次${
-          cloud ? "（每张图一次云端线稿）" : ""
-        }。人工门里的云端操作另计，不包含在这里。</p>
-        ${
-          cloud
-            ? `<p class="field__hint">提交后会上传所选图片到云端服务商，并按次计费；失败不会自动重试。</p>`
-            : `<p class="field__hint">本地路线不产生云端调用；若人工门里另选云端操作，按工作台提交处理。</p>`
-        }
+        <p class="pf-run__estimate">${cloud
+          ? `将上传所选图片，预计调用云端 <b class="num">${estimate}</b> 次，按次计费。失败后可到任务页核对。`
+          : "自动步骤在本机完成，免费。"}${steps.some(step => step.manual) ? "手动选择云端工具会另行计费。" : ""}</p>
       </div>
       ${run.error ? `<p class="pf-error" role="alert">${esc(run.error)}</p>` : ""}
     </div>
     <footer class="pf-modal__foot">
-      <span class="pf-foot-note">${problem ? esc(problem) : "单个批次最多 100 张；输入将使用每张原图的兼容版本。"}</span>
+      <span class="pf-foot-note">${problem ? esc(problem) : "最多 100 张；每张使用兼容输入版本。"}</span>
       <button class="btn btn--quiet btn--sm" type="button" data-pf-close-run>取消</button>
       <button class="btn btn--primary btn--sm" type="button" data-pf-run-start${startDisabled ? " disabled" : ""}>${
-        ui.runBusy ? "提交中…" : "开始处理"
+        ui.runBusy ? "提交中…" : cloud ? "确认上传并开始付费处理" : "开始本地处理"
       }</button>
     </footer>
   </div>`;
@@ -1362,15 +1363,17 @@ async function startRun() {
   run.error = "";
   paintRun();
   try {
-    const batch = await createBatch({
+    await createBatch({
       presetId: run.presetId,
       inputs,
-      consentToUpload: true,
-      consentToCharge: true,
+      consentToUpload: isCloud(options),
+      consentToCharge: isCloud(options),
     });
     closeRunDialog();
-    await openProcessingWindow({ batchId: batch.batch_id });
-    appApi?.toast(`批次已提交：${inputs.length} 张原图。进度保存在本机服务，可收起浮窗后继续。`, "done");
+    // 提交后不自动弹窗：只更新状态条入口，工作台保持可用；要细节时再点开。
+    paintDock();
+    dockEl?.focus({ preventScroll: true });
+    appApi?.toast(`批次已提交：${inputs.length} 张原图；进度在底部状态条。`, "done");
   } catch (error) {
     run.error = error?.message || "批次提交失败。";
   } finally {
@@ -1403,9 +1406,9 @@ function onGlobalKey(event) {
 export function processingUiSnapshot() {
   return {
     windowOpen: ui.windowOpen,
-    collapsed: ui.collapsed,
     runOpen: Boolean(runEl && !runEl.hidden),
     presetOpen: Boolean(presetEl && !presetEl.hidden),
     batches: processing.batches.length,
+    active: processing.batches.filter(isBatchActive).length,
   };
 }

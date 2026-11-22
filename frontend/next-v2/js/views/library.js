@@ -428,9 +428,7 @@ function emptyHtml() {
     <div class="lb-empty">
       <span class="lb-empty__icon" aria-hidden="true">${icon("layers")}</span>
       <p class="lb-empty__title">还没有纹样</p>
-      <p class="lb-empty__copy">上传第一张原图，等级、尺寸与授权记录会一起登记；处理结果按原图分组显示。</p>
-      <button class="btn btn--primary btn--sm" type="button" data-act="upload">${icon("upload")}上传纹样</button>
-      <p class="lb-empty__hint">文件保存在本机 storage/api/。</p>
+      <p class="lb-empty__copy">还没有纹样。用页头「上传纹样」开始。</p>
     </div>`;
   }
   const condition = activeFilterText();

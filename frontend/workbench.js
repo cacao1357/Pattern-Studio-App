@@ -1085,9 +1085,9 @@ function renderHealth() {
 
   chip.classList.add("is-ok");
   if (dot) dot.className = "status-dot is-ok";
-  setText(dom.healthLabel, "本机就绪");
-  chip.setAttribute("aria-label", "本机服务已就绪：" + summary);
-  chip.title = "本机服务已就绪：" + summary;
+  setText(dom.healthLabel, "检查连接");
+  chip.setAttribute("aria-label", "检查本机连接，" + summary);
+  chip.title = summary;
   setHidden(dom.connectionBanner, true);
 }
 
@@ -1828,6 +1828,7 @@ function openUploadPicker() {
 function setView(view) {
   const next = ["home", "history", "library", "workspace"].includes(view) ? view : "home";
   state.view = next;
+  $("quick-upload").hidden = next === "library";
   $("app-view")?.classList.toggle("is-workspace", next === "workspace");
   $("app-view")?.classList.toggle("is-home", next === "home");
   for (const name of ["home", "history", "library", "workspace"]) {
@@ -4926,9 +4927,8 @@ async function handleCancelTask() {
       state.cancelNote = "任务在取消请求前失败；失败记录与已有成果仍保留。";
       await finishJobOnce(merged);
     } else {
-      state.cancelNote = "取消请求已提交，等待服务端给出真实终态。";
+      state.cancelNote = "已请求取消，正在等待结果。";
       scheduleJobPoll(job.job_id, 900);
-      showToast("取消请求已提交，等待真实终态；页面不会自动重发。", "info", 5500);
     }
   } catch (error) {
     state.cancelError = cancelConflictMessage(error);
@@ -6645,7 +6645,7 @@ async function adoptAiPipeline(raw, options) {
     await processAiResult(pipeline);
   }
   if (opts.announce) {
-    showToast(isAiWaiting(pipeline) ? "AI 候选已就绪，请选择要保留的图层。" : "AI 流程状态已更新。", "info", 4500);
+    showToast(isAiWaiting(pipeline) ? "请选择要保留的图层。" : "AI 流程状态已更新。", "info", 4500);
   }
 }
 
@@ -7402,8 +7402,8 @@ function renderRepairDamageOptions() {
   const validSelected = state.repair.damageIds.includes(state.repair.damageId) ? state.repair.damageId : "";
   dom.repairDamageMask.value = validSelected;
   setText(dom.repairDamageNote, masks.length
-    ? "只列出与当前输入同源、同尺寸、同坐标空间的二值损伤标注；矩形选区不会被当作损伤真值。"
-    : "当前输入没有可用的已登记损伤标注；这不是把框选当成损伤真值。");
+    ? "请选择与修复区域对应的损伤标注。"
+    : "当前图片还没有可用的损伤标注。");
 }
 
 function renderRepairInput() {
@@ -8066,7 +8066,7 @@ async function renderRepairCompare() {
       if (seq !== state.repair.compareSeq) return;
       image.src = url;
       dom.repairCompareBody.replaceChildren(layout);
-      setText(dom.repairCompareNote, "差异图不烧入成果，也不代表质量判定；请人工检查结构和边缘。");
+      setText(dom.repairCompareNote, "在差异图中检查纹样结构和边缘。");
     }
   } catch (error) {
     if (seq !== state.repair.compareSeq) return;
@@ -8247,15 +8247,15 @@ function renderTilePanel() {
   const size = unit ? tileOutputSize() : null;
   const reason = tileBlockReason();
   if (!unit) {
-    setText(dom.tileNote, "选择单元后显示输出尺寸与 4 MP 上限检查。");
+    setText(dom.tileNote, "先选一张图作为平铺单元。");
   } else if (size.pixels > TILE_PIXEL_LIMIT) {
     setText(dom.tileNote,
       "输出 " + formatDimensions(size.width, size.height) + "（" + formatPixels(size.width, size.height) +
-      "）超过 4,000,000 px；请换较小单元，服务端会拒绝，前端不会缩放。");
+      "）超过 400 万像素。请减少行列数或换一张小图。");
   } else {
     setText(dom.tileNote,
       "输出 " + formatDimensions(size.width, size.height) + "（" + formatPixels(size.width, size.height) +
-      "）· 上限 4 MP · 接缝仅记录你的目测，不提供自动消缝或无缝判定。");
+      "）");
   }
   setError(dom.tileError, state.tile.error || "");
   updateTileActions();
@@ -8394,7 +8394,7 @@ async function startTilePreview() {
       await adoptJob(job, { announce: true });
       const latest = state.tasks.get(job.job_id);
       if (isJobActive(latest)) {
-        showToast("平铺任务已提交；完成后可下载单元与平铺，预览不代表无缝。", "info", 5500);
+        showToast("正在生成平铺图，完成后可下载。", "info", 5500);
       }
       renderTilePanel();
     },
@@ -8469,8 +8469,8 @@ async function completeRepairJob(job) {
   const repairState = String(record.state || "").toLowerCase();
   if (repairState === "waiting_user") {
     showToast(record.composited_asset
-      ? "修复候选已就绪；默认接受局部保护版，请先比较后确认。"
-      : "修复候选已就绪，但未生成局部保护版；接受全图候选需额外确认。", "success", 6500);
+      ? "请对比修复效果，默认接受局部修复版本。"
+      : "仅生成了全图候选，接受前请确认整图改动。", "success", 6500);
   } else if (repairState === "failed") {
     showToast("修复任务失败；没有自动重试或收费。可在归档复用路径下重新提交。", "warning", 6500);
   }
@@ -8525,7 +8525,7 @@ async function completeTileJob(job) {
   state.tile.error = "";
   renderTilePanel();
   renderVersions();
-  showToast("平铺预览已生成。请目测接缝；这仅证明整数复制，不代表自动无缝。", "success", 6500);
+  showToast("请在平铺预览中检查接缝。", "success", 6500);
 }
 
 async function restoreRepairForJob(jobId) {
@@ -9795,14 +9795,8 @@ function renderHistoryDetail(job) {
     empty.append(icon("history", "empty-mark"));
     empty.append(element("h3", "", state.history.items.length ? "未选择任务" : "还没有历史任务"));
     empty.append(element("p", "", state.history.items.length
-      ? "在左侧索引里点一条任务，这里会显示它的参数、错误和可执行操作。"
-      : "上传图片并运行本地操作后，任务会按时间保留在这里。"));
-    if (!state.history.items.length) {
-      const upload = element("button", "btn btn-solid btn-sm", "上传纹样");
-      upload.type = "button";
-      upload.addEventListener("click", openUploadPicker);
-      empty.append(upload);
-    }
+      ? "选择任务查看详情。"
+      : "处理纹样后，可在这里查看记录。"));
     detail.append(empty);
     return;
   }
@@ -10739,7 +10733,7 @@ function wireEvents() {
   $("side-dataset")?.addEventListener("click", openDatasetDialog);
   $("side-settings")?.addEventListener("click", openSettingsDialog);
   $("side-open-workspace")?.addEventListener("click", () => openWorkspace());
-  for (const id of ["quick-upload", "library-upload", "library-empty-upload"]) {
+  for (const id of ["quick-upload", "library-upload"]) {
     $(id)?.addEventListener("click", openUploadPicker);
   }
   $("library-open-workspace")?.addEventListener("click", () => openWorkspace());
