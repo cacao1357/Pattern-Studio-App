@@ -173,6 +173,24 @@ class WorkbenchStore(Store):
             for parent in record.get("parents", []):
                 db.execute("INSERT INTO asset_relations VALUES (?,?,?)", (record["asset_id"], parent["asset_id"], parent["role"]))
 
+    @staticmethod
+    def insert_image_meta(db, image_id, meta, created):
+        db.execute("""INSERT INTO image_meta
+            (image_id,content_id,grade,grade_version,short_side,sharpness,contrast,
+             ref_size,ref_fit,ahash,fingerprint_version,split,source_type,source_name,
+             source_url,license,collected_at,batch_id,provenance_status,
+             normalization_version,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (image_id, meta.get("content_id", ""), meta.get("grade", "U"),
+             meta.get("grade_version", ""), meta.get("short_side"), meta.get("sharpness"),
+             meta.get("contrast"), meta.get("ref_size", 512), meta.get("ref_fit", ""),
+             meta.get("ahash", ""), meta.get("fingerprint_version", ""), meta.get("split", ""),
+             meta.get("source_type", "未确认"), meta.get("source_name", ""),
+             meta.get("source_url", ""), meta.get("license", "未确认"),
+             meta.get("collected_at", ""), meta.get("batch_id", ""),
+             meta.get("provenance_status", "unverified"),
+             meta.get("normalization_version", ""), created))
+
     def add_image(self, outputs, source_note, key, request_hash, *, meta=None):
         existing = self.existing("images", key, request_hash)
         if existing:
@@ -198,21 +216,7 @@ class WorkbenchStore(Store):
                     self._register(db, staged)
                     db.execute("INSERT INTO images VALUES (?,?,?,?,?)", (image_id, staged[0][0]["asset_id"], staged[1][0]["asset_id"], source_note, created))
                     if meta:
-                        db.execute("""INSERT INTO image_meta
-                            (image_id,content_id,grade,grade_version,short_side,sharpness,contrast,
-                             ref_size,ref_fit,ahash,fingerprint_version,split,source_type,source_name,
-                             source_url,license,collected_at,batch_id,provenance_status,
-                             normalization_version,created_at)
-                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                            (image_id, meta.get("content_id", ""), meta.get("grade", "U"),
-                             meta.get("grade_version", ""), meta.get("short_side"), meta.get("sharpness"),
-                             meta.get("contrast"), meta.get("ref_size", 512), meta.get("ref_fit", ""),
-                             meta.get("ahash", ""), meta.get("fingerprint_version", ""), meta.get("split", ""),
-                             meta.get("source_type", "未确认"), meta.get("source_name", ""),
-                             meta.get("source_url", ""), meta.get("license", "未确认"),
-                             meta.get("collected_at", ""), meta.get("batch_id", ""),
-                             meta.get("provenance_status", "unverified"),
-                             meta.get("normalization_version", ""), created))
+                        self.insert_image_meta(db, image_id, meta, created)
                     db.execute("INSERT INTO local_keys VALUES (?,?,?,?)", ("images", key, request_hash, image_id))
                     db.commit()
         except BaseException:

@@ -28,12 +28,12 @@ const FLOW_ICONS = ["image", "crop", "brush", "layers", "flask", "mask", "spark"
 /* ------------------------------------------------------------------ 当前进度
 
    首页的高亮跟着真实进度走，不写死在某一工序：
-   - 「已完成」看这张图已经产出的资产与成功的任务；
+   - 「已完成」看这张图已经产出的纹样与成功的任务；
    - 「最近一步」先看正在跑的任务，再看用户刚停下的工序（store.lastStage），
-     最后才回落到当前资产与任务类型。
+     最后才回落到当前纹样与任务类型。
    会话只在内存里：刷新后没有会话，自动退到最近成果/最近任务的数据。 */
 
-/** 正在处理的那张图的资产：会话里的资产，加上最近成果里同一张图的其它版本。 */
+/** 正在处理的那张图的纹样：会话里的纹样，加上最近成果里同一张图的其它版本。 */
 function workAssets() {
   const session = store.session;
   const recent = store.recentAssets || [];
@@ -294,7 +294,7 @@ function renderGate() {
           blockers.length
             ? `<ul class="gate__list gate__list--small"><li>${icon("alert")} 云端尚未就绪，到设置里完成配置即可调用。</li></ul>`
             : `<ul class="gate__list gate__list--small">
-                 <li>${icon("flask")} 每次调用前勾选上传与调用确认</li>
+                 <li>${icon("flask")} 云端调用会按次计费，失败不自动重发</li>
                </ul>`
         }
         <a class="btn btn--paper btn--sm gate__cta" href="#/settings">配置云端 ${icon("arrow")}</a>
@@ -478,7 +478,7 @@ export default {
         const { asset, stage } = opened;
         api.go("workbench", { query: { image: asset.image_id, asset: asset.asset_id, stage } });
       } catch (error) {
-        api.toast(error?.message || "打开资产失败", "warn");
+        api.toast(error?.message || "打开纹样失败", "warn");
       }
     });
 
@@ -695,7 +695,7 @@ async function openAsset(assetId, api) {
   try {
     if (!asset) asset = await api.http.asset(assetId);
   } catch (error) {
-    api.toast(error?.message || "读取资产失败", "warn");
+    api.toast(error?.message || "读取纹样失败", "warn");
     return;
   }
   const preview = hasPreview(asset)
@@ -719,7 +719,7 @@ async function openAsset(assetId, api) {
         <a class="btn btn--ghost btn--sm" href="${api.http.assetDownloadUrl(asset.asset_id)}" download>下载原文件</a>
         <a class="btn btn--ghost btn--sm" href="#/library">去纹样库</a>
       </div>
-      <p class="drawer-foot">字段来自本机资产记录；下载直接读取 storage/api 里的文件。</p>
+      <p class="drawer-foot">字段来自本机纹样记录；下载直接读取 storage/api 里的文件。</p>
     `,
   });
   document.querySelector("[data-drawer-open]")?.addEventListener("click", async () => {

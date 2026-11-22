@@ -1469,7 +1469,7 @@ test("刷新后按图 jobs 历史恢复修复候选与旧修复框，不提交�
     );
     assert.match(html, /修复框 50 × 60/);
     assert.match(html, /100 × 80/);
-    assert.match(html, /来自输入资产/);
+    assert.match(html, /来自输入纹样/);
   } finally {
     globalThis.document = originalDocument;
     globalThis.location = originalLocation;
@@ -1492,7 +1492,7 @@ test("修复框换算只使用修复记录的 input_asset 尺寸", () => {
   const text = workbench.repairRecordText(info, input);
   assert.match(text, /100 × 80/);
   assert.match(text, /50 × 60/);
-  assert.match(text, /输入资产/);
+  assert.match(text, /输入纹样/);
   assert.equal(workbench.repairBoxFromJob(info, null), null);
   assert.equal(workbench.repairBoxFromJob({ parameters: {} }, input), null);
 

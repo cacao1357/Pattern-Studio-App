@@ -1,5 +1,5 @@
 /* =============================================================================
-   store.js — 页面共享的服务端数据（健康、设置、会话资产、纹样库、最近任务）。
+   store.js — 页面共享的服务端数据（健康、设置、会话纹样、纹样库、最近任务）。
    约定：
    - 视图通过 import { store } 读取数据；
    - 数据变化后由调用方决定何时 api.render()（app.js 的 patch 不做深合并）；
@@ -93,7 +93,7 @@ export const store = {
   session: blankSession(),
   /**
    * 纹样库按原图分组的分页状态（GET /api/v1/patterns）。
-   * items 是「原图组」而不是单个资产；筛选与分页都在服务端完成，翻页后
+   * items 是「原图组」而不是单个纹样；筛选与分页都在服务端完成，翻页后
    * 仍只有已载入的组会被选中/导出。openId 供 ?open= 深链在列表载入后打开档案。
    */
   patterns: {
@@ -304,7 +304,7 @@ export const store = {
     // 来源名默认用文件名，让工作台标题和纹样库能区分不同纹样；调用方可覆盖。
     const provenance = { source_name: String(file?.name || "").slice(0, 200), ...(options.provenance || {}) };
     const result = await api.uploadImage(file, provenance, options);
-    // 上传期间有任何新的加载开始（打开别的纹样/资产）或会话已切换，
+    // 上传期间有任何新的加载开始（打开别的纹样或版本）或会话已切换，
     // 都说明这份上传结果是晚到的，不能再发布。
     if (!this.isSessionCurrent(token) || loadSeq !== pendingLoad) {
       return { result, session: null, stale: true };
@@ -339,7 +339,7 @@ export const store = {
     return this.session;
   },
 
-  /** 从纹样库挑一个资产作为工作输入。 */
+  /** 从纹样库挑一个纹样作为工作输入。 */
   async openAsset(assetId, { stage = null } = {}) {
     const seq = ++loadSeq;
     const epoch = sessionEpoch;
@@ -387,7 +387,7 @@ export const store = {
   },
 
   /**
-   * 只从当前工作台移除一份派生资产，不删除纹样库里的记录。
+   * 只从当前工作台移除一份派生纹样，不删除纹样库里的记录。
    * 原件与规范输入是会话底座，不允许移除。
    */
   removeAsset(assetId) {
@@ -413,7 +413,7 @@ export const store = {
     return this.session.assets.find((asset) => asset.asset_id === assetId) || null;
   },
 
-  /** 把按图恢复时读取到的资产并入当前会话；已存在则不重复加入。 */
+  /** 把按图恢复时读取到的纹样并入当前会话；已存在则不重复加入。 */
   rememberAsset(asset, { token } = {}) {
     if (!asset?.asset_id) return null;
     if (token !== undefined && token !== sessionEpoch) return null;
@@ -425,7 +425,7 @@ export const store = {
   },
 
   /**
-   * 把任务产物并入会话资产（按出现顺序）。
+   * 把任务产物并入会话纹样（按出现顺序）。
    * 传入 token 时只在仍属于该会话时写入；失败/取消任务也已发布的产物同样保留。
    */
   addJobAssets(job, { token } = {}) {
@@ -462,7 +462,7 @@ export const store = {
     }
     if (!current()) return { asset: null, status: "stale_session" };
     if (!asset || !asset.asset_id) {
-      return { asset: null, status: "fetch_failed", error: new ApiError("修复资产读取结果为空。") };
+      return { asset: null, status: "fetch_failed", error: new ApiError("修复纹样读取结果为空。") };
     }
     // 等待期间可能有并发的接受调用已经加入，避免重复。
     const duplicate = this.assetById(acceptedId);
@@ -632,6 +632,28 @@ export const store = {
     return item;
   },
 
+  /**
+   * 保存纹样资料后同步当前会话的原图记录与已载入的纹样组。
+   * 只改原图组自己的等级/来源；已生成版本保留各自的生成记录。
+   */
+  applyPatternMeta(imageId, result) {
+    if (!imageId || !result?.meta) return null;
+    let sessionChanged = false;
+    const image = this.session.image;
+    if (image && (image.image_id === imageId || this.session.imageId === imageId)) {
+      image.meta = { ...(image.meta || {}), ...result.meta };
+      if (result.source_note !== undefined) image.source_note = result.source_note;
+      sessionChanged = true;
+    }
+    const item = this.patterns.items.find((entry) => entry.image_id === imageId);
+    if (item) {
+      item.meta = { ...(item.meta || {}), ...result.meta };
+      if (result.source_note !== undefined) item.source_note = result.source_note;
+    }
+    if (sessionChanged) emit("session");
+    return image;
+  },
+
   async createPatternCategory(name) {
     const created = await api.createPatternCategory(name);
     this.patterns.categories = sortCategories([...this.patterns.categories, created]);
@@ -656,7 +678,7 @@ export const store = {
     return updated;
   },
 
-  /** 删除分类只解除归类：纹样组、资产与 revision 之外的内容保持不动。 */
+  /** 删除分类只解除归类：纹样组、纹样与 revision 之外的内容保持不动。 */
   async deletePatternCategory(categoryId, revision) {
     const result = await api.deletePatternCategory(categoryId, revision);
     const state = this.patterns;
@@ -678,7 +700,7 @@ export const store = {
   /**
    * 永久删除整张原图组：原图、规范输入、全部衍生版本、文件与这张纹样的
    * 任务记录都由服务端一并删除；题材分类本身和其他原图组保留。
-   * 若删的是当前会话的原图，同时结束会话，避免继续指向已不存在的资产。
+   * 若删的是当前会话的原图，同时结束会话，避免继续指向已不存在的纹样。
    */
   async deletePatternGroup(imageId) {
     const result = await api.deletePattern(imageId);

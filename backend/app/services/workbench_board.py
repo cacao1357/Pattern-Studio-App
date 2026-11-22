@@ -116,3 +116,9 @@ class WorkbenchBoard:
             after = db.execute("SELECT count(*) FROM workbench_items").fetchone()[0]
             db.commit()
         return {"removed": before - after, "image_ids": image_ids}
+
+    def clear_items(self):
+        with self.store.connection() as db:
+            removed = db.execute("DELETE FROM workbench_items").rowcount
+            db.commit()
+        return {"removed": removed}

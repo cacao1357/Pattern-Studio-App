@@ -77,10 +77,8 @@ function listHtml() {
   return `<div class="pp-items">${modal.items.map(itemHtml).join("")}</div>`;
 }
 
-function paint() {
+function paintChrome() {
   if (!modal.el) return;
-  const list = modal.el.querySelector("[data-pp-list]");
-  if (list) list.innerHTML = listHtml();
   const count = modal.el.querySelector("[data-pp-count]");
   if (count) count.textContent = `已选 ${modal.selected.size} / ${MAX_WORKBENCH_SELECTION}`;
   const add = modal.el.querySelector("[data-pp-act='add']");
@@ -99,6 +97,25 @@ function paint() {
     error.textContent = modal.error && modal.items.length ? modal.error : "";
     error.hidden = !error.textContent;
   }
+}
+
+/** 只同步勾选状态：不重建列表，缩略图不会因为勾选重新载入而闪一下。 */
+function syncSelectionDom() {
+  if (!modal.el) return;
+  modal.el.querySelectorAll("[data-pp-row]").forEach((row) => {
+    const imageId = row.dataset.ppRow || "";
+    row.classList.toggle("is-checked", modal.selected.has(imageId));
+    const input = row.querySelector("[data-pp-item]");
+    if (input && !input.disabled) input.checked = modal.selected.has(imageId);
+  });
+  paintChrome();
+}
+
+function paint() {
+  if (!modal.el) return;
+  const list = modal.el.querySelector("[data-pp-list]");
+  if (list) list.innerHTML = listHtml();
+  paintChrome();
 }
 
 async function loadPage({ append = false } = {}) {
@@ -215,7 +232,7 @@ function bind() {
         modal.selected = new Set(
           [...modal.selected, ...addable.map((item) => item.image_id)].slice(0, MAX_WORKBENCH_SELECTION)
         );
-        paint();
+        syncSelectionDom();
         break;
       }
       default:
@@ -239,7 +256,7 @@ function bind() {
       modal.selected.delete(imageId);
     }
     modal.error = "";
-    paint();
+    syncSelectionDom();
   });
   const search = modal.el.querySelector("[data-pp-search]");
   search?.addEventListener("input", () => {
@@ -285,7 +302,7 @@ export function openPatternPicker({ existing = [], onAdd = null } = {}) {
     </header>
     <label class="pp__search">
       ${icon("search")}
-      <input class="input" type="search" data-pp-search placeholder="搜索名称、来源、类型或资产编号…"
+      <input class="input" type="search" data-pp-search placeholder="搜索名称、来源、类型或纹样编号…"
         autocomplete="off" spellcheck="false" aria-label="搜索纹样" />
     </label>
     <p class="pp__error" data-pp-error role="alert" hidden></p>

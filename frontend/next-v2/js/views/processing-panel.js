@@ -92,6 +92,9 @@ let dockEl = null;
 let windowEl = null;
 let runEl = null;
 let presetEl = null;
+/* 浮窗是否已经画过一次：再次重绘不再重播入场动画。 */
+let runPainted = false;
+let presetsPainted = false;
 
 const ui = {
   windowOpen: false,
@@ -440,7 +443,7 @@ function waitingHtml(batch, item, { candidates, patternEntry, busy }) {
     <p class="pf-gate__copy">这一步不会自动生成结果。请到既有工作台完成「${esc(
       manualStepLabel(item.waiting_for)
     )}」，再回到这里选择这次生成的后代版本；不能用旧结果自动通过。</p>
-    <p class="pf-gate__hint">人工门里的云端操作可能产生额外费用，沿用工作台现有的同意项，不计入本批次的预计云端调用。</p>
+    <p class="pf-gate__hint">人工门里的云端操作可能产生额外费用，按工作台的提交方式处理，不计入本批次的预计云端调用。</p>
     <div class="pf-gate__acts">
       <button class="btn btn--ghost btn--sm" type="button" data-pf-workbench="${esc(item.item_id)}"${
         busy ? " disabled" : ""
@@ -677,6 +680,7 @@ export async function openPresetManager({ presetId = "" } = {}) {
     : { name: "", options: defaultPresetOptions() };
   ui.presetError = "";
   ensurePresetEl();
+  presetsPainted = false;
   presetEl.hidden = false;
   paintPresets();
   presetEl.querySelector("[data-pf-name]")?.focus({ preventScroll: true });
@@ -696,6 +700,7 @@ function ensurePresetEl() {
 
 function closePresetManager() {
   if (presetEl) presetEl.hidden = true;
+  presetsPainted = false;
   ui.presetMode = "";
   ui.presetError = "";
   if (ui.run) paintRun();
@@ -704,6 +709,8 @@ function closePresetManager() {
 function paintPresets() {
   if (!presetEl) return;
   presetEl.innerHTML = presetLayerHtml();
+  if (presetsPainted) presetEl.querySelector(".pf-modal")?.classList.add("is-repaint");
+  presetsPainted = true;
 }
 
 function presetLayerHtml() {
@@ -1072,13 +1079,12 @@ export async function openRunDialog({ groups, preselectedImageIds = [], preferre
     selected: new Set(preselectedImageIds.filter((id) => normalized.some((group) => group.imageId === id))),
     preferredInputs: { ...preferredInputs },
     presetId: defaultPreset?.preset_id || "",
-    consentUpload: false,
-    consentCharge: false,
     error: "",
     sourceLabel,
   };
   pruneRunSelection(ui.run);
   ensureRunEl();
+  runPainted = false;
   runEl.hidden = false;
   paintRun();
   runEl.querySelector("[data-pf-run-preset]")?.focus({ preventScroll: true });
@@ -1097,6 +1103,7 @@ function ensureRunEl() {
 
 function closeRunDialog() {
   if (runEl) runEl.hidden = true;
+  runPainted = false;
   ui.run = null;
   ui.runBusy = false;
 }
@@ -1115,6 +1122,9 @@ function pruneRunSelection(run) {
 function paintRun() {
   if (!runEl || !ui.run) return;
   runEl.innerHTML = runLayerHtml();
+  // 勾选图片、切预设只是局部重绘：不重播入场动画，避免每点一次都闪一下。
+  if (runPainted) runEl.querySelector(".pf-modal")?.classList.add("is-repaint");
+  runPainted = true;
 }
 
 function runLayerHtml() {
@@ -1141,8 +1151,8 @@ function runLayerHtml() {
     groups: run.groups,
     selectedImageIds: run.selected,
     options,
-    consentToUpload: run.consentUpload,
-    consentToCharge: run.consentCharge,
+    consentToUpload: true,
+    consentToCharge: true,
   });
   const startDisabled = ui.runBusy || Boolean(problem);
   return `
@@ -1253,18 +1263,8 @@ function runLayerHtml() {
         }。人工门里的云端操作另计，不包含在这里。</p>
         ${
           cloud
-            ? `<div class="pf-consents">
-                <label class="pf-consent">
-                  <input type="checkbox" data-pf-consent-upload ${run.consentUpload ? "checked" : ""} />
-                  <span>我确认这一批图片会上传到云端服务商（${run.selected.size} 张）。</span>
-                </label>
-                <label class="pf-consent">
-                  <input type="checkbox" data-pf-consent-charge ${run.consentCharge ? "checked" : ""} />
-                  <span>我确认这次批次可能产生 ${estimate} 次云端调用费用。</span>
-                </label>
-                <p class="field__hint">两项都不会默认勾选；缺少任意一项，云端批次会被服务端拒绝。</p>
-              </div>`
-            : `<p class="field__hint">本地路线不产生云端调用；若人工门里另选云端操作，沿用工作台现有确认。</p>`
+            ? `<p class="field__hint">提交后会上传所选图片到云端服务商，并按次计费；失败不会自动重试。</p>`
+            : `<p class="field__hint">本地路线不产生云端调用；若人工门里另选云端操作，按工作台提交处理。</p>`
         }
       </div>
       ${run.error ? `<p class="pf-error" role="alert">${esc(run.error)}</p>` : ""}
@@ -1292,22 +1292,11 @@ function onRunChange(event) {
   }
   if (event.target.matches("[data-pf-run-preset]")) {
     run.presetId = event.target.value;
-    run.consentUpload = false;
-    run.consentCharge = false;
     run.error = "";
     ui.lastPresetId = run.presetId;
     pruneRunSelection(run);
     paintRun();
     return;
-  }
-  if (event.target.matches("[data-pf-consent-upload]")) {
-    run.consentUpload = event.target.checked;
-    paintRun();
-    return;
-  }
-  if (event.target.matches("[data-pf-consent-charge]")) {
-    run.consentCharge = event.target.checked;
-    paintRun();
   }
 }
 
@@ -1360,8 +1349,8 @@ async function startRun() {
     groups: run.groups,
     selectedImageIds: run.selected,
     options,
-    consentToUpload: run.consentUpload,
-    consentToCharge: run.consentCharge,
+    consentToUpload: true,
+    consentToCharge: true,
   });
   if (error) {
     run.error = error;
@@ -1376,8 +1365,8 @@ async function startRun() {
     const batch = await createBatch({
       presetId: run.presetId,
       inputs,
-      consentToUpload: run.consentUpload,
-      consentToCharge: run.consentCharge,
+      consentToUpload: true,
+      consentToCharge: true,
     });
     closeRunDialog();
     await openProcessingWindow({ batchId: batch.batch_id });

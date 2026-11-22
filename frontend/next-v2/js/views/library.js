@@ -1,5 +1,5 @@
 /* =============================================================================
-   views/library.js — 纹样库：按原图 image_id 分组的真实资产索引。
+   views/library.js — 纹样库：按原图 image_id 分组的真实纹样索引。
    数据层：store.patterns（GET /api/v1/patterns 服务端分页 + 手动分类）
            store.dataset（数据集统计，保持原有统计条）。
    交互约定：
@@ -32,6 +32,7 @@ import {
   sourceLabel,
 } from "../format.js";
 import { openBatchExport } from "./batch-export.js";
+import { openPatternMetaDrawer } from "./pattern-meta.js";
 import { openRunDialog } from "./processing-panel.js";
 
 /* ---------- 常量 ---------- */
@@ -171,7 +172,7 @@ const chip = (act, value, current, text, extra = "") => {
 function statValues() {
   const dataset = store.dataset;
   if (!dataset) {
-    return { total: "—", a: "—", b: "—", c: "—", duplicate: "—", license: "—", batches: "—" };
+    return { total: "—", a: "—", b: "—", c: "—", duplicate: "—", license: "—" };
   }
   const grades = dataset.grades || {};
   return {
@@ -181,7 +182,6 @@ function statValues() {
     c: grades.C ?? 0,
     duplicate: dataset.duplicate_content_ids ?? 0,
     license: `${Math.round((dataset.license_coverage || 0) * 100)}%`,
-    batches: (dataset.batches || []).length,
   };
 }
 
@@ -199,7 +199,6 @@ function statsHtml() {
     ["c", "C 级"],
     ["duplicate", "重复内容"],
     ["license", "授权覆盖"],
-    ["batches", "批次"],
   ];
   return `
   <dl class="lb-stats" aria-label="数据集统计" data-lb-stats>
@@ -259,10 +258,10 @@ function filtersHtml() {
   <div class="lb-filters" role="search" aria-label="筛选纹样">
     <div class="lb-filters__top">
       <label class="lb-search" for="lb-search-input">
-        <span class="sr-only">搜索纹样名称、来源、类型或资产编号</span>
+        <span class="sr-only">搜索纹样名称、来源、类型或纹样编号</span>
         ${icon("search")}
         <input class="input lb-search__input" id="lb-search-input" name="纹样搜索" type="search" data-lb-q
-          value="${esc(lib.q)}" placeholder="搜索名称、来源、类型或资产编号…" autocomplete="off" spellcheck="false" />
+          value="${esc(lib.q)}" placeholder="搜索名称、来源、类型或纹样编号…" autocomplete="off" spellcheck="false" />
       </label>
 
       <div class="lb-sort">
@@ -503,6 +502,13 @@ function assetRowHtml(asset) {
 export function patternGroupHtml(group, { select = selectMode, chosen = selected } = {}) {
   const categories = group.categories || [];
   const checked = chosen.has(group.image_id);
+  const meta = group.meta || {};
+  const sourceText =
+    String(meta.source_name || "").trim() ||
+    (meta.source_type && meta.source_type !== "未确认" ? String(meta.source_type) : "");
+  const metaBits = [`#${esc(shortId(group.image_id))}`, `登记 ${esc(formatTime(group.created_at, { withDate: true }))}`, `${group.assets.length} 个版本`];
+  if (meta.grade) metaBits.push(esc(gradeLabel(meta.grade)));
+  if (sourceText) metaBits.push(`来源 ${esc(sourceText)}`);
   return `
   <section class="lb-pattern${select ? " lb-pattern--select" : ""}${checked ? " is-selected" : ""}"
     data-pattern="${esc(group.image_id)}">
@@ -519,9 +525,7 @@ export function patternGroupHtml(group, { select = selectMode, chosen = selected
         }
         <div class="lb-pattern__title">
           <h3 class="lb-pattern__name">${esc(group.name || "未命名纹样")}</h3>
-          <p class="mono lb-pattern__meta">#${esc(shortId(group.image_id))} · 登记 ${esc(
-            formatTime(group.created_at, { withDate: true })
-          )} · ${group.assets.length} 个版本</p>
+          <p class="mono lb-pattern__meta">${metaBits.join(" · ")}</p>
         </div>
       </div>
       <div class="lb-pattern__cats">
@@ -536,6 +540,9 @@ export function patternGroupHtml(group, { select = selectMode, chosen = selected
                 .join("")
             : `<span class="lb-pattern__uncat">未归类</span>`
         }
+        <button class="btn btn--quiet btn--sm" type="button" data-act="pattern-meta" data-image="${esc(group.image_id)}">
+          ${icon("sliders")}资料
+        </button>
         <button class="btn btn--quiet btn--sm" type="button" data-act="assign" data-image="${esc(group.image_id)}">
           ${icon("star")}归类
         </button>
@@ -719,6 +726,36 @@ function paintResults(page, { animate = false } = {}) {
   paintMore(page);
   paintFooter(page);
   paintSelectMode(page);
+}
+
+/** 只同步勾选状态：不重建卡片，避免缩略图每次勾选都重新载入闪一下。 */
+function syncSelectionDom(page) {
+  if (!page || !page.isConnected) return;
+  const groups = displayedPatterns(patterns().items, { grade: patterns().grade, sort: patterns().sort });
+  const visible = new Set(groups.map((group) => group.image_id));
+  for (const imageId of [...selected]) {
+    if (!visible.has(imageId)) selected.delete(imageId);
+  }
+  const count = groups.filter((group) => selected.has(group.image_id)).length;
+  page.querySelectorAll("[data-pattern]").forEach((section) => {
+    section.classList.toggle("is-selected", selected.has(section.dataset.pattern));
+  });
+  page.querySelectorAll("[data-lb-select]").forEach((input) => {
+    input.checked = selected.has(input.dataset.lbSelect);
+  });
+  const bar = page.querySelector("[data-lb-batchbar]");
+  if (bar) {
+    const all = bar.querySelector("[data-lb-select-all]");
+    if (all) {
+      all.checked = count > 0 && count === groups.length;
+      all.indeterminate = count > 0 && count < groups.length;
+    }
+    const countEl = bar.querySelector(".lb-batchbar__count");
+    if (countEl) countEl.textContent = `已选 ${count} / ${groups.length} 组`;
+    bar.querySelectorAll(".lb-batchbar__clear, .lb-batchbar__del").forEach((button) => {
+      button.disabled = count === 0;
+    });
+  }
 }
 
 /* ---------- 载入（最新查询优先） ---------- */
@@ -1050,20 +1087,18 @@ function drawerBody(asset, pattern = null) {
     </div>
 
     <dl class="kv">
-      ${kvRow("资产 ID", `<span class="mono lb-break">${esc(asset.asset_id)}</span>`)}
+      ${kvRow("纹样 ID", `<span class="mono lb-break">${esc(asset.asset_id)}</span>`)}
       ${kvRow("类型", `${esc(kindLabel(asset.kind))}${asset.algorithm_version ? ` · <span class="mono">${esc(asset.algorithm_version)}</span>` : ""}`)}
       ${kvRow("尺寸", dimsOf(asset) === "—" ? "—" : `<span class="mono">${esc(dimsOf(asset))}</span> 像素`)}
       ${kvRow("大小", `<span class="mono">${esc(formatBytes(asset.bytes))}</span>`)}
       ${kvRow("评级", `${esc(gradeLabel(asset.grade))}${asset.grade_version ? ` · <span class="mono">${esc(asset.grade_version)}</span>` : ""}`)}
-      ${kvRow("许可证", license.unset ? `${esc(license.text)} · 打包前需逐条确认` : esc(license.text))}
+      ${kvRow("许可证", license.unset ? `${esc(license.text)} · 打包前需确认授权` : esc(license.text))}
       ${kvRow("来源", sourceBits.join("<br />"))}
-      ${kvRow("采集日期", `<span class="mono">${esc(asset.collected_at || "—")}</span>`)}
-      ${kvRow("批次", `<span class="mono">${esc(asset.batch_id || "—")}</span>`)}
       ${kvRow("sha256", `<span class="mono">${shortHash(asset.sha256)}</span>`)}
       ${kvRow("内容 ID", `<span class="mono">${asset.content_id ? esc(asset.content_id) : "—"}</span>`)}
       ${kvRow("坐标空间", `<span class="mono">${asset.coordinate_space_id ? esc(shortId(asset.coordinate_space_id)) : "—"}</span>`)}
       ${kvRow("生成任务", `<span class="mono">${asset.generated_by_job_id ? esc(shortId(asset.generated_by_job_id)) : "—"}</span>`)}
-      ${kvRow("父资产", parentsHtml(asset))}
+      ${kvRow("父纹样", parentsHtml(asset))}
       ${kvRow("创建时间", `<span class="mono">${esc(formatTime(asset.created_at, { withDate: true }))}</span>`)}
     </dl>
 
@@ -1088,11 +1123,11 @@ function drawerBody(asset, pattern = null) {
           : ""
       }
       <a class="btn btn--ghost btn--sm" href="${http.assetDownloadUrl(asset.asset_id)}" download>${icon("download")}下载</a>
-      <button class="btn btn--ghost btn--sm" type="button" data-drawer-action="copy">${icon("file")}复制资产 ID</button>
+      <button class="btn btn--ghost btn--sm" type="button" data-drawer-action="copy">${icon("file")}复制纹样 ID</button>
       ${pattern ? `<button class="btn btn--quiet btn--sm lb-pattern__del" type="button" data-drawer-action="delete-pattern">${icon("trash")}删除整组</button>` : ""}
       <button class="btn btn--primary btn--sm" type="button" data-drawer-action="workbench">${icon("arrow")}在工作台打开</button>
     </div>
-    <p class="drawer-foot">字段来自本机资产记录；预览与下载直接读取本机文件。一个原图组可同时归入多个题材分类。</p>
+    <p class="drawer-foot">字段来自本机纹样记录；预览与下载直接读取本机文件。一个原图组可同时归入多个题材分类。</p>
   `;
 }
 
@@ -1106,9 +1141,9 @@ async function drawerAction(action, asset, button, api, pattern = null) {
   if (action === "copy") {
     try {
       await navigator.clipboard.writeText(asset.asset_id);
-      api.toast("资产 ID 已复制", "done");
+      api.toast("纹样 ID 已复制", "done");
     } catch {
-      api.toast("无法写入剪贴板，请手动选择资产 ID", "warn");
+      api.toast("无法写入剪贴板，请手动选择纹样 ID", "warn");
     }
     return;
   }
@@ -1136,7 +1171,7 @@ async function drawerAction(action, asset, button, api, pattern = null) {
       api.go("workbench", { query });
     } catch (error) {
       if (button) button.disabled = false;
-      api.toast(error?.message || "无法在工作台打开这个资产", "warn");
+      api.toast(error?.message || "无法在工作台打开这个纹样", "warn");
     }
   }
 }
@@ -1176,6 +1211,25 @@ function findLoadedAsset(assetId) {
 }
 
 /* ---------- 归类抽屉 ---------- */
+
+function openPatternMeta(group, api) {
+  openPatternMetaDrawer({
+    api,
+    imageId: group.image_id,
+    name: group.name,
+    meta: group.meta || {},
+    sourceNote: group.source_note || "",
+    onSaved: async () => {
+      try {
+        const fresh = await http.pattern(group.image_id);
+        store.replacePattern(fresh);
+      } catch {
+        /* 读取失败时保留下一次刷新再更新，不把已保存说成失败 */
+      }
+      paintResults(ctx?.page, { animate: true });
+    },
+  });
+}
 
 async function openAssignDrawer(pattern, api) {
   if (!patterns().categories.length && !patterns().categoriesLoading) {
@@ -1296,7 +1350,7 @@ async function openDeepLinkedAsset(page, api, params) {
   } catch (error) {
     if (ctx && ctx.page === page) {
       const missing = error?.status === 404 || error?.status === 422;
-      api.toast(missing ? "没有找到这个资产（编号无效或已删除）" : error?.message || "无法打开这个资产", "warn");
+      api.toast(missing ? "没有找到这个纹样（编号无效或已删除）" : error?.message || "无法打开这个纹样", "warn");
     }
   } finally {
     stripOpenParam();
@@ -1344,7 +1398,7 @@ export default {
           const asset = await http.asset(hit.dataset.open);
           openAssetDrawer(asset, hit, api);
         } catch (error) {
-          api.toast(error?.message || "无法打开这个资产", "warn");
+          api.toast(error?.message || "无法打开这个纹样", "warn");
         }
         return;
       }
@@ -1432,6 +1486,11 @@ export default {
           catDeleteTimer = 0;
           catDeletePending = "";
           deleteCategory(page, api, id);
+          break;
+        }
+        case "pattern-meta": {
+          const pattern = patterns().items.find((item) => item.image_id === hit.dataset.image);
+          if (pattern) openPatternMeta(pattern, api);
           break;
         }
         case "assign": {
@@ -1525,14 +1584,14 @@ export default {
         });
         if (all.checked) for (const group of groups) selected.add(group.image_id);
         else for (const group of groups) selected.delete(group.image_id);
-        paintResults(page);
+        syncSelectionDom(page);
         return;
       }
       const checkbox = event.target.closest("[data-lb-select]");
       if (!checkbox) return;
       if (checkbox.checked) selected.add(checkbox.dataset.lbSelect);
       else selected.delete(checkbox.dataset.lbSelect);
-      paintResults(page);
+      syncSelectionDom(page);
     });
 
     page.addEventListener("keydown", (event) => {

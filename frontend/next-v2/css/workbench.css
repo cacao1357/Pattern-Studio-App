@@ -1,5 +1,5 @@
 /* =============================================================================
-   workbench.css — 工作台：四栏（文档/工序 · 图片资产 · 纸本画布 · 参数；232 · 268 · 1fr · 368）
+   workbench.css — 工作台：四栏（文档/工序 · 图片纹样 · 纸本画布 · 参数；232 · 268 · 1fr · 368）
    主题：墨房。界面是墨与细线，纹样只出现在暖纸图版上。
    排版：正文 14px、标注不小于 12px；动画克制，prefers-reduced-motion 下全部静止。
    只使用 tokens.css 的变量与 base.css / shell.css 的组件类，不自造第二套按钮/表单。
@@ -106,13 +106,19 @@
   color: var(--text-3);
 }
 
+.wb-doc__edit {
+  width: 100%;
+  margin-top: 10px;
+  justify-content: center;
+}
+
 /* 区块头 */
 .wb-rail__sec {
   flex: none;
   padding: 11px 8px 6px;
   border-bottom: 1px solid var(--line-1);
 }
-/* 工序轨独占资产列让出的高度：八步按可用高度等分，矮窗口时整栏滚动而不是把步骤压扁 */
+/* 工序轨独占纹样列让出的高度：八步按可用高度等分，矮窗口时整栏滚动而不是把步骤压扁 */
 .wb-rail__sec--steps {
   display: flex;
   flex: 1 0 auto;
@@ -234,7 +240,7 @@
   box-shadow: var(--ring-focus);
 }
 
-/* 资产列：文档/工序之后的独立一列，整列高度归缩略图，滚动只发生在这里 */
+/* 纹样列：文档/工序之后的独立一列，整列高度归缩略图，滚动只发生在这里 */
 .wb-assets {
   display: flex;
   flex-direction: column;
@@ -1480,7 +1486,7 @@
 
 /* ================================================================ 响应式 */
 
-/* 三栏：资产列仍在画布左侧，参数区下移、可折叠；展开时作为底部抽屉覆盖画布，避免把画布压扁 */
+/* 三栏：纹样列仍在画布左侧，参数区下移、可折叠；展开时作为底部抽屉覆盖画布，避免把画布压扁 */
 @media (max-width: 1300px) {
   .wb {
     grid-template-columns: 220px 244px minmax(0, 1fr);
@@ -1806,11 +1812,11 @@
 }
 
 /* =============================================================================
-   真实数据接入（2026-11）：媒体盒、任务进度、错误/禁用态、资产与导出清单
+   真实数据接入（2026-11）：媒体盒、任务进度、错误/禁用态、纹样与导出清单
    仍只使用 tokens.css 变量与 base.css 组件类；新增文字不低于 12px。
    ============================================================================= */
 
-/* 图版内的图片内容盒：按资产真实长宽比居中，叠层坐标以它为基准 */
+/* 图版内的图片内容盒：按纹样真实长宽比居中，叠层坐标以它为基准 */
 .wb-media {
   position: absolute;
   overflow: visible;
@@ -1874,6 +1880,10 @@
   text-align: center;
   color: var(--paper-ink);
 }
+.wb-entry {
+  min-height: 55vh;
+  background: var(--paper-0);
+}
 .wb-empty-state__icon {
   display: grid;
   place-items: center;
@@ -1906,12 +1916,12 @@
   gap: 8px;
   margin-top: 4px;
 }
-.wb-plate--empty .btn--ghost {
+:is(.wb-plate--empty, .wb-entry) .btn--ghost {
   border-color: color-mix(in srgb, var(--paper-ink) 32%, transparent);
   background: rgba(255, 255, 255, 0.25);
   color: var(--paper-ink);
 }
-.wb-plate--empty .btn--ghost:hover {
+:is(.wb-plate--empty, .wb-entry) .btn--ghost:hover {
   border-color: color-mix(in srgb, var(--paper-ink) 50%, transparent);
   background: rgba(255, 255, 255, 0.55);
 }
@@ -2150,7 +2160,7 @@
   margin-top: 2px;
 }
 
-/* 面板内资产选择 */
+/* 面板内纹样选择 */
 .wb-asset-list {
   display: flex;
   flex-direction: column;
@@ -2273,7 +2283,7 @@
   margin-top: 10px;
 }
 
-/* 资产轨空态 */
+/* 纹样轨空态 */
 .wb-assets-empty {
   display: flex;
   flex-direction: column;

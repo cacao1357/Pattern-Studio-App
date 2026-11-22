@@ -122,7 +122,7 @@ test("parseSvgElements 保留独立图形字段；elements 空数组合法（空
   );
   assert.throws(
     () => parseSvgElements(payload({ asset_id: "other" }), { assetId: "svg-a" }),
-    /不属于当前资产/
+    /不属于当前纹样/
   );
 });
 

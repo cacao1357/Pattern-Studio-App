@@ -1,6 +1,6 @@
 """Local endpoints for grouped patterns and user-managed categories."""
 
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import FastAPI, Query
@@ -21,6 +21,14 @@ class CategoryUpdate(CategoryCreate):
 class PatternCategoriesUpdate(StrictModel):
     category_ids: list[UUID] = Field(max_length=200)
     revision: int = Field(ge=0, strict=True)
+
+
+class PatternMetaUpdate(StrictModel):
+    grade: Literal["", "A", "B", "C", "U"] = ""
+    source_type: str = Field(default="", max_length=32)
+    source_name: str = Field(default="", max_length=200)
+    source_url: str = Field(default="", max_length=500)
+    source_note: str = Field(default="", max_length=1000)
 
 
 def mount_pattern_library(app: FastAPI, current_store):
@@ -65,6 +73,10 @@ def mount_pattern_library(app: FastAPI, current_store):
     @app.delete("/api/v1/patterns/{image_id}")
     def delete_pattern(image_id: UUID):
         return library().delete_pattern(str(image_id))
+
+    @app.patch("/api/v1/patterns/{image_id}")
+    def update_pattern_meta(image_id: UUID, payload: PatternMetaUpdate):
+        return library().update_meta(str(image_id), **payload.model_dump(exclude_unset=True))
 
     @app.put("/api/v1/patterns/{image_id}/categories")
     def set_pattern_categories(image_id: UUID, payload: PatternCategoriesUpdate):

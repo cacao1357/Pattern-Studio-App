@@ -108,6 +108,20 @@ class WorkbenchItemsTests(unittest.TestCase):
             self.assertEqual([third, second], [item["image_id"]
                                                for item in client.get("/api/v1/patterns").json()["items"]])
 
+    def test_starting_fresh_clears_the_rail_and_preserves_library_versions(self):
+        first, second, third = self.images
+        lineart = self.add_derivative(first, "lineart")
+        with self.client() as client:
+            client.post("/api/v1/workbench/items", json={"image_ids": self.images})
+            path = "/api/v1/workbench/items/all"
+            self.assertEqual({"removed": 3}, client.delete(path).json())
+            self.assertEqual({"removed": 0}, client.delete(path).json())
+            self.assertEqual({"items": [], "next_cursor": None},
+                             client.get("/api/v1/workbench/items").json())
+            groups = client.get("/api/v1/patterns").json()["items"]
+            self.assertEqual([third, second, first], [item["image_id"] for item in groups])
+            self.assertIn(lineart, [asset["asset_id"] for asset in groups[-1]["assets"]])
+
     def test_payload_validation_and_duplicate_selection(self):
         first = self.images[0]
         with self.client() as client:

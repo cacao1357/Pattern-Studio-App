@@ -36,3 +36,7 @@ def mount_workbench_items(app: FastAPI, current_store):
     @app.delete("/api/v1/workbench/items")
     def remove_items(payload: WorkbenchItemsPayload):
         return board().remove_items([str(value) for value in payload.image_ids])
+
+    @app.delete("/api/v1/workbench/items/all")
+    def clear_items():
+        return board().clear_items()
