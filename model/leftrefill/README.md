@@ -9,6 +9,7 @@
 - `inference.json` 记录提示向量、基础模型全部文件的 SHA-256、推理参数及训练来源。
 - `evaluation.json` 保存原有固定 63 张验证图的汇总结果和可比检查点排名。
 - `LICENSE`、`NOTICE` 记录上游 Apache-2.0 代码许可、版本与本次修改。
+- `BASE_MODEL_LICENSE`、`BASE_MODEL_NOTICE` 保留 SD2 基础权重的许可全文和转换来源。完整基础权重由[单独的模型发布页](https://github.com/cacao1357/Pattern-Studio-App/releases/tag/leftrefill-textile-step1108)分发。
 
 原始研究及代码见 [LeftRefill 官方仓库](https://github.com/ewrfcas/LeftRefill)，本次实现基于本地训练已使用的 Diffusers 适配路线。来源版本为 `893c3220ffefba7158c1b5c688d344a8a0e3ff80`。参考图、掩码、原始纹样训练素材的许可需按各自来源核实。
 

@@ -20,6 +20,8 @@ storage/
 !/model/leftrefill/requirements.txt
 !/model/leftrefill/LICENSE
 !/model/leftrefill/NOTICE
+!/model/leftrefill/BASE_MODEL_LICENSE
+!/model/leftrefill/BASE_MODEL_NOTICE
 _qa/
 node_modules/
 frontend/dist/
@@ -31,6 +33,7 @@ dist/
 
 # Local environments, tool caches and machine-generated files
 .venv/
+.venv-gpu/
 .venv-leftrefill/
 venv/
 .ruff_cache/

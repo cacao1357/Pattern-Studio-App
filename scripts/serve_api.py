@@ -1,5 +1,6 @@
 """Launch the same-origin local workbench and bounded worker in the active env."""
 
+import argparse
 from pathlib import Path
 import sys
 
@@ -13,6 +14,11 @@ from app.main import ApiAlreadyRunningError, create_app, exclusive_process
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--port", type=int, default=8765, help="Local HTTP port (default: 8765)")
+    args = parser.parse_args()
+    if not 1 <= args.port <= 65535:
+        parser.error("--port must be between 1 and 65535")
     try:
         settings = load_settings(ROOT)
     except ConfigurationError as error:
@@ -32,12 +38,12 @@ def main() -> int:
             print("Pattern Studio API is already running for this project. Use the existing service, or stop it before starting another instance.")
             print("After changing .env, stop the old service and start it again. Do not delete api-process.lock to bypass the OS lock.")
             return 2
-    print("Starting Pattern Studio: http://127.0.0.1:8765 (local workbench; no password required).")
+    print(f"Starting Pattern Studio: http://127.0.0.1:{args.port} (local workbench; no password required).")
     print("Open this address in a browser to start. ARK_API_KEY stays in the server configuration.")
     print("Seedream enabled: " + str(not settings.blockers()).lower() + "; startup creates no new AI request. Previously submitted queued tasks may resume.")
     if settings.blockers():
         print("Seedream blockers: " + ", ".join(settings.blockers()) + ". Key validity is not checked on startup.")
-    uvicorn.run(create_app(settings), host="127.0.0.1", port=8765, workers=1, http="h11", ws="none",
+    uvicorn.run(create_app(settings), host="127.0.0.1", port=args.port, workers=1, http="h11", ws="none",
                 proxy_headers=False, access_log=False, log_level="warning", limit_concurrency=32,
                 h11_max_incomplete_event_size=16 * 1024)
     return 0

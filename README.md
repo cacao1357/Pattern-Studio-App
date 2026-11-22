@@ -1,163 +1,72 @@
-# Pattern Studio
+# Pattern Studio · 纹样工作台
 
-> 项目处于多人协作开发阶段。已验证本地工作流和 GPU 推理，真实素材的保真度和可编辑性仍按固定样本验收。
+在本机把平面纹样照片处理成透明线稿 PNG 和可编辑 SVG。可以从整张图开始，裁取局部、修正蒙版、移动或删除 SVG 色块，最后平铺检查接缝，按原图分组导出。原图、已保存版本和任务历史保存在自己的电脑上。
 
-本地运行的图案提取与矢量化工作台。包含透明背景提取、全局/局部阈值、GrabCut、蒙版画笔、图像增强、旋转纠偏、轮廓图、SVG 矢量化与调色、预览/应用/放弃、撤销重做、取消、本地历史和导出。
+## Windows 快速开始
 
-## 安装与启动
+1. 在 [v0.2.0 下载页](https://github.com/cacao1357/Pattern-Studio-App/releases/tag/v0.2.0) 的 **Assets** 中选择 **Pattern-Studio-0.2.0-windows-x64.zip**。这是完整的 Windows 64 位便携包，内置 Python 3.11、CPU 推理环境、TGS-Net 线稿权重和 LeftRefill 微调提示向量。GitHub 的 **Source code** 是供开发用的源码快照。
+2. 将 ZIP **完整解压**到路径较短、当前用户可写的目录，例如 `D:\Apps`。进入 `Pattern-Studio`，双击 **Start.cmd** 并保持终端打开。
+3. 用浏览器打开 [本地工作台](http://127.0.0.1:8765/)。点「添加纹样」或上传自己的 PNG/JPEG。第一次可用一张背景干净的小图，在「提取」选「本地模型」，生成线稿后进入「矢量」，保存并导出 SVG。
 
-基础工作台需要 **Python 3.11（64 位）**和现代浏览器。Windows 为当前验证平台。可以复用现有 Python 环境，运行工作台无需 Node.js。默认一键路线使用本地模型，依赖见[本地线稿模型](#本地线稿模型)。
-
-克隆仓库后，在项目根目录创建虚拟环境：
-
-    python -m venv .venv
-
-Windows PowerShell：
-
-    .\.venv\Scripts\python.exe -m pip install -e .
-    .\.venv\Scripts\python.exe -B scripts/serve_api.py
-
-macOS / Linux（未实机验证）：
-
-    .venv/bin/python -m pip install -e .
-    .venv/bin/python -B scripts/serve_api.py
-
-浏览器打开 **http://127.0.0.1:8765**。关闭时在启动终端按 Ctrl+C。保持仓库目录结构完整；此程序通过源码目录读取前端资源，不支持只复制 Python 安装包运行。
-
-当前页面是接入本机服务的新版工作台（`frontend/next-v2/`），配色为「蜜蜡 · 沉褐」（令牌在 `frontend/next-v2/css/tokens.css`，改动后可用 `python scripts/check_contrast.py` 复核对比度）。旧的浅色前端文件仍在 `frontend/` 根目录保留，可通过 **http://127.0.0.1:8765/legacy/** 只读打开对照；接入与回退说明见 [docs/guides/frontend-integration.md](docs/guides/frontend-integration.md)。
-
-本地处理无需配置密钥。更新源码后，请在原启动终端按 Ctrl+C 停止服务，用同一个 Python 环境重新启动，再刷新浏览器。
+便携包的本地流程可离线使用，无需另装 Python、Node.js、Git LFS 或配置 API Key。关闭服务时在启动终端按 Ctrl+C。默认端口被其他程序占用时，在解压目录打开 PowerShell，执行 `.\Start.cmd --port 8876`，再打开 [备用端口地址](http://127.0.0.1:8876/)。服务仅监听本机。
 
 ## 工作台操作
 
-1. 按「来源 → 裁切 → 修复 → 候选 → 提取 → 蒙版 → 矢量 → 平铺」操作。裁切、修复和云端候选均可按素材实际情况跳过；缺损纹样先修复并接受结果，再提取线稿。
-2. 「提取」可选择本地模型、云端模型、OpenCV 线稿或颜色提取，只生成 PNG。云端线稿使用当前输入，提交即视为同意上传与计费，不自动重试。
-3. 「蒙版」可修正透明 PNG，随后在「矢量」单独生成 SVG。切换工序保留当前输入、选层与会话；修改参数可复用已有 PNG，无需再次调用云端。
-4. 已保存产物和任务记录可在纹样库或历史中找回；未接受的修复候选不会自动进入后续处理。旧版前端保留原有一键路线、应用/放弃和会话撤销行为。
-5. 在「平铺」选择有效 PNG 生成 2×2 或 3×3 排列，检查接缝后导出。接缝观察写入相应结果和后续 ZIP 清单。
+| 目标 | 操作 |
+| --- | --- |
+| 提取纹样 | 在「来源」导入原图，可先裁切。直接进入「提取」可选本地模型、OpenCV 或颜色提取。模型输出保持输入尺寸的透明底黑线 PNG。 |
+| 修复破损 | 在「修复」选择路线。本地 LeftRefill 使用 512×512 裁切、缺损框和已保存的参考图，安装见下节。检查候选后点接受，局部结果回填原画布。 |
+| 修改线稿与 SVG | 在「蒙版」修正透明 PNG，再到「矢量」生成 SVG。按填色连通区域选择、移动或删除，保存产生新版本。滑动对照和透明叠加用于核对原图。 |
+| 检查并导出 | 在「平铺」做 2×2 或 3×3 接缝预览。批量导出可选原图、PNG、SVG，ZIP 按原图分组并保留来源和已登记的许可。 |
+| 继续或批量处理 | 首页可恢复上次工作，也可开始新的选入列表。纹样库保存各图与版本。批次在需裁切、修复或人工确认处暂停，进度可在任务中心查阅。 |
 
-### SVG 图形编辑与结果核验
+批量导出每次最多 500 个版本、合计 128 MiB。不同工序有独立像素和时间限制，大图可先显式创建工作副本。处理质量请结合原图检查，尤其是实物照片中的细线、孔洞和低对比区域。[各工序实测上限](https://github.com/cacao1357/Pattern-Studio-App/blob/v0.2.0/docs/guides/local-processing-limits.md)
 
-矢量工序支持按填色连通区域选择、移动或删除图形，复合路径中的孔洞随所属区域一起操作；不同原始路径保持各自颜色和堆叠顺序，不推断花鸟等语义对象。草稿可撤销、重做，保存后生成新 SVG 版本，不覆盖原图或旧 SVG。重新打开已保存版本可继续编辑；未保存的草稿不能代替已保存历史。
+## 本地线稿模型
 
-结果核验保留滑动对照，并提供同坐标透明叠加；裁切、旋转或缩放后的结果不能简单铺满原图当作已对齐。沿来源链找到可核对的光栅版本后，两者使用相同画布与缩放。
+主包中的 `model/model.pt` 与 `model/inference.json` 对应 TGS-Net（HRNet-W18 + U-Net++）。模型以 512×512 窗口、256 像素步长重叠推理，阈值为 0.5，部署参数为 `gate_alpha=0`。便携包默认使用 CPU。下面是可选的 NVIDIA GPU 路线。
 
-编辑组件分析新增 `svg.path` 与 `shapely` 依赖，更新项目后在原 Python 环境执行 `pip install -e .` 补齐。分析仅用于元素归属，保存保留原始曲线命令；过于复杂或无法安全拆分的 SVG 会明确提示，支持边界及接口见 [SVG 编辑契约](docs/contracts/svg-editing-contract.md)。这些能力不代表提取或修复模型质量已通过真实文物验收。
+### GPU 加速与 LeftRefill 局部修复
 
-### 批量纹样与流程预设
-
-进入工作台或刷新时，如有历史工作，可选择「继续上次」或「开始新的工作」。继续会尝试恢复上次打开的纹样、版本和工序；开始新的工作会清空工作台的选入列表，已保存纹样、版本和任务仍可在纹样库或任务页查看。从纹样库打开指定纹样可直接进入工作台。
-
-工作台和纹样库共用「编辑资料」入口，可修改整张纹样的人工评级与来源。已有处理版本保留生成时的资料，来源登记与素材授权分别记录。
-
-批量导入的各张原图独立登记，处理结果按原图分组，跨图切换保留各自历史。工作台「纹样」列只显示用户自己选入的组：第一次使用点「添加纹样」从纹样库勾选，之后上传或批量导入成功的原图会自动加入；加入与移出只改工作台选择，不删除纹样库记录。纹样库支持处理类型筛选和自建多分类，同一组纹样可加入多个题材分类；移除分类不删除图片。纹样库组头和工作台「纹样」列都提供「删除整组」：确认后永久删除该原图、全部处理版本、文件与这张纹样的任务记录；两处也都支持多选、全选与「删除选中」，逐个执行并汇总失败原因。运行中的任务或批次会阻止对应组的删除。
-
-流程预设复用已有本地模型、云端线稿和颜色提取，提交批次时保存参数快照。裁切、修复、候选选层和蒙版确认按图暂停，其余图片继续；进度保存在本机服务，关闭浮窗不会停止后台处理。大图可在预设中显式设置工作副本像素上限，未设置时不会自动缩放。云端预设需在运行前确认上传和费用，失败或未知结果不会自动重发。
-
-批量导出时可逐项、整组或按处理类型选择原始文件、PNG 和 SVG，直接按原图目录打包 ZIP。每次最多 500 个版本，合计上限 128 MiB。导出清单保留素材来源和许可。详见[批量工作台契约](docs/contracts/batch-workbench-contract.md)。
-
-本地模型线稿已实测开放到 2500 万像素，Otsu 提取开放到 400 万像素，SVG 保持现有限制；原图不自动缩小。测试数据与分环节边界见[本地处理上限](docs/guides/local-processing-limits.md)。
-
-## 数据体检、去重与来源登记（P0）
-
-上传时会额外完成四件事，全部只作提示，不改变坐标、尺寸或本地处理能力：
-
-- **质量分级**：在 512 px 参考画布上测清晰度/对比度，给出 A/B/C 提示；C 级仍可继续处理。
-- **近似去重**：aHash 粗筛 + 32×32 NCC 复核；命中时提示可切换到已有版本，不自动合并。
-- **来源登记**：可填来源类型/名称/链接、授权、采集日期、批次，写入资产元数据与导出清单。
-- **算法版本**：每个资产记录 `algorithm_version`，导出清单升级为 `local-s1-v2`。
-
-未登记授权或标记“未确认”的版本，在打包 ZIP 前需要一次显式确认；本地预览与处理不受影响。
-旧数据库可直接打开；旧图片可用 `scripts/backfill_metrics.py` 补算指标。
-
-契约与字段说明见 [docs/contracts/data-contract-p0.md](docs/contracts/data-contract-p0.md)。测试：
-
-    .\.venv\Scripts\python.exe -m pytest -q
-
-## 线稿、轮廓与数据集清单（P1）
-
-- **线稿 v0.2**：处理页新增“线稿”组，生成透明背景黑色墨线 PNG；全局强轮廓与局部分块路径取并集，结果可继续矢量化。
-- **轮廓单线 SVG**：矢量化模式新增“轮廓单线”，按 alpha 掩膜保留孔洞并简化为 even-odd 闭合路径；适合蒙版/线稿。
-- **数据集清单与审计**：顶部“数据集”按钮查看 A/B/C/U、划分、授权、重复 content_id 与批次汇总，并下载 `manifest.csv`。
-
-接口、字段、限制与验证命令见 [docs/guides/p1-lineart-dataset.md](docs/guides/p1-lineart-dataset.md)。
-
-### 本地线稿模型
-
-当前部署模型为 2026-11-13 交付的 TGS-Net（`gts2-tex-seed42`、HRNet-W18 + U-Net++）。权重通过 Git LFS 分发，项目根目录的 `model/` 保存 `model.pt` 和配套的 `inference.json`。有仓库访问权限的成员切换到包含模型的分支后，在项目根目录运行以下命令。
+使用兼容 CUDA 12.8 的 NVIDIA 驱动，在便携包根目录打开 PowerShell。以下命令用内置 Python 创建独立的 GPU 环境，首次安装需要联网和数 GB 可用磁盘空间。
 
 ```powershell
-git lfs version
+.\python\python.exe -m venv .venv-gpu
+.\.venv-gpu\Scripts\python.exe -m pip install torch==2.9.1 torchvision==0.24.1 --index-url https://download.pytorch.org/whl/cu128
+.\.venv-gpu\Scripts\python.exe -m pip install ".[leftrefill]" segmentation-models-pytorch==0.5.0 timm==1.0.31
+.\.venv-gpu\Scripts\python.exe -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+```
+
+结果显示 `True` 后即可用该环境加速线稿。要启用 **LeftRefill**，从[完整基础权重发布页](https://github.com/cacao1357/Pattern-Studio-App/releases/tag/leftrefill-textile-step1108) 下载 **leftrefill-sd2-unet.zip** 和 **leftrefill-sd2-components.zip**，按该页的 SHA256SUMS 核对。将两个 ZIP 解压到同一父目录，会得到 `leftrefill-sd2`。其中应同时有 `scheduler`、`text_encoder`、`unet`、`vae` 四个目录以及许可和转换说明。两个包合计约 2.4 GiB，微调提示向量已随主包提供。
+
+停止 CPU 服务后，用同一 PowerShell 指向解压目录并启动 GPU 服务。下次新开终端需重新设置该变量，也可将上述四个子目录和许可文件直接放在 `model/leftrefill/base/`。
+
+```powershell
+$env:PATTERN_STUDIO_LEFTREFILL_BASE_MODEL = 'D:\Models\leftrefill-sd2'
+.\.venv-gpu\Scripts\python.exe -B scripts/serve_api.py
+```
+
+LeftRefill 使用 CUDA FP16，显存不足会报告错误。SD2 基础权重适用随权重分发的 CreativeML Open RAIL++-M 许可。模型输入、微调和评估说明见 [LeftRefill 文档](model/leftrefill/README.md)。
+
+## 数据、升级与云端设置
+
+- **工作数据**位于解压目录下的 `storage/api/`。升级时先完成或取消活动批次，再停止旧服务。将新版本解压到独立目录，复制旧版完整的 `storage/api/` 到新目录的同一位置后启动。先保留旧目录，核对纹样库、历史和导出结果。备份和离线校验也可运行 `scripts/backup_restore.py --help`。
+- **个人设置**位于 `storage/settings.json`。Windows 下保存的密钥由当前用户的 DPAPI 保护。换机或换账户后，在「设置」重新配置自己的密钥。空白便携包首次启动使用新素材库。
+- **云端功能**可用于线稿、候选分层和局部修复。在「设置」填写自己的火山方舟模型 ID 与 API Key，并在需要时开启「允许云端计费调用」。提交会上传所选素材并可能产生费用。遇到结果未知的任务，请先在任务中心和服务商账单核对。
+- **排查启动问题**时先看启动终端，再打开 [默认端口健康检查](http://127.0.0.1:8765/api/v1/health)。它报告数据库、写入、worker 和模型前置条件；一次实际提取可检验推理是否成功。
+
+## 从源码运行
+
+需要 64 位 Python 3.11。Windows 是本项目验证的平台。安装 Git LFS 后，克隆仓库并在根目录执行以下命令。这里使用 CPU 版 PyTorch，GPU 用户可采用上面的 CUDA 版本。
+
+```powershell
 git lfs pull --include="model/model.pt" --exclude=""
-```
-
-如果 `git lfs version` 提示命令不存在，请先安装 [Git LFS](https://docs.github.com/en/repositories/working-with-files/managing-large-files/installing-git-large-file-storage)，再运行 `git lfs install --local` 和上面的拉取命令。只下载了源码压缩包或恢复了离线备份时，可以从已拉取权重的工作副本复制这两个文件到 `model/`。
-
-模型依赖安装在运行工作台的同一个 Python 3.11 环境。下面以项目虚拟环境的 CPU 版为例。如果该环境已有匹配硬件的 GPU 版 PyTorch 和 torchvision，只需补装缺失的分割模型库。
-
-```powershell
+py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install torch==2.9.1 torchvision==0.24.1 --index-url https://download.pytorch.org/whl/cpu
-.\.venv\Scripts\python.exe -m pip install segmentation-models-pytorch==0.5.0 timm==1.0.31
+.\.venv\Scripts\python.exe -m pip install . segmentation-models-pytorch==0.5.0 timm==1.0.31
+.\.venv\Scripts\python.exe -B scripts/serve_api.py
 ```
 
-重启工作台后，新版「提取」可选择本地模型生成线稿 PNG，再进入「矢量」；旧版保留本地模型一键路线。CUDA 可用时优先用 GPU 推理；CUDA 不可用时使用 CPU。显存分配失败会明确报错，释放竞争任务后再重试，不自动切换设备。产物记录实际推理设备。
+运行代码位于 `backend/app/` 与 `frontend/next-v2/`。旧版对照页位于 [本机 /legacy/](http://127.0.0.1:8765/legacy/)。开发者可安装 `.[dev]` 并运行 `python -m pytest -q`，前端测试使用 Node.js 22+ 执行 `node --test frontend/tests/*.test.mjs`。[项目文档与接口索引](https://github.com/cacao1357/Pattern-Studio-App/blob/v0.2.0/docs/README.md)
 
-模型按原始像素使用 512×512 窗口、256 步长推理，重叠区域用渐变权重融合概率；不足 512 的边用边缘复制填充，输出裁回输入尺寸，不拉伸图像。以 0.5 阈值生成透明底黑线 PNG，再可继续矢量化。部署固定 `gate_alpha=0`，覆盖 `inference.json` 中的训练导出值 1.0；推理结构内只执行线稿分支，完整权重仍严格校验和加载。含模型的任务串行运行，worker 内存上限为 6 GiB，默认超时 90 秒。淡线、低对比照片及实心粗条的轮廓语义仍受模型本身限制。
-
-### LeftRefill 参考图引导修复
-
-`model/leftrefill/` 提供纹样微调的 1108 步提示向量、命令行推理实现、SHA-256 校验清单和固定 63 张验证图的指标。基础 SD2-inpainting 模型从独立离线目录加载。安装、输入约定和权重选择依据见 [LeftRefill 使用说明](model/leftrefill/README.md)。
-
-工作台「局部修复」已提供本地 LeftRefill 路线，复用候选确认、历史及后续处理。目标须为显式 512×512 裁切，并选择已保存参考图；缺少模型时入口显示不可用，不会自动改用云端。
-
-应用服务使用现有 Python 3.11 环境和 CUDA PyTorch。需要时在该服务环境安装 `pip install -e ".[leftrefill]"` 补齐可选依赖；不要把独立 CLI 的 `requirements.txt` 安装到主环境，以免替换项目的 NumPy/Pillow。GPU 版 PyTorch 仍按本机硬件单独准备，不由此选项安装。2026-11-16 已在本机 `pattern-studio` Conda 环境完成合成样本的真实 GPU 推理及系统确认链路验证；文物素材质量仍需单独验收。
-
-另行取得成员交付的匹配基础模型后，放在被忽略的 `model/leftrefill/base/`，或在启动服务的 PowerShell 设置 `$env:PATTERN_STUDIO_LEFTREFILL_BASE_MODEL='D:/models/leftrefill-sd2'` 后启动服务。基础权重不会自动下载；健康检查只确认前置条件，真实任务才校验完整性和 CUDA。当前修复资源限制为单任务、10 GiB 主机提交内存及至少 180 秒超时，其他本地任务额度保持不变；显存不足会明确失败，不回退 CPU 或云端。Windows 实测模型加载曾超过原 6 GiB 上限，诊断进程提交峰值约 8.6 GiB、驻留峰值约 3.7 GiB。可选真实 GPU 冒烟入口：`python -B scripts/validate_local_repair.py --output storage/validation/local-repair-NEW`，输出目录须不存在；使用临时数据库和合成图，不读写正式素材库，不调用云端。
-
-## 数据与限制
-
-- 上传及结果保存于自动创建的 storage/api/，包含 SQLite 历史；保留该目录即可保留本地数据。
-- 常规处理工作图上限为 100 万像素；大图先创建工作副本。批量预设里的本地模型线稿放宽到 2500 万像素、Otsu 提取放宽到 400 万像素，其余环节仍按原限制，见[本地处理上限](docs/guides/local-processing-limits.md)。单任务有内存及超时限制。
-- 撤销与重做记录保留在当前页面会话。已保存的预览产物和任务历史可跨刷新查阅，重新载入后按来源标识查找。
-- 本地取消与云端请求的停止及计费状态不同；已发出的云端调用需要核对结果和账单。
-- 只监听本机，不提供远程登录及多人服务部署。
-
-## 可选云端功能
-
-在工作台顶部打开“设置”，填写自己的 API Key 和模型，需要云端生成时开启“允许云端计费调用”。模型填方舟控制台的 Model ID，例如 `doubao-seedream-5-5-261028` 或 `doubao-seedream-5-0-pro-260628`。Windows 使用当前用户 DPAPI 加密保存密钥，只有该 Windows 用户可解密；页面不回显密钥，也不写入浏览器持久存储。保存只做本地检查，不发起调用。设置保存后对新任务生效，无需重启服务。
-
-页面设置保存在被 Git 忽略的 `storage/settings.json`，优先于进程环境变量和 `.env`；清除密钥后也不会自动回退到环境变量中的旧密钥。进行中的云端请求保持启动配置，排队任务的模型和提示词沿用提交快照，并检查启动时的当前付费开关。
-
-以下 `.env` 命令是可选的命令行配置方式；更改 `.env` 后需重启，且已有页面设置的同名字段仍优先。
-
-Seedream 云端线稿、图层分解和局部修复需要用户自己的火山方舟账号、可用模型权限及付费开关，默认关闭，不影响本地功能。云端输出不加水印；局部修复按输入尺寸请求，输入低于方舟最小输出像素时会在本地缩回输入尺寸并记录变换，分层结果仍由所选 1K/1.5K/2K 档位定义。云端合成矢量化在颜色模式下把工作副本限制在 25 万像素以内，并记录缩放变换。
-
-使用虚拟环境的 Python 执行：
-
-    python -B scripts/seedream_validate.py init-config
-
-命令创建私有 .env，不覆盖已有文件。参照 .env.example 填写自己的 API Key、模型；明确开启付费及价格确认开关后重启程序。密钥只在后端使用。不再设置预算、单次预留或调用次数门槛；不自动重试不确定的付费调用。
-
-## 协作与开发
-
-[项目文档索引](docs/README.md)按使用与验证、接口契约、协作交接归类，包含当前整理记录。
-
-A 的基础实现已完成。真实提示词实验、自动选层策略、矢量质量改进和固定素材验收继续按计划推进。最新定向验证及复现命令见交接记录。前端测试和 Edge 验证脚本需要 Node.js 22 或更新版本。
-
-运行代码位于 `frontend/next-v2/`、`frontend/`（旧前端，只读对照）和 `backend/app/`，测试沿用 `frontend/tests/`、`backend/tests/` 与 `tests/`，验证入口在 `scripts/`。设计交接材料归在 `design/`，本地运行数据和验证产物归在被 Git 忽略的 `storage/`。
-
-## 离线备份与恢复
-
-备份包含任务、资产和工作流分支记录，排除本机设置、密钥、`docs/local/` 和旧前端草稿。恢复后可在「设置」重新配置云端服务。
-
-备份前请先在工作台确认各批次已完成或已取消，再停止服务。当前版本恢复已有任务时会停止未完成的子任务，但仍在运行的批次可能在启动后排入下一项任务。如果要恢复含活动批次的旧备份，请在关闭云端调用的环境启动并检查批次，再启用云端。
-
-先停止程序，再用虚拟环境的 Python 执行：
-
-    python -B scripts/backup_restore.py backup --output ../pattern-backup
-    python -B scripts/backup_restore.py verify --backup ../pattern-backup
-    python -B scripts/backup_restore.py restore --backup ../pattern-backup --target ../pattern-restored
-
-输出和恢复路径应为尚不存在的独立目录。备份包含运行源码和项目数据。恢复后需重新安装依赖，从有仓库权限的工作副本补齐 `model/` 中的模型文件，并按需配置云端密钥。程序需手动启动。
-
-源码、开发文档和测试夹具随仓库提供。个人素材、密钥、虚拟环境和运行产物各自在本机保存。算法效果取决于素材，需人工检查预览和导出结果。
+发布包使用 [python-build-standalone 20261110](https://github.com/astral-sh/python-build-standalone/releases/tag/20261110) 的 CPython 3.11.18 Windows x64 运行时及项目依赖的二进制发行包。Python 和依赖的许可文件随运行时保留。维护者在 Windows 上备好 Git LFS 权重与 uv 后，可用 `python scripts/package_windows.py <运行时.tar.gz>` 从工作区构建便携包，产物位于 `dist/`。

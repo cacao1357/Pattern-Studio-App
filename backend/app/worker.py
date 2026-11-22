@@ -202,6 +202,8 @@ class LocalWorker:
         backend = Path(__file__).resolve().parents[1]
         env = {k: os.environ[k] for k in ("SYSTEMROOT", "WINDIR", "PATH", "TEMP", "TMP") if k in os.environ}
         env.update(PYTHONPATH=str(backend), PYTHONDONTWRITEBYTECODE="1", PYTHONUTF8="1")
+        if sys.flags.no_user_site:
+            env["PYTHONNOUSERSITE"] = "1"
         if "PATTERN_STUDIO_LEFTREFILL_BASE_MODEL" in os.environ:
             env["PATTERN_STUDIO_LEFTREFILL_BASE_MODEL"] = os.environ["PATTERN_STUDIO_LEFTREFILL_BASE_MODEL"]
         model_lineart = (
