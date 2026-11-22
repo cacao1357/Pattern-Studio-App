@@ -3,8 +3,9 @@
    约定：
    - 只导出真实存在的资产：原始文件、已有 PNG、已有 SVG 原样打包，不伪造转换；
      ZIP / 导出包不能再嵌套，所以不出现在清单里。
-   - 请求沿用 POST /api/v1/exports：{asset_ids, layout:"by_image", license_acknowledged}，
-     单个资产最多 500，总大小上限 128 MiB 由后端再次校验。
+   - 请求沿用 POST /api/v1/exports：{asset_ids, layout:"by_image"}，
+     单个资产最多 500，总大小上限 128 MiB 由后端再次校验。导出不代用户声明授权，
+     因此不发送 license_acknowledged。
    - 选择范围只限本次浮窗已载入的原图组；分页之外的分组不会被「全选」选中。
    - 浮窗是只读选择 + 一个导出任务；不改写会话、不删除或合并任何资产。
    ============================================================================= */
@@ -33,7 +34,6 @@ const modal = {
   api: null,
   groups: [],
   selected: new Set(),
-  licenseAck: false,
   zoomAsset: null,
   running: false,
   job: null,
@@ -133,19 +133,17 @@ export function defaultExportSelection(groups, currentImageId, currentAssetId = 
   return new Set(wanted.slice(0, 5));
 }
 
-export function buildExportPayload(selectedIds, { licenseAcknowledged = false } = {}) {
+export function buildExportPayload(selectedIds) {
   return {
     asset_ids: [...selectedIds],
     layout: "by_image",
-    license_acknowledged: Boolean(licenseAcknowledged),
   };
 }
 
-export function submitBlockReason(stats, licenseAcknowledged) {
+export function submitBlockReason(stats) {
   if (!stats || !stats.count) return "至少勾选一个要导出的版本。";
   if (stats.overCount) return `单次最多导出 ${MAX_BATCH_SELECTION} 个资产，请少选一些。`;
   if (stats.overBytes) return `所选文件超过 128 MiB 导出上限，请少选几个。`;
-  if (!licenseAcknowledged) return "导出前需要确认许可提示。";
   return "";
 }
 
@@ -160,14 +158,7 @@ export function groupKindOptions(groups) {
     .sort((a, b) => a.label.localeCompare(b.label, "zh-Hans-CN"));
 }
 
-function unregisteredLicenseCount(entries, selected) {
-  return entries.filter(
-    (entry) => selected.has(entry.asset.asset_id) && licenseLabel(entry.asset.license) === "未登记"
-  ).length;
-}
-
 /* ------------------------------------------------------------------ 片段 */
-
 function thumbHtml(entry, selected) {
   const { asset } = entry;
   const on = selected.has(asset.asset_id);
@@ -227,8 +218,8 @@ function groupSectionHtml(group, selected) {
 }
 
 /**
- * 生成浮窗 HTML；纯函数，测试可直接断言范围文案、选择状态与许可提示。
- * model: { groups, selected, licenseAck, scopeNote, running, job, zip, error, zoomAsset }
+ * 生成浮窗 HTML；纯函数，测试可直接断言范围文案与选择状态。
+ * model: { groups, selected, scopeNote, running, job, zip, error, zoomAsset }
  */
 export function exportModalHtml(model = {}) {
   const groups = model.groups || [];
@@ -236,8 +227,7 @@ export function exportModalHtml(model = {}) {
   const stats = selectionStats(groups, selected);
   const kinds = groupKindOptions(groups);
   const entries = exportableAssets(groups);
-  const unregistered = unregisteredLicenseCount(entries, selected);
-  const block = submitBlockReason(stats, model.licenseAck);
+  const block = submitBlockReason(stats);
   const job = model.job || null;
   const percent = job ? progressOf(job) : 0;
   const running = Boolean(model.running);
@@ -300,11 +290,6 @@ export function exportModalHtml(model = {}) {
           <span>已选 <b class="num">${stats.count}</b> / ${stats.total} 项 · 涉及 <b class="num">${stats.groups}</b> 个原图组</span>
           <span class="mono">约 ${stats.bytes ? formatBytes(stats.bytes) : "0 B"} / 128 MiB</span>
         </div>
-        ${unregistered ? `<p class="bx__warn">${icon("alert")}所选版本中有 ${unregistered} 个授权未登记；导出清单会记录这次确认，不代替授权审查。</p>` : ""}
-        <label class="bx__license">
-          <input type="checkbox" data-bx-license ${model.licenseAck ? "checked" : ""} />
-          <span>许可证已确认：只导出我有权使用的素材；删除分类、未写入记录的文件不会被自动补登。</span>
-        </label>
         ${model.error ? `<p class="bx__error" role="alert">${esc(model.error)}</p>` : ""}
         ${
           running || job
@@ -355,7 +340,6 @@ function model() {
   return {
     groups: modal.groups,
     selected: modal.selected,
-    licenseAck: modal.licenseAck,
     scopeNote: modal.scopeNote,
     running: modal.running,
     job: modal.job,
@@ -442,7 +426,7 @@ function exportJobError(job) {
 async function submit() {
   if (modal.running) return;
   const stats = selectionStats(modal.groups, modal.selected);
-  const block = submitBlockReason(stats, modal.licenseAck);
+  const block = submitBlockReason(stats);
   if (block) {
     footerMessage(block);
     return;
@@ -458,7 +442,7 @@ async function submit() {
   modal.error = "";
   paint();
   try {
-    const queued = await api.exportAssets(buildExportPayload(ordered, { licenseAcknowledged: modal.licenseAck }));
+    const queued = await api.exportAssets(buildExportPayload(ordered));
     if (seq !== modal.runSeq) return;
     modal.job = queued;
     paint();
@@ -582,12 +566,6 @@ function onKeydown(event) {
 function bind() {
   if (!modal.el) return;
   modal.el.addEventListener("click", onClick);
-  modal.el.addEventListener("change", (event) => {
-    if (event.target.matches("[data-bx-license]")) {
-      modal.licenseAck = Boolean(event.target.checked);
-      paint({ focusSelector: "[data-bx-license]" });
-    }
-  });
 }
 
 /**
@@ -616,7 +594,6 @@ export function openBatchExport({
   modal.selected = preseed.length
     ? new Set(preseed)
     : defaultExportSelection(modal.groups, defaultImageId, currentAssetId);
-  modal.licenseAck = false;
   modal.zoomAsset = null;
   modal.running = false;
   modal.job = null;

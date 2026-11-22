@@ -465,16 +465,17 @@ test("整组/类型/全选/反选只在传入的已载入组内生效", () => {
   assert.equal(exportView.allSelection(groups, false).size, 0);
 });
 
-test("导出请求固定 by_image，保留许可与上限阻断", () => {
-  const payload = exportView.buildExportPayload(["a", "b"], { licenseAcknowledged: true });
-  assert.deepEqual(payload, { asset_ids: ["a", "b"], layout: "by_image", license_acknowledged: true });
+test("导出请求固定 by_image，保留上限阻断", () => {
+  const payload = exportView.buildExportPayload(["a", "b"]);
+  assert.deepEqual(payload, { asset_ids: ["a", "b"], layout: "by_image" });
+  assert.equal(Object.hasOwn(payload, "license_acknowledged"), false);
 
   const tooMany = { count: 501, total: 600, groups: 3, bytes: 100, overCount: true, overBytes: false };
-  assert.match(exportView.submitBlockReason(tooMany, true), /500/);
+  assert.match(exportView.submitBlockReason(tooMany), /500/);
   const tooBig = { count: 2, total: 10, groups: 1, bytes: 129 * 1024 * 1024, overCount: false, overBytes: true };
-  assert.match(exportView.submitBlockReason(tooBig, true), /128 MiB/);
-  assert.match(exportView.submitBlockReason({ count: 2, overCount: false, overBytes: false }, false), /许可/);
-  assert.equal(exportView.submitBlockReason({ count: 0, overCount: false, overBytes: false }, true), "至少勾选一个要导出的版本。");
+  assert.match(exportView.submitBlockReason(tooBig), /128 MiB/);
+  assert.equal(exportView.submitBlockReason({ count: 2, overCount: false, overBytes: false }), "");
+  assert.equal(exportView.submitBlockReason({ count: 0, overCount: false, overBytes: false }), "至少勾选一个要导出的版本。");
 });
 
 test("默认只勾当前原图组的关键结果，其它原图需显式全选", () => {
@@ -485,12 +486,11 @@ test("默认只勾当前原图组的关键结果，其它原图需显式全选",
   assert.ok(!selected.has("b-png"));
 });
 
-test("导出浮窗明示范围、许可与逐图选择，不把未载入组说成全选", () => {
+test("导出浮窗明示范围与逐图选择，不把未载入组说成全选", () => {
   const groups = exportGroups();
   const html = exportView.exportModalHtml({
     groups,
     selected: new Set(["a-orig"]),
-    licenseAck: false,
     scopeNote: "本次已载入 2 个原图组",
     running: false,
     job: null,
@@ -505,7 +505,7 @@ test("导出浮窗明示范围、许可与逐图选择，不把未载入组说�
   assert.match(html, /data-bx-toggle="b-orig" aria-pressed="false"/);
   assert.match(html, /data-bx-group="image-a"/);
   assert.match(html, /data-bx-kind="svg"/);
-  assert.match(html, /data-bx-license/);
+  assert.doesNotMatch(html, /data-bx-license|许可证已确认/);
   assert.match(html, /128 MiB/);
   assert.match(html, /授权未登记/);
   assert.match(html, /已选 <b class="num">1<\/b> \/ 4 项/);

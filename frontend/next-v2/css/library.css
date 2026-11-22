@@ -393,6 +393,7 @@
   flex-direction: column;
   gap: 3px;
   padding-top: 13px;
+  min-width: 0;
 }
 
 .lb-card__name {
@@ -400,6 +401,8 @@
   font-size: var(--text-h4);
   color: var(--text-1);
   letter-spacing: 0.02em;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .lb-card__sub {
@@ -407,6 +410,8 @@
   font-size: var(--text-meta);
   letter-spacing: 0.02em;
   color: var(--text-4);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* 纸面颗粒：在纹样之上叠一层极淡的纸纹，让图版更像样张 */

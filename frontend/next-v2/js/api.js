@@ -45,7 +45,7 @@ const CODE_MESSAGES = {
   EXPORT_SIZE_LIMIT: "所选文件超过 128 MiB 导出上限，请少选几个。",
   EXPORT_LAYOUT_INVALID: "导出目录布局不受支持。",
   NESTED_EXPORT: "不能把已有的 ZIP 再打包一次，请只选图片或 SVG。",
-  LICENSE_REVIEW_REQUIRED: "所选纹样里有未登记的许可证；导出清单会记录本次导出，请自行确认授权。",
+  LICENSE_REVIEW_REQUIRED: "本机服务仍在要求导出授权确认；请重启本机服务后再导出。",
   BATCH_CLOUD_CONSENT_REQUIRED: "云端批次需要确认本批次上传与可能费用。",
   BATCH_INPUT_KIND: "所选预设不能处理这个纹样类型，请换一个输入版本。",
   BATCH_IMAGE_REQUIRED: "请选择属于已登记原图的输入纹样。",

@@ -196,9 +196,9 @@ try {
       for(let i=0;i<3;i++){
         const canvas=document.createElement('canvas');canvas.width=64;canvas.height=64;
         const c=canvas.getContext('2d');c.fillStyle='white';c.fillRect(0,0,64,64);
-        c.strokeStyle='black';c.lineWidth=4;c.strokeRect(8+i,8,45-i,45);
+        c.strokeStyle='black';c.lineWidth=4;c.strokeRect(8,8,45,45);
         const blob=await new Promise(r=>canvas.toBlob(r,'image/png'));
-        files.push(new File([blob],'batch-smoke-'+i+'.png',{type:'image/png',lastModified:100+i}));
+        files.push(new File([blob],'batch-smoke-'+i+'-'+'a'.repeat(80)+'.png',{type:'image/png',lastModified:100+i}));
       }
       files.push(new File(['invalid'],'unsupported.txt',{type:'text/plain'}));
       return importFiles(files,{onChange:()=>app.render()});
@@ -211,12 +211,27 @@ try {
     assert.equal(await evaluate("getComputedStyle(document.querySelector('.wb-steps'),'::before').content"), "none");
     assert.notEqual(await evaluate("getComputedStyle(document.querySelector('.wb-step')).backgroundColor"), "rgba(0, 0, 0, 0)");
     check("batch import preserves three originals, reports unsupported file and renders separate pattern groups");
+    await evaluate("[...document.querySelectorAll('[data-pattern]')].find(e=>e.textContent.includes('batch-smoke-0')).querySelector('[data-act=pattern-open]').click()");
+    await waitFor("document.querySelector('.wb-doc__name')?.textContent.includes('batch-smoke-0') && document.querySelector('.bp-dupes__list li')", "long document and duplicate names");
     await writeFile(path.join(output,"batch-workbench.png"),Buffer.from((await call("Page.captureScreenshot",{format:"png"})).data,"base64"));
 
     const batchLayoutFailures = [];
     for (const [width,height] of [[1440,900],[1080,720],[390,844]]) {
       await call("Emulation.setDeviceMetricsOverride",{width,height,deviceScaleFactor:1,mobile:width<820});
       await new Promise(r=>setTimeout(r,200));
+      const overflowingNames=await evaluate(`(() => {
+        const fields = [...document.querySelectorAll('.wb-doc__name,.bp-dupes__list li span')];
+        return fields.filter(el => {
+          const box = el.getBoundingClientRect();
+          if (!box.width) return false;
+          const panel = el.closest('.wb-doc,.bp-import').getBoundingClientRect();
+          const range = document.createRange(); range.selectNodeContents(el);
+          const visibleTextEnd = getComputedStyle(el).overflowX === 'visible'
+            ? range.getBoundingClientRect().right : box.right;
+          return box.left < panel.left - 1 || Math.max(box.right, visibleTextEnd) > panel.right + 1;
+        }).map(el => el.textContent);
+      })()`);
+      assert.deepEqual(overflowingNames, [], 'long document and duplicate names fit their panels at '+width);
       const geometry=await evaluate(`(()=>{
         const scroller=document.querySelector('.wb-groups');
         const first=scroller.querySelector('[data-pattern]');
@@ -238,7 +253,7 @@ try {
     assert.equal(exportChoice.stats.count, groupIds.length);
     await evaluate("document.querySelector('[data-bx-zoom]').click()");
     await waitFor("Boolean(document.querySelector('[data-bx-zoom-close]'))", "export enlarged preview");
-    await evaluate("document.querySelector('[data-bx-zoom-close]').click();document.querySelector('[data-bx-license]').click();document.querySelector('[data-bx-submit]').click()");
+    await evaluate("document.querySelector('[data-bx-zoom-close]').click();document.querySelector('[data-bx-submit]').click()");
     await waitFor("Boolean(document.querySelector('[data-bx-download]'))", "real batch ZIP",30000);
     assert.ok(await evaluate("fetch(document.querySelector('[data-bx-download]').href).then(async r=>r.ok&&(await r.blob()).size>0)"));
     await writeFile(path.join(output,"batch-export.png"),Buffer.from((await call("Page.captureScreenshot",{format:"png"})).data,"base64"));
@@ -588,6 +603,30 @@ try {
       }
       if(width===1920 || width===1440 || width===390) await writeFile(path.join(output,'asset-column-'+width+'.png'),Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
       check('independent asset column, selection and responsive layout at '+width+'x'+height);
+    }
+    if (!layoutOnly) {
+      const settingsUrl = '/api/v1/settings';
+      const current = () => evaluate(`fetch('${settingsUrl}').then(r=>r.json())`);
+      const initial = await current();
+      // A historical partial opt-in must survive an unrelated save.
+      assert.equal(await evaluate(`fetch('${settingsUrl}',{method:'PUT',headers:{'Content-Type':'application/json','X-Pattern-Studio':'local'},
+        body:JSON.stringify({revision:${initial.revision},paid_calls_enabled:false,pricing_confirmed:true})}).then(r=>r.ok)`), true);
+      await navigatePage(info.url+'/#/settings');
+      const billing = '[data-cfg=billing_enabled]';
+      await waitFor(`document.querySelector('${billing}')?.getAttribute('aria-checked')==='false'`, 'partial billing opt-in stays off');
+      await fill('st-cloud-model','ep-20261122123456-test');
+      await evaluate("document.querySelector('[data-act=save]').click()");
+      await waitFor(`fetch('${settingsUrl}').then(r=>r.json()).then(s=>s.model==='ep-20261122123456-test')`, 'unrelated setting saved');
+      const after = await current();
+      assert.deepEqual([after.paid_calls_enabled, after.pricing_confirmed], [false,true]);
+      for (const enabled of [true,false]) {
+        await waitFor("document.querySelector('.st-page[data-saved=true]:not([data-saving])') && document.querySelector('[data-act=save]').disabled", 'billing form ready');
+        await evaluate(`document.querySelector('${billing}').click()`);
+        assert.equal(await evaluate("document.querySelector('[data-act=save]').disabled"),false);
+        await evaluate("document.querySelector('[data-act=save]').click()");
+        await waitFor(`fetch('${settingsUrl}').then(r=>r.json()).then(s=>s.paid_calls_enabled===${enabled} && s.pricing_confirmed===${enabled})`, 'billing choice saved: '+enabled);
+      }
+      check('one billing switch updates both flags only on explicit change');
     }
   }
   // Newly merged repair entry must reflect actual local prerequisites and must

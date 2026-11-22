@@ -278,8 +278,7 @@ const dom = {
   settingsKeyNote: $("settings-key-note"),
   settingsModel: $("settings-model"),
   settingsBaseUrl: $("settings-base-url"),
-  settingsPaid: $("settings-paid"),
-  settingsPricing: $("settings-pricing"),
+  settingsBilling: $("settings-billing"),
   settingsBudget: $("settings-budget"),
   settingsReservation: $("settings-reservation"),
   settingsMaxCalls: $("settings-max-calls"),
@@ -506,9 +505,6 @@ const dom = {
   aiVectorSummary: $("ai-vector-summary"),
   aiStart: $("ai-start"),
   aiCallId: $("ai-call-id"),
-  aiConsents: $("ai-consents"),
-  aiConsentUpload: $("ai-consent-upload"),
-  aiConsentCharge: $("ai-consent-charge"),
   aiStartButton: $("ai-start-button"),
   aiStartNote: $("ai-start-note"),
   aiError: $("ai-error"),
@@ -570,9 +566,6 @@ const dom = {
   repairCallId: $("repair-call-id"),
   repairDamageMask: $("repair-damage-mask"),
   repairDamageNote: $("repair-damage-note"),
-  repairConsents: $("repair-consents"),
-  repairConsentUpload: $("repair-consent-upload"),
-  repairConsentCharge: $("repair-consent-charge"),
   repairStart: $("repair-start"),
   repairStartNote: $("repair-start-note"),
   repairError: $("repair-error"),
@@ -590,8 +583,6 @@ const dom = {
   repairMetrics: $("repair-metrics"),
   repairDecision: $("repair-decision"),
   repairDecisionNote: $("repair-decision-note"),
-  repairFullWarning: $("repair-full-warning"),
-  repairAcceptFull: $("repair-accept-full"),
   repairReject: $("repair-reject"),
   repairAccept: $("repair-accept"),
   repairDecisionResult: $("repair-decision-result"),
@@ -734,6 +725,7 @@ const state = {
     value: null,
     revision: null,
     keyAction: "keep",
+    billingTouched: false,
     error: "",
     message: ""
   },
@@ -792,7 +784,6 @@ const state = {
     error: "",
     loadSeq: 0,
     selectedAssetId: "",
-    acceptFull: false,
     decisionBusy: false,
     compareView: "three",
     compareSeq: 0,
@@ -989,7 +980,7 @@ function formatDateTime(value) {
 function friendlyError(error) {
   if (!error) return "操作未完成，请重试。";
   if (error.code === "LICENSE_REVIEW_REQUIRED") {
-    return "导出前需要确认来源授权：所选版本有未登记或“未确认”的授权。请回到版本区检查后再次导出。";
+    return "本机服务仍在要求导出授权确认；请重启本机服务后再导出。";
   }
   if (error.code === "LINEART_MODEL_UNAVAILABLE") {
     return lineartModelUnavailableText(error.message);
@@ -5047,26 +5038,6 @@ function handleOneClick() {
   void runLocalRequest(buildOneClickRequest(), {});
 }
 
-function unconfirmedLicenseIds(ids) {
-  return (ids || []).filter((id) => {
-    const asset = state.assets.get(id);
-    const licenseName = String((asset && asset.license) || "").trim();
-    return !licenseName || licenseName === "未确认";
-  });
-}
-
-async function confirmExportLicense(unconfirmedCount) {
-  if (!unconfirmedCount) return { proceed: true, acknowledged: false };
-  const proceed = await confirmAction({
-    title: "导出前确认来源授权",
-    message: "所选版本中有 " + unconfirmedCount + " 个未登记授权或标记为“未确认”。ZIP 只在本机生成与使用；请确认你已核对来源和授权范围，导出不会改变授权状态。",
-    confirmLabel: "我确认，继续导出",
-    cancelLabel: "返回检查",
-    tone: "primary"
-  });
-  return { proceed: proceed, acknowledged: proceed };
-}
-
 async function handleExport() {
   if (state.requestInFlight || state.pendingSubmission || state.taskRunning || state.duplicateSwitching) return;
   const ids = state.versionIds.filter((id) => state.selectedAssetIds.has(id));
@@ -5075,10 +5046,7 @@ async function handleExport() {
     return;
   }
   setError(dom.exportError, "");
-  const unconfirmed = unconfirmedLicenseIds(ids);
-  const license = await confirmExportLicense(unconfirmed.length);
-  if (!license.proceed) return;
-  const bodyText = JSON.stringify({ asset_ids: ids, license_acknowledged: license.acknowledged });
+  const bodyText = JSON.stringify({ asset_ids: ids });
   startSubmission({
     path: "/exports",
     method: "POST",
@@ -5806,7 +5774,7 @@ function renderAiService() {
     service.classList.add("is-ok");
     dom.aiServiceDot.classList.add("is-ok");
     setText(dom.aiServiceLabel, "AI 新生成可用");
-    setText(dom.aiServiceNote, "每次生成都需要分别确认上传与费用；不会自动重试，也不会自动合并。");
+    setText(dom.aiServiceNote, "每次新生成都会上传当前图像并按次计费；不会自动重试，也不会自动合并。");
   } else {
     service.classList.add("is-warn");
     dom.aiServiceDot.classList.add("is-warn");
@@ -5834,18 +5802,12 @@ function aiStartBlockReason() {
   if (state.ai.statusLoading) return "正在读取 AI 状态…";
   if (state.ai.statusError) return "AI 状态不可用，可改用归档编号或本地处理。";
   if (!aiNewGenerationAvailable()) return "AI 新生成暂不可用，可继续本地处理。";
-  if (!dom.aiConsentUpload.checked || !dom.aiConsentCharge.checked) {
-    return "请分别确认上传与可能产生的费用。";
-  }
   return "";
 }
 
 function renderAiStart() {
   const reuse = Boolean(dom.aiCallId.value.trim());
-  dom.aiConsentUpload.disabled = reuse;
-  dom.aiConsentCharge.disabled = reuse;
-  dom.aiConsents.classList.toggle("is-disabled", reuse);
-  setButtonLabel(dom.aiStartButton, reuse ? "读取归档候选" : "生成 AI 候选");
+  setButtonLabel(dom.aiStartButton, reuse ? "读取归档候选" : "上传并生成 AI 候选（按次计费）");
   const reason = aiStartBlockReason();
   setDisabled(dom.aiStartButton, Boolean(reason));
   setText(dom.aiStartNote, reason || (reuse
@@ -6814,16 +6776,12 @@ async function startAiPipeline() {
     return;
   }
   const callId = dom.aiCallId.value.trim();
-  if (!callId && (!dom.aiConsentUpload.checked || !dom.aiConsentCharge.checked)) {
-    setAiError("新生成需要分别确认上传与可能产生的费用。");
-    return;
-  }
   setAiError("");
   const payload = {
     input_asset_id: asset.asset_id,
     provider_call_id: callId || null,
-    consent_to_upload: callId ? false : Boolean(dom.aiConsentUpload.checked),
-    consent_to_charge: callId ? false : Boolean(dom.aiConsentCharge.checked),
+    consent_to_upload: callId ? false : true,
+    consent_to_charge: callId ? false : true,
     size: "1K",
     vector: vectorPayloadFrom(vector)
   };
@@ -6840,8 +6798,6 @@ async function startAiPipeline() {
       state.ai.layers = null;
       state.ai.layerKey = "";
       state.ai.selectedLayerIds.clear();
-      dom.aiConsentUpload.checked = false;
-      dom.aiConsentCharge.checked = false;
       await adoptAiPipeline(pipeline, { announce: true });
       showToast(callId ? "已读取归档候选。" : "AI 拆层已开始，等待候选生成。", "success", 5000);
     },
@@ -7016,7 +6972,6 @@ function resetRepairState() {
   state.repair.error = "";
   state.repair.loadSeq += 1;
   state.repair.selectedAssetId = "";
-  state.repair.acceptFull = false;
   state.repair.decisionBusy = false;
   state.repair.compareView = "three";
   state.repair.compareSeq += 1;
@@ -7027,9 +6982,6 @@ function resetRepairState() {
   dom.repairSize.value = "1K";
   dom.repairCallId.value = "";
   dom.repairDamageMask.value = "";
-  dom.repairConsentUpload.checked = false;
-  dom.repairConsentCharge.checked = false;
-  dom.repairAcceptFull.checked = false;
   setRadio("repair-intent", "restore_small_gap");
   setError(dom.repairError, "");
   setText(dom.repairStartNote, "先选择规范输入并框选缺损区域。");
@@ -7167,10 +7119,6 @@ function applyRepairRecord(record, options) {
     selected = pending ? (localId || "") : (acceptedId || selected || "");
   }
   state.repair.selectedAssetId = selected;
-  if (!pending || selected !== fullId) {
-    state.repair.acceptFull = false;
-    dom.repairAcceptFull.checked = false;
-  }
   renderVersions();
   renderRepairPanel();
   updateActionState();
@@ -7327,18 +7275,12 @@ function repairStartBlockReason() {
   if (state.ai.statusLoading) return "正在读取 AI 能力状态…";
   if (state.ai.statusError) return "AI 状态不可用；可填写已归档编辑调用只读复用，或继续本地处理。";
   if (!aiNewGenerationAvailable()) return "AI 新生成暂不可用；填写已归档编辑调用仍可复用。";
-  if (!dom.repairConsentUpload.checked || !dom.repairConsentCharge.checked) {
-    return "新修复需要分别确认上传与可能产生的费用。";
-  }
   return "";
 }
 
 function renderRepairStart() {
   const reuse = Boolean(dom.repairCallId.value.trim());
-  dom.repairConsentUpload.disabled = reuse;
-  dom.repairConsentCharge.disabled = reuse;
-  dom.repairConsents.classList.toggle("is-disabled", reuse);
-  setButtonLabel(dom.repairStart, reuse ? "复用归档编辑" : "提交修复任务");
+  setButtonLabel(dom.repairStart, reuse ? "复用归档编辑" : "上传并提交修复（按次计费）");
   const reason = repairStartBlockReason();
   setDisabled(dom.repairStart, Boolean(reason));
   if (reason) {
@@ -7349,7 +7291,7 @@ function renderRepairStart() {
         ? "只读取已归档的同输入、同矩形、同意图、同尺寸编辑调用；不上传、不产生新费用。"
         : "AI 新生成当前不可用，但已归档编辑复用仍可用；不上传、不产生新费用。");
   } else {
-    setText(dom.repairStartNote, "将上传当前规范输入并可能产生费用；页面不会自动重发收费请求。");
+    setText(dom.repairStartNote, "页面不会自动重发收费请求。");
   }
 }
 
@@ -7614,7 +7556,7 @@ function renderRepairRecord() {
         choice: pending,
         choiceEnabled: pending && !state.repair.decisionBusy,
         selected: pending && selectedFull,
-        choiceLabel: "选择全图候选（需另行确认）",
+        choiceLabel: "选择全图候选（会替换整幅画面）",
         kicker: "修复全图候选"
       }
     ));
@@ -7657,30 +7599,18 @@ function renderRepairRecord() {
   if (pending) {
     const fullSelected = Boolean(fullId && selectedId === fullId);
     const localSelected = Boolean(localId && selectedId === localId);
-    const noLocal = !local;
-    setText(dom.repairDecisionNote, noLocal
-      ? "本次未生成局部保护版。全图候选不是局部保护版，接受前必须单独确认整图可能变化。"
+    setText(dom.repairDecisionNote, (!full && !local)
+      ? "当前记录没有可接受候选，请等待任务完成或重新读取。"
       : fullSelected
-        ? "已选择全图候选；它可能改变框外像素，必须勾选醒目确认后才能接受。"
-        : "默认接受局部保护版；拒绝不会改变当前输入，也不会再次调用模型。");
-    setHidden(dom.repairFullWarning, !fullSelected);
-    dom.repairAcceptFull.checked = Boolean(state.repair.acceptFull);
+        ? "已选择全图候选；接受会用 AI 结果替换整幅画面。"
+        : "接受局部保护版会创建新分支；拒绝不会改变当前输入，也不会再次调用模型。");
     setButtonLabel(dom.repairAccept, fullSelected ? "接受整图候选" : "接受局部保护版");
     setDisabled(dom.repairAccept,
       state.repair.decisionBusy || state.requestInFlight || Boolean(state.pendingSubmission) || state.taskRunning ||
-      state.duplicateSwitching || (!fullSelected && !localSelected) || (fullSelected && !state.repair.acceptFull));
+      state.duplicateSwitching || (!fullSelected && !localSelected));
     setDisabled(dom.repairReject,
       state.repair.decisionBusy || state.requestInFlight || Boolean(state.pendingSubmission) || state.taskRunning ||
       state.duplicateSwitching);
-    setText(dom.repairDecisionNote,
-      (!full && !local)
-        ? "当前记录没有可接受候选，请等待任务完成或重新读取。"
-        : (noLocal ? "仅有全图候选；" : "") +
-          (fullSelected && !state.repair.acceptFull
-            ? "请先勾选“我已知晓并接受整图可能变化”。"
-            : fullSelected
-              ? "接受后将创建全图候选分支。"
-              : "接受后将创建局部保护版分支。"));
   }
 
   dom.repairDecisionResult.replaceChildren();
@@ -7750,14 +7680,13 @@ function updateRepairActions() {
   const selectedId = state.repair.selectedAssetId;
   const selectedFull = Boolean(fullId && selectedId === fullId);
   const selectedLocal = Boolean(localId && selectedId === localId);
-  const canAccept = pending && !busy && (selectedLocal || (selectedFull && state.repair.acceptFull));
+  const canAccept = pending && !busy && (selectedLocal || selectedFull);
   setDisabled(dom.repairCompare,
     !record || !(fullId || localId));
   setDisabled(dom.repairEditView, !record || !repairAssetId(record, "edit_mask"));
   setDisabled(dom.repairDiffView, !record || !repairAssetId(record, "difference_map"));
   setDisabled(dom.repairAccept, !canAccept);
   setDisabled(dom.repairReject, !pending || busy);
-  setDisabled(dom.repairAcceptFull, !pending || busy || !selectedFull);
   setDisabled(dom.repairNext, Boolean(busy));
   setDisabled(dom.repairFeather, Boolean(state.requestInFlight || state.pendingSubmission));
   setDisabled(dom.repairSize, Boolean(state.requestInFlight || state.pendingSubmission));
@@ -7766,8 +7695,6 @@ function updateRepairActions() {
   });
   setDisabled(dom.repairCallId, Boolean(state.requestInFlight || state.pendingSubmission));
   setDisabled(dom.repairDamageMask, Boolean(state.requestInFlight || state.pendingSubmission));
-  setDisabled(dom.repairConsentUpload, Boolean(state.requestInFlight || state.pendingSubmission) || Boolean(dom.repairCallId.value.trim()));
-  setDisabled(dom.repairConsentCharge, Boolean(state.requestInFlight || state.pendingSubmission) || Boolean(dom.repairCallId.value.trim()));
 }
 
 function selectRepairCandidate(assetId) {
@@ -7777,10 +7704,6 @@ function selectRepairCandidate(assetId) {
   if (!allowed.includes(assetId)) return;
   const before = captureWorkspace();
   state.repair.selectedAssetId = assetId;
-  if (assetId !== repairAssetId(record, "candidate_asset")) {
-    state.repair.acceptFull = false;
-    dom.repairAcceptFull.checked = false;
-  }
   setRepairError("");
   renderRepairPanel();
   updateActionState();
@@ -7801,16 +7724,6 @@ async function startRepair() {
     return;
   }
   const reuse = Boolean(params.provider_call_id);
-  const ok = await confirmAction({
-    title: reuse ? "复用已归档编辑调用？" : "提交新的局部修复？",
-    message: reuse
-      ? "将只读取同一输入、矩形、意图与尺寸的成功归档编辑，不上传当前图像，也不会产生新费用。"
-      : "将上传当前规范输入并可能产生费用。已分别确认上传与收费；页面不会自动重发此收费请求。",
-    confirmLabel: reuse ? "复用归档" : "提交并可能收费",
-    cancelLabel: "取消",
-    tone: reuse ? "primary" : "danger"
-  });
-  if (!ok) return;
   if (state.requestInFlight || state.pendingSubmission || state.taskRunning || state.duplicateSwitching) {
     setRepairError("当前有提交或任务尚未完成，请稍后再发起修复。");
     return;
@@ -7822,8 +7735,8 @@ async function startRepair() {
     intent: params.intent,
     feather_px: params.feather_px,
     size: params.size,
-    consent_to_upload: reuse ? false : Boolean(dom.repairConsentUpload.checked),
-    consent_to_charge: reuse ? false : Boolean(dom.repairConsentCharge.checked)
+    consent_to_upload: reuse ? false : true,
+    consent_to_charge: reuse ? false : true
   };
   if (params.provider_call_id) payload.provider_call_id = params.provider_call_id;
   if (params.damage_mask_asset_id) payload.damage_mask_asset_id = params.damage_mask_asset_id;
@@ -7833,8 +7746,6 @@ async function startRepair() {
   state.repair.record = null;
   state.repair.jobId = null;
   state.repair.selectedAssetId = "";
-  state.repair.acceptFull = false;
-  dom.repairAcceptFull.checked = false;
   startSubmission({
     path: "/jobs/repair",
     method: "POST",
@@ -7846,8 +7757,6 @@ async function startRepair() {
       if (!job) throw new ApiError("修复任务响应缺少编号。", { status: 202 });
       state.repair.jobId = job.job_id;
       state.repair.error = "";
-      dom.repairConsentUpload.checked = false;
-      dom.repairConsentCharge.checked = false;
       await adoptJob(job, { announce: true });
       const latest = state.tasks.get(job.job_id);
       if (isJobActive(latest)) {
@@ -7885,24 +7794,8 @@ async function decideRepair(action) {
       setRepairError("请选择本次修复的局部保护版或全图候选。");
       return;
     }
-    if (selectedId === fullId && !state.repair.acceptFull) {
-      setRepairError("接受全图候选前必须勾选“我已知晓并接受整图可能变化”。");
-      return;
-    }
   }
   const fullSelected = action === "accept" && selectedId === fullId;
-  const ok = await confirmAction({
-    title: action === "reject" ? "拒绝本次修复？" : fullSelected ? "接受整图候选？" : "接受局部保护版？",
-    message: action === "reject"
-      ? "拒绝只记录决定，不改变当前输入，也不会创建后续任务或新收费。"
-      : fullSelected
-        ? "全图候选可能改变框外像素。接受后会创建新分支并切换输入；请确认这是你人工检查后的选择。"
-        : "接受局部保护版会创建新的已接受修复资产并切换输入；框外应保持原输入。",
-    confirmLabel: action === "reject" ? "拒绝" : fullSelected ? "接受整图候选" : "接受局部保护版",
-    cancelLabel: "取消",
-    tone: action === "reject" ? "danger" : fullSelected ? "danger" : "primary"
-  });
-  if (!ok) return;
   if (state.requestInFlight || state.pendingSubmission || state.duplicateSwitching) {
     setRepairError("当前还有提交尚未完成，请稍后再做修复决定。");
     return;
@@ -7931,8 +7824,6 @@ async function decideRepair(action) {
       await registerRepairAssets(next);
       state.repair.record = next;
       state.repair.jobId = next.repair_job_id;
-      state.repair.acceptFull = false;
-      dom.repairAcceptFull.checked = false;
       applyRepairRecord(next, { preserveSelection: false });
       if (String(next.state || "").toLowerCase() === "accepted") {
         await switchToAcceptedRepair(next, { announce: true });
@@ -7946,8 +7837,6 @@ async function decideRepair(action) {
       state.repair.decisionBusy = false;
       if (error.status === 409) {
         state.repair.selectedAssetId = "";
-        state.repair.acceptFull = false;
-        dom.repairAcceptFull.checked = false;
         const refreshed = await loadRepairRecord(record.repair_job_id, {
           preserveSelection: false,
           switchAccepted: true
@@ -8420,9 +8309,6 @@ async function handleTileZip() {
   }
   const ids = [unit.asset_id, preview.asset_id];
   setError(dom.tileError, "");
-  const unconfirmed = unconfirmedLicenseIds(ids);
-  const license = await confirmExportLicense(unconfirmed.length);
-  if (!license.proceed) return;
   if (state.requestInFlight || state.pendingSubmission || state.taskRunning || state.duplicateSwitching) {
     setError(dom.tileError, "当前有提交或任务正在处理，完成后再打包。");
     return;
@@ -8432,7 +8318,7 @@ async function handleTileZip() {
     setError(dom.tileError, "平铺预览或裁切单元已变化，请重新确认后再打包。");
     return;
   }
-  const bodyText = JSON.stringify({ asset_ids: ids, license_acknowledged: license.acknowledged });
+  const bodyText = JSON.stringify({ asset_ids: ids });
   startSubmission({
     path: "/exports",
     method: "POST",
@@ -10476,12 +10362,28 @@ function updateSettingsKeyUi() {
       : "保留当前密钥；请求中不会携带密钥字段。");
 }
 
+/**
+ * 旧设置页把 paid_calls_enabled 与 pricing_confirmed 合为一个计费开关。
+ * 用户没动开关时保留服务端原值（两项历史不一致也原样带回），
+ * 只有明确切换后才同时写入两项。
+ */
+function settingsBillingFlags(settings, checked, touched) {
+  if (touched) {
+    const value = Boolean(checked);
+    return { paidCallsEnabled: value, pricingConfirmed: value };
+  }
+  return {
+    paidCallsEnabled: Boolean(settings && settings.paidCallsEnabled),
+    pricingConfirmed: Boolean(settings && settings.pricingConfirmed)
+  };
+}
+
 function fillSettingsForm(settings) {
   if (!settings) return;
   dom.settingsModel.value = settings.model;
   dom.settingsBaseUrl.value = settings.baseUrl;
-  dom.settingsPaid.checked = settings.paidCallsEnabled;
-  dom.settingsPricing.checked = settings.pricingConfirmed;
+  dom.settingsBilling.checked = Boolean(settings.paidCallsEnabled && settings.pricingConfirmed);
+  state.settings.billingTouched = false;
   dom.settingsBudget.value = centsToYuan(settings.budgetCents);
   dom.settingsReservation.value = centsToYuan(settings.reservationCents);
   dom.settingsMaxCalls.value = String(settings.maxCalls);
@@ -10522,8 +10424,7 @@ function renderSettings() {
   setDisabled(dom.settingsKeyAction, settings.loading || settings.saving || !value);
   setDisabled(dom.settingsModel, settings.loading || settings.saving || !value);
   setDisabled(dom.settingsBaseUrl, settings.loading || settings.saving || !value);
-  setDisabled(dom.settingsPaid, settings.loading || settings.saving || !value);
-  setDisabled(dom.settingsPricing, settings.loading || settings.saving || !value);
+  setDisabled(dom.settingsBilling, settings.loading || settings.saving || !value);
   setDisabled(dom.settingsBudget, settings.loading || settings.saving || !value);
   setDisabled(dom.settingsReservation, settings.loading || settings.saving || !value);
   setDisabled(dom.settingsMaxCalls, settings.loading || settings.saving || !value);
@@ -10571,6 +10472,7 @@ function openSettingsDialog() {
   clearSettingsKeyInput();
   dom.settingsKeyAction.value = "keep";
   state.settings.keyAction = "keep";
+  state.settings.billingTouched = false;
   state.settings.error = "";
   state.settings.message = "";
   renderSettings();
@@ -10603,14 +10505,19 @@ async function handleSettingsSave(event) {
     });
     if (!ok) return;
   }
+  const billing = settingsBillingFlags(
+    current,
+    dom.settingsBilling.checked,
+    state.settings.billingTouched
+  );
   const built = buildSettingsUpdate({
     revision: current.revision,
     apiKeyAction: action,
     apiKey: dom.settingsKeyInput.value,
     model: dom.settingsModel.value,
     baseUrl: dom.settingsBaseUrl.value,
-    paidCallsEnabled: dom.settingsPaid.checked,
-    pricingConfirmed: dom.settingsPricing.checked,
+    paidCallsEnabled: billing.paidCallsEnabled,
+    pricingConfirmed: billing.pricingConfirmed,
     budgetYuan: dom.settingsBudget.value,
     reservationYuan: dom.settingsReservation.value,
     maxCalls: dom.settingsMaxCalls.value
@@ -10793,6 +10700,9 @@ function wireEvents() {
   dom.settingsClose.addEventListener("click", closeSettingsDialog);
   dom.settingsReload.addEventListener("click", () => void loadSettings({}));
   dom.settingsForm.addEventListener("submit", (event) => void handleSettingsSave(event));
+  dom.settingsBilling.addEventListener("change", () => {
+    state.settings.billingTouched = true;
+  });
   dom.settingsKeyAction.addEventListener("change", () => {
     updateSettingsKeyUi();
     updateActionState();
@@ -11018,16 +10928,6 @@ function wireEvents() {
     renderAiStart();
     updateActionState();
   });
-  dom.aiConsentUpload.addEventListener("change", () => {
-    setAiError("");
-    renderAiStart();
-    updateActionState();
-  });
-  dom.aiConsentCharge.addEventListener("change", () => {
-    setAiError("");
-    renderAiStart();
-    updateActionState();
-  });
   dom.aiStartButton.addEventListener("click", () => void startAiPipeline());
   dom.aiCompose.addEventListener("click", () => void continueAi("select_layers"));
   dom.aiUseLocal.addEventListener("click", () => void continueAi("use_local"));
@@ -11050,10 +10950,6 @@ function wireEvents() {
   dom.aiRerunVectorize.addEventListener("click", () => void handleAiRerun("vectorize"));
 
   dom.repairCallId.addEventListener("input", () => {
-    if (dom.repairCallId.value.trim()) {
-      dom.repairConsentUpload.checked = false;
-      dom.repairConsentCharge.checked = false;
-    }
     setRepairError("");
     renderRepairStart();
     updateActionState();
@@ -11071,16 +10967,6 @@ function wireEvents() {
     setRepairError("");
     renderRepairStart();
   });
-  dom.repairConsentUpload.addEventListener("change", () => {
-    setRepairError("");
-    renderRepairStart();
-    updateActionState();
-  });
-  dom.repairConsentCharge.addEventListener("change", () => {
-    setRepairError("");
-    renderRepairStart();
-    updateActionState();
-  });
   document.querySelectorAll('input[name="repair-intent"]').forEach((node) => {
     node.addEventListener("change", () => {
       setRepairError("");
@@ -11095,12 +10981,6 @@ function wireEvents() {
   });
   dom.repairAccept.addEventListener("click", () => void decideRepair("accept"));
   dom.repairReject.addEventListener("click", () => void decideRepair("reject"));
-  dom.repairAcceptFull.addEventListener("change", () => {
-    state.repair.acceptFull = dom.repairAcceptFull.checked;
-    setRepairError("");
-    renderRepairPanel();
-    updateActionState();
-  });
   dom.repairCompare.addEventListener("click", () => openRepairCompare("three"));
   dom.repairEditView.addEventListener("click", () => openRepairCompare("edit"));
   dom.repairDiffView.addEventListener("click", () => openRepairCompare("difference"));

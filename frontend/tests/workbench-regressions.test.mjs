@@ -297,18 +297,32 @@ test("duplicate switch blocks new submissions until it finishes", () => {
   assert.equal(calls.send[0].path, "/exports");
 });
 
+test("legacy settings billing switch preserves mismatched fields until the user toggles it", () => {
+  const api = loadFunctions(["settingsBillingFlags"], {});
+  const mixed = { paidCallsEnabled: true, pricingConfirmed: false };
+  assert.deepEqual(api.settingsBillingFlags(mixed, false, false), {
+    paidCallsEnabled: true,
+    pricingConfirmed: false
+  });
+  assert.deepEqual(api.settingsBillingFlags(mixed, true, true), {
+    paidCallsEnabled: true,
+    pricingConfirmed: true
+  });
+  assert.deepEqual(api.settingsBillingFlags({ paidCallsEnabled: true, pricingConfirmed: true }, false, true), {
+    paidCallsEnabled: false,
+    pricingConfirmed: false
+  });
+});
+
 function tileZipHarness(overrides) {
   const opts = overrides || {};
   const calls = {
-    confirm: [],
     submissions: [],
     errors: [],
     toast: []
   };
-  const unitLicense = Object.hasOwn(opts, "unitLicense") ? opts.unitLicense : "未确认";
-  const previewLicense = Object.hasOwn(opts, "previewLicense") ? opts.previewLicense : "未确认";
-  const unit = { asset_id: "unit-1", kind: "cropped", license: unitLicense };
-  const preview = { asset_id: "tile-1", kind: "tile_preview", license: previewLicense };
+  const unit = { asset_id: "unit-1", kind: "cropped", license: "未确认" };
+  const preview = { asset_id: "tile-1", kind: "tile_preview", license: "未确认" };
   const state = {
     requestInFlight: false,
     pendingSubmission: null,
@@ -330,20 +344,13 @@ function tileZipHarness(overrides) {
       calls.submissions.push(config);
       return true;
     },
-    confirmAction: async (options) => {
-      calls.confirm.push(options);
-      return settle(opts.confirm === undefined ? true : opts.confirm, state);
-    },
     showToast: (message, tone) => calls.toast.push({ message, tone }),
     friendlyError: (error) => String((error && error.message) || error || ""),
     ApiError: class ApiError extends Error {},
     extractJobFromResponse: () => ({ job_id: "export-job" }),
     adoptJob: async () => {}
   };
-  const api = loadFunctions(
-    ["unconfirmedLicenseIds", "confirmExportLicense", "handleTileZip"],
-    dependencies
-  );
+  const api = loadFunctions(["handleTileZip"], dependencies);
   return { api, state, calls, unit, preview };
 }
 
@@ -356,68 +363,29 @@ test("tile ZIP export refuses to submit while work is active", async () => {
   ]) {
     const harness = tileZipHarness({ state: busy });
     await harness.api.handleTileZip();
-    assert.equal(harness.calls.confirm.length, 0, JSON.stringify(busy));
     assert.equal(harness.calls.submissions.length, 0, JSON.stringify(busy));
   }
 });
 
-test("tile ZIP export keeps the license gate when confirmation is cancelled", async () => {
-  const harness = tileZipHarness({ confirm: false });
-  await harness.api.handleTileZip();
-  assert.equal(harness.calls.confirm.length, 1);
-  assert.match(harness.calls.confirm[0].message, /2 个/);
-  assert.equal(harness.calls.submissions.length, 0);
-});
-
-test("tile ZIP export acknowledges licences only after confirmation", async () => {
-  const harness = tileZipHarness({ confirm: true });
+test("tile ZIP export submits once without declaring licence acknowledgment", async () => {
+  const harness = tileZipHarness();
   await harness.api.handleTileZip();
   assert.equal(harness.calls.submissions.length, 1);
   const submission = harness.calls.submissions[0];
   assert.equal(submission.path, "/exports");
   assert.equal(submission.method, "POST");
   const body = JSON.parse(submission.bodyFactory());
-  assert.deepEqual(body.asset_ids, ["unit-1", "tile-1"]);
-  assert.equal(body.license_acknowledged, true);
+  assert.deepEqual(body, { asset_ids: ["unit-1", "tile-1"] });
+  assert.equal(Object.hasOwn(body, "license_acknowledged"), false);
 });
 
-test("tile ZIP export skips the dialog when every licence is confirmed", async () => {
-  const harness = tileZipHarness({ unitLicense: "CC0", previewLicense: "已登记授权" });
-  await harness.api.handleTileZip();
-  assert.equal(harness.calls.confirm.length, 0);
-  assert.equal(harness.calls.submissions.length, 1);
-  const body = JSON.parse(harness.calls.submissions[0].bodyFactory());
-  assert.equal(body.license_acknowledged, false);
-});
-
-test("tile ZIP export counts missing licence metadata as unconfirmed", async () => {
-  const harness = tileZipHarness({ unitLicense: "", previewLicense: "CC0" });
-  await harness.api.handleTileZip();
-  assert.equal(harness.calls.confirm.length, 1);
-  assert.match(harness.calls.confirm[0].message, /1 个/);
-  assert.equal(JSON.parse(harness.calls.submissions[0].bodyFactory()).license_acknowledged, true);
-});
-
-test("tile ZIP export re-checks state after the async licence dialog", async () => {
-  const busy = tileZipHarness({
-    confirm: (state) => {
-      state.taskRunning = true;
-      return true;
-    }
+test("tile ZIP export keeps the stale tile guard before submitting", async () => {
+  const harness = tileZipHarness({
+    state: { tile: { unitId: "unit-1", resultAssetId: "other-tile" } }
   });
-  await busy.api.handleTileZip();
-  assert.equal(busy.calls.submissions.length, 0);
-  assert.ok(busy.calls.errors.some((entry) => /正在处理/.test(entry.message)));
-
-  const stale = tileZipHarness({
-    confirm: (state) => {
-      state.tile.resultAssetId = "other-tile";
-      return true;
-    }
-  });
-  await stale.api.handleTileZip();
-  assert.equal(stale.calls.submissions.length, 0);
-  assert.ok(stale.calls.errors.some((entry) => /已变化/.test(entry.message)));
+  await harness.api.handleTileZip();
+  assert.equal(harness.calls.submissions.length, 0);
+  assert.ok(harness.calls.errors.some((entry) => /先生成平铺预览/.test(entry.message)));
 });
 
 function lineartRequestHarness(overrides) {

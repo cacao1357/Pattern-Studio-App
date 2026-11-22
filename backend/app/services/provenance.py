@@ -1,8 +1,7 @@
 """Bounded, human-declared provenance fields for uploads and exports.
 
 Nothing here verifies a license: these are declarations written into the local
-record and the export manifest.  A missing declaration stays "未确认" and can
-only block/annotate an explicit export, never local editing.
+record and the export manifest. A missing declaration stays "未确认" on export.
 """
 
 from __future__ import annotations

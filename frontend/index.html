@@ -551,7 +551,7 @@
                     <input id="batch-id" type="text" maxlength="64" autocomplete="off" placeholder="batch-20261101">
                   </div>
                 </div>
-                <p class="hint">这些字段只作登记，不构成授权证明；未确认授权的版本导出前会再次确认。</p>
+                <p class="hint">这些字段只作登记，不构成授权证明。</p>
               </div>
             </details>
 
@@ -963,19 +963,9 @@
               </label>
               <p class="hint">填写已归档编号可只读复用候选，不生成、不产生新费用；图像不匹配时不会加载。</p>
 
-              <div class="consents" id="ai-consents">
-                <label class="check-row">
-                  <input type="checkbox" id="ai-consent-upload">
-                  <span><strong>允许上传当前图像</strong><small>默认关闭，单独确认</small></span>
-                </label>
-                <label class="check-row">
-                  <input type="checkbox" id="ai-consent-charge">
-                  <span><strong>同意可能产生的费用</strong><small>默认关闭，单独确认</small></span>
-                </label>
-                <p class="hint">新生成需要两项都确认。复用归档时不会上传，也不会产生新费用。</p>
-              </div>
+              <p class="hint">填写归档编号则只读取，不上传、不计费。</p>
 
-              <button class="btn btn-solid btn-wide" id="ai-start-button" type="button" disabled>生成 AI 候选</button>
+              <button class="btn btn-solid btn-wide" id="ai-start-button" type="button" disabled>上传并生成 AI 候选（按次计费）</button>
               <p class="hint" id="ai-start-note">上传图像后可开始；也可填入归档编号复用。</p>
             </div>
 
@@ -1149,26 +1139,16 @@
             </div>
             <p class="hint" id="repair-damage-note">可选择与当前输入匹配的损伤标注。</p>
 
-            <div class="consents" id="repair-consents">
-              <label class="check-row">
-                <input type="checkbox" id="repair-consent-upload">
-                <span><strong>允许上传当前图像</strong><small>默认关闭，单独确认</small></span>
-              </label>
-              <label class="check-row">
-                <input type="checkbox" id="repair-consent-charge">
-                <span><strong>同意可能产生的费用</strong><small>默认关闭，单独确认</small></span>
-              </label>
-            </div>
-            <p class="hint">生成新候选需确认上传和费用。复用已有候选免费。</p>
+            <p class="hint">复用已有候选不上传、不计费。</p>
 
-            <button class="btn btn-solid btn-wide" id="repair-start" type="button" disabled>提交修复任务</button>
+            <button class="btn btn-solid btn-wide" id="repair-start" type="button" disabled>上传并提交修复（按次计费）</button>
             <p class="hint" id="repair-start-note">先选择规范输入并框选缺损区域。</p>
 
             <p class="field-error" id="repair-error" role="alert" hidden></p>
 
             <div class="empty-note" id="repair-empty">
               <strong>候选不会自动接受</strong>
-              <p>任务完成后在此比较原输入、全图候选与局部保护版。默认接受局部保护版；接受整图候选需额外勾选确认。</p>
+              <p>任务完成后在此比较原输入、全图候选与局部保护版。默认接受局部保护版；接受整图候选会用 AI 结果替换整幅画面。</p>
             </div>
 
             <div class="record" id="repair-record" hidden>
@@ -1199,17 +1179,6 @@
 
               <div class="decision" id="repair-decision">
                 <p id="repair-decision-note">等待修复候选。</p>
-                <div class="banner banner-warn" id="repair-full-warning" hidden>
-                  <span class="banner-mark"><svg class="icon" aria-hidden="true"><use href="#i-alert"></use></svg></span>
-                  <div class="banner-copy">
-                    <strong>整图候选可能改变框外像素</strong>
-                    <p>全图候选不是局部保护版，不能保证矩形外与原输入一致。选择它必须单独勾选下方确认。</p>
-                    <label class="check-row">
-                      <input type="checkbox" id="repair-accept-full">
-                      <span>我已知晓并接受整图可能变化，仍选择全图候选</span>
-                    </label>
-                  </div>
-                </div>
                 <div class="decision-acts">
                   <button class="btn btn-quiet btn-sm" id="repair-reject" type="button">拒绝修复</button>
                   <button class="btn btn-solid btn-sm" id="repair-accept" type="button" disabled>接受局部保护版</button>
@@ -1431,12 +1400,8 @@
 
       <div class="settings-checks">
         <label class="check-row">
-          <input type="checkbox" id="settings-paid">
-          <span><strong>允许付费云端调用</strong><small>只阻止尚未开始的新请求；已开始的请求不变</small></span>
-        </label>
-        <label class="check-row">
-          <input type="checkbox" id="settings-pricing">
-          <span><strong>已确认价格</strong><small>需与所用模型的实际计费核对</small></span>
+          <input type="checkbox" id="settings-billing">
+          <span><strong>允许云端计费调用</strong><small>提交云端任务时上传所选纹样，按次计费。</small></span>
         </label>
       </div>
 

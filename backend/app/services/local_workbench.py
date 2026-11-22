@@ -16,7 +16,7 @@ from app.services import quality
 from app.services.imaging import normalize_image, crop_image, extract_foreground, contour_line_art
 from app.services.lineart import extract_lineart
 from app.services.preparation import prepare_image, prepared_output_size
-from app.services.provenance import is_license_confirmed, normalize_provenance
+from app.services.provenance import normalize_provenance
 from app.services.vector import vectorize
 from app.storage import ServiceError, canonical_json, digest, png_bytes
 from app import versions
@@ -168,20 +168,11 @@ class LocalWorkbench:
             if export_layout != "flat":
                 values["layout"] = export_layout
             total = 0
-            unconfirmed = []
             for asset_id in values["asset_ids"]:
                 metadata, path = self.store.get_asset(asset_id)
                 if path.suffix == ".zip":
                     raise ServiceError("NESTED_EXPORT", "Select image or SVG versions instead of an existing ZIP", 422)
-                if not is_license_confirmed(metadata):
-                    unconfirmed.append(asset_id)
                 total += metadata["bytes"]
-            if unconfirmed and not values.get("license_acknowledged"):
-                raise ServiceError(
-                    "LICENSE_REVIEW_REQUIRED",
-                    f"{len(unconfirmed)} selected versions have unconfirmed source license; confirm the attribution before exporting",
-                    409,
-                )
             if total > MAX_EXPORT_BYTES:
                 raise ServiceError("EXPORT_SIZE_LIMIT", "Selected files exceed the 128 MiB export limit", 413)
         else:

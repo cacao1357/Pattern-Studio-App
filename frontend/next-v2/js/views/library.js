@@ -1090,7 +1090,7 @@ function drawerBody(asset, pattern = null) {
       ${kvRow("尺寸", dimsOf(asset) === "—" ? "—" : `<span class="mono">${esc(dimsOf(asset))}</span> 像素`)}
       ${kvRow("大小", `<span class="mono">${esc(formatBytes(asset.bytes))}</span>`)}
       ${kvRow("评级", `${esc(gradeLabel(asset.grade))}${asset.grade_version ? ` · <span class="mono">${esc(asset.grade_version)}</span>` : ""}`)}
-      ${kvRow("许可证", license.unset ? `${esc(license.text)} · 打包前需确认授权` : esc(license.text))}
+      ${kvRow("许可证", esc(license.text))}
       ${kvRow("来源", sourceBits.join("<br />"))}
       ${kvRow("sha256", `<span class="mono">${shortHash(asset.sha256)}</span>`)}
       ${kvRow("内容 ID", `<span class="mono">${asset.content_id ? esc(asset.content_id) : "—"}</span>`)}

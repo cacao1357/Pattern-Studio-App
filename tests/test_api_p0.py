@@ -1,6 +1,7 @@
 from io import BytesIO
 import time
 
+import pytest
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 from pydantic import SecretStr
@@ -89,18 +90,15 @@ def test_exact_duplicate_is_reported_but_not_merged(tmp_path):
         assert duplicates[0]["ncc"] > 0.98
 
 
-def test_export_requires_license_acknowledgement(tmp_path):
+@pytest.mark.parametrize("legacy_ack", [False, True])
+def test_export_accepts_omitted_and_legacy_acknowledgement(tmp_path, legacy_ack):
     with client_for(tmp_path) as client:
         body = upload(client, "p0_" + "d" * 16).json()
         asset_id = body["normalized"]["asset_id"]
-        denied = client.post("/api/v1/exports", json={"asset_ids": [asset_id]},
-                            headers=headers("p0_" + "e" * 16))
-        assert denied.status_code == 409
-        assert denied.json()["error"]["code"] == "LICENSE_REVIEW_REQUIRED"
-
-        allowed = client.post("/api/v1/exports",
-                             json={"asset_ids": [asset_id], "license_acknowledged": True},
-                             headers=headers("p0_" + "f" * 16))
+        request = {"asset_ids": [asset_id]}
+        if legacy_ack:
+            request["license_acknowledged"] = True
+        allowed = client.post("/api/v1/exports", json=request, headers=headers("p0_" + "f" * 16))
         assert allowed.status_code == 202, allowed.text
         job_id = allowed.json()["job_id"]
         for _ in range(50):
@@ -111,7 +109,7 @@ def test_export_requires_license_acknowledgement(tmp_path):
         assert job["state"] == "succeeded", job
         zip_asset = next(asset for asset in job["result"]["assets"] if asset["kind"] == "zip")
         assert zip_asset["manifest_schema_version"] == "local-s1-v2"
-        assert zip_asset["license_acknowledged"] is True
+        assert zip_asset["license_acknowledged"] is legacy_ack
 
 
 def test_invalid_provenance_is_rejected_without_echo(tmp_path):

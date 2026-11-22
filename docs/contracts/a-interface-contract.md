@@ -11,6 +11,7 @@
 - `GET /api/v1/settings`：仅返回非敏感字段、`api_key_configured`、`revision` 和 `blockers`。
 - `PUT /api/v1/settings`：需 `X-Pattern-Studio: local`；JSON 含当前 `revision`，以及待修改字段。
 - 字段：`model`、`base_url`、`paid_calls_enabled`、`pricing_confirmed`。旧客户端的 `budget_cents`、`reservation_cents`、`max_calls` 仍可提交以兼容，但不再作为调用门槛。
+- 设置页将两项计费字段显示为一个开关。两项均为真时显示开启。修改开关时同步保存两项，保存其他设置时保留各自的原值。
 - `model` 只接受方舟文档中的 Model ID（`doubao-seedream-5-0-pro/flash-*`、`doubao-seedream-5-5-*`）或 `ep-*` 接入点；`base_url` 只接受北京区 `/api/v3` 根地址或其 `/images/generations` 完整地址，保存时归一化为根地址。
 - 密钥字段：`api_key_action` 为 `keep`（默认）、`replace` 或 `clear`；仅 `replace` 携带 `api_key`。不回显密钥。
 - 成功返回完整非敏感状态；409 表示修订冲突，422 表示验证失败。422 的 `message` 指明被拒字段（型号、端点或密钥），客户端据此给出中文提示。保存不发起云端请求。

@@ -1295,14 +1295,6 @@ function reopenHistory(api) {
     api?.toast?.("先选择一个历史版本。", "warn");
     return;
   }
-  if (
-    svgHasUnsaved() &&
-    typeof window !== "undefined" &&
-    typeof window.confirm === "function" &&
-    !window.confirm("当前 SVG 还有未保存改动；切换后草稿会保留在本次页面，可切回继续编辑。继续打开所选历史版本？")
-  ) {
-    return;
-  }
   store.setCurrentAsset(target.asset_id);
 }
 

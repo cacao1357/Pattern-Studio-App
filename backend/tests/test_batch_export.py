@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 from app.schemas.workbench import ExportRequest
 from app.services.local_workbench import LocalWorkbench, _export_archive_name, execute_local
-from app.storage import ServiceError, png_bytes
+from app.storage import png_bytes
 from app.workbench_store import WorkbenchStore
 
 
@@ -39,7 +39,7 @@ class BatchExportTests(unittest.TestCase):
         return record
 
     def _export(self, asset_ids, *, layout="by_image", key=None):
-        request = ExportRequest(asset_ids=asset_ids, layout=layout, license_acknowledged=True)
+        request = ExportRequest(asset_ids=asset_ids, layout=layout)
         queued = self.service.submit("export", request, key or uuid4().hex)
         job, token = self.store.claim()
         self.assertEqual(job["job_id"], queued["job_id"])
@@ -100,12 +100,16 @@ class BatchExportTests(unittest.TestCase):
         request = ExportRequest(asset_ids=[str(uuid4()) for _ in range(500)])
         self.assertEqual(len(request.asset_ids), 500)
 
-    def test_export_still_requires_explicit_license_acknowledgement(self):
+    def test_export_preserves_undeclared_license_in_manifest(self):
         data = png_bytes(Image.new("RGB", (8, 8), "white"))
         record, _, _ = self.service.upload(data, "unlicensed.png", "", uuid4().hex)
-        with self.assertRaises(ServiceError) as raised:
-            self.service.submit("export", ExportRequest(asset_ids=[record["original"]["asset_id"]]), uuid4().hex)
-        self.assertEqual(raised.exception.code, "LICENSE_REVIEW_REQUIRED")
+        job = self._export([record["original"]["asset_id"]])
+        zip_asset = job["result"]["assets"][0]
+        _, data = self.store.read_asset(zip_asset["asset_id"])
+        with zipfile.ZipFile(BytesIO(data)) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+        self.assertIs(manifest["license_acknowledged"], False)
+        self.assertEqual(manifest["selected_assets"][0]["license"], "未确认")
 
 
 if __name__ == "__main__":

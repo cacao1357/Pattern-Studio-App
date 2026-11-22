@@ -351,6 +351,12 @@
   display: flex;
   flex-wrap: wrap;
   gap: 3px 8px;
+  min-width: 0;
+}
+
+.bp-dupes__list li > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* 真正的文件选择框：视觉隐藏，但仍可被脚本点击 */
@@ -628,6 +634,7 @@
 .bx-group__meta {
   font-size: var(--text-min);
   color: var(--text-4);
+  overflow-wrap: anywhere;
 }
 
 .bx-group__acts {
@@ -843,40 +850,6 @@
 .bx__summary .mono {
   font-size: var(--text-min);
   color: var(--text-4);
-}
-
-.bx__warn {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  font-size: var(--text-label);
-  line-height: 1.7;
-  color: var(--gold);
-}
-
-.bx__warn .icon {
-  width: 14px;
-  height: 14px;
-  margin-top: 2px;
-  flex: none;
-}
-
-.bx__license {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  font-size: var(--text-label);
-  line-height: 1.7;
-  color: var(--text-2);
-  cursor: pointer;
-}
-
-.bx__license input {
-  width: 16px;
-  height: 16px;
-  margin-top: 3px;
-  accent-color: var(--cinnabar);
-  flex: none;
 }
 
 .bx__error {
@@ -1930,6 +1903,7 @@
   font-size: var(--text-min);
   line-height: 1.6;
   color: var(--text-4);
+  overflow-wrap: anywhere;
 }
 
 .pf-pick.is-disabled {
