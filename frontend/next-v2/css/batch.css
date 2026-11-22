@@ -1067,25 +1067,27 @@
 
 /* ================================================================ 处理批次与预设 */
 
-/* 常驻入口：刷新后从服务端批次列表恢复，收起浮窗后仍能看到进行中数量 */
-.pf-dock {
-  position: fixed;
-  right: 18px;
-  bottom: 46px;
-  z-index: 55;
+/* 常驻入口：放在底部状态条里，属于外壳而不是工作台浮层；
+   刷新后从服务端批次列表恢复，任何页面都能看到进行中数量。 */
+.statusbar__batch {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 38px;
-  padding-inline: 14px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-pill);
-  background: color-mix(in srgb, var(--bg-2) 94%, transparent);
-  backdrop-filter: blur(14px);
-  box-shadow: var(--shadow-pop);
-  color: var(--text-1);
-  font-size: var(--text-label);
-  transition: border-color var(--dur-2), background var(--dur-2), transform var(--dur-2) var(--ease-spring);
+  flex: none;
+}
+
+.pf-dock {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 24px;
+  padding-inline: 8px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--text-min);
+  white-space: nowrap;
+  transition: border-color var(--dur-2), background var(--dur-2), color var(--dur-2);
 }
 
 .pf-dock[hidden] {
@@ -1093,12 +1095,17 @@
 }
 
 .pf-dock:hover {
-  border-color: var(--line-3);
-  background: var(--bg-3);
+  background: color-mix(in srgb, var(--text-1) 6%, transparent);
+  color: var(--text-1);
+}
+
+.pf-dock:focus-visible {
+  border-color: var(--cinnabar-line);
+  outline: none;
 }
 
 .pf-dock:active {
-  transform: scale(0.98);
+  color: var(--text-1);
 }
 
 .pf-dock__dot {
@@ -1130,17 +1137,18 @@
   color: var(--text-4);
 }
 
-/* 可收起 / 重新打开的进度浮窗 */
+/* 完整进度浮窗：只在用户点状态条入口时打开；日常状态不占工作台像素。 */
 .pf-window {
   position: fixed;
   right: 18px;
-  bottom: 96px;
+  bottom: 48px;
   /* 低于档案抽屉（80），高于页面内容与常驻入口；导出浮窗（86）在它之上 */
   z-index: 78;
   display: flex;
   flex-direction: column;
-  width: min(640px, calc(100vw - 32px));
-  max-height: min(78vh, 860px);
+  width: min(600px, calc(100vw - 32px));
+  /* 展开上限留在顶栏之下，避免一开窗就从右上角压到屏幕顶部 */
+  max-height: min(70vh, 720px);
   background: color-mix(in srgb, var(--bg-1) 98%, transparent);
   border: 1px solid var(--line-2);
   border-radius: var(--r-lg);
@@ -1151,11 +1159,6 @@
 
 .pf-window[hidden] {
   display: none;
-}
-
-.pf-window.is-collapsed {
-  width: min(440px, calc(100vw - 32px));
-  max-height: none;
 }
 
 @keyframes pf-window-in {
@@ -1203,21 +1206,6 @@
 .pf-window__head-acts .icon-btn {
   width: 30px;
   height: 30px;
-}
-
-.pf-window__head-acts .icon-btn[data-pf-collapse] .icon {
-  transition: transform var(--dur-2) var(--ease-out);
-}
-
-.pf-window.is-collapsed [data-pf-collapse] .icon {
-  transform: rotate(-90deg);
-}
-
-.pf-window__collapsed {
-  padding: 6px 16px 12px;
-  font-family: var(--font-mono);
-  font-size: var(--text-min);
-  color: var(--text-3);
 }
 
 .pf-window__body {
@@ -2131,20 +2119,13 @@
 }
 
 @media (max-width: 820px) {
-  .pf-dock {
-    right: 12px;
-    bottom: 42px;
-  }
   .pf-window {
     left: 10px;
     right: 10px;
-    bottom: 88px;
+    bottom: 44px;
     width: auto;
-    max-height: 78vh;
-  }
-  .pf-window.is-collapsed {
-    left: auto;
-    width: min(440px, calc(100vw - 24px));
+    /* 展开时也让工作台上半部可见 */
+    max-height: 60vh;
   }
   .pf-layer {
     align-items: flex-end;
@@ -2170,6 +2151,9 @@
 }
 
 @media (max-width: 560px) {
+  .pf-dock__meta {
+    display: none;
+  }
   .pf-window__head {
     padding-inline: 13px;
   }

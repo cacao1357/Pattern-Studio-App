@@ -127,7 +127,7 @@ const api = {
     const tone = kind === "warn" || kind === "done" ? kind : "info";
     const el = document.createElement("div");
     el.className = `toast toast--${tone}`;
-    el.innerHTML = `${icon(tone === "warn" ? "alert" : tone === "done" ? "check" : "info")}<span>${message}</span>`;
+    el.innerHTML = `${icon(tone === "warn" ? "alert" : tone === "done" ? "check" : "info")}<span>${escapeHtml(message)}</span>`;
     stack.append(el);
     setTimeout(() => {
       el.classList.add("is-out");
@@ -309,8 +309,11 @@ function renderStatusbar() {
   const health = store.health;
   const online = Boolean(health && health.status === "ok");
   const asset = store.currentAsset();
-  const cloud = store.seedream?.enabled ? "云端已连接" : "云端未配置";
+  const cloud = store.seedream?.enabled ? "云端已启用" : "云端未启用";
   const isWorkbench = state.route === "workbench";
+  // 先留住处理批次入口，再重建状态条：innerHTML 一替换，原节点就脱离文档，
+  // 之后按 id 查会拿到 null，入口会在刷新/重绘后消失。
+  const batchDock = document.getElementById("pf-dock");
   bar.innerHTML = `
     <span class="statusbar__item" title="${online ? "数据库、存储与后台任务均正常" : escapeHtml(store.healthError || "尚未连接本机服务")}">
       <span class="svc__dot${online ? "" : " is-off"}" aria-hidden="true"></span>${online ? "本机服务正常" : "本机服务未连接"}
@@ -323,7 +326,11 @@ function renderStatusbar() {
     }
     <span class="statusbar__item statusbar__item--hide-sm">${cloud}</span>
     <span class="statusbar__item statusbar__item--grow"></span>
+    <span class="statusbar__batch" data-batch-slot></span>
   `;
+  // 处理批次的入口常驻状态条：它在工作台布局之外，不叠浮块遮住画布。
+  const batchSlot = bar.querySelector("[data-batch-slot]");
+  if (batchSlot && batchDock) batchSlot.append(batchDock);
 }
 
 

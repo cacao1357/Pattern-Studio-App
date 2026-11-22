@@ -359,8 +359,10 @@ class PatternLibrary:
         exhausted = False
         while not exhausted and next_cursor is None:
             with self.store.connection() as db:
-                rows = db.execute("""SELECT id,original_id,normalized_id,source_note,created_at,rowid AS sequence FROM images
-                    WHERE rowid<? ORDER BY rowid DESC LIMIT 100""", (scan_cursor,)).fetchall()
+                rows = db.execute("""SELECT i.id,i.original_id,i.normalized_id,i.source_note,i.created_at,
+                           i.rowid AS sequence,m.source_name,m.source_type,m.source_url
+                    FROM images i LEFT JOIN image_meta m ON m.image_id=i.id
+                    WHERE i.rowid<? ORDER BY i.rowid DESC LIMIT 100""", (scan_cursor,)).fetchall()
             if not rows:
                 break
             for row in rows:
@@ -368,11 +370,12 @@ class PatternLibrary:
                 assets = self._assets_for_image(image_id)
                 original = next((a for a in assets if a["asset_id"] == row["original_id"]),
                                 {"asset_id": row["original_id"]})
-                names = " ".join(str(asset.get(field, "")) for asset in assets
-                                 for field in ("filename", "source_name", "kind", "asset_id"))
-                names = (names + " " + str(row["source_note"] or "")).casefold()
-                if query and query not in names:
-                    continue
+                if query:
+                    fields = [asset.get(field) for asset in assets
+                              for field in ("filename", "source_name", "kind", "asset_id")]
+                    fields.extend(row[field] for field in ("source_note", "id", "source_name", "source_type", "source_url"))
+                    if query not in " ".join(str(value or "") for value in fields).casefold():
+                        continue
                 if kind and not any(str(asset.get("kind", "")).casefold() == kind for asset in assets):
                     continue
                 if category_id:

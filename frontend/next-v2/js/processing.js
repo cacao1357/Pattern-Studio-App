@@ -374,6 +374,17 @@ export function batchProgress(batch) {
   };
 }
 
+/** 进度计数只留需要看的状态：成功/等待/失败常显，进行中与排队仅在非零时出现。 */
+export function progressCountsText(progress) {
+  const parts = [`成功 ${progress.succeeded}`, `等待 ${progress.waiting}`];
+  if (progress.running) parts.push(`处理中 ${progress.running}`);
+  if (progress.queued) parts.push(`排队 ${progress.queued}`);
+  if (progress.cancelling) parts.push(`取消中 ${progress.cancelling}`);
+  parts.push(`失败 ${progress.failed}`);
+  if (progress.cancelled) parts.push(`取消 ${progress.cancelled}`);
+  return parts.join(" · ");
+}
+
 export function isBatchActive(batch) {
   return Boolean(batch && (batch.state === "running" || batch.state === "cancelling"));
 }
@@ -441,7 +452,7 @@ export function pickInputAsset(group, options, preferredId = "") {
   if (!list.length) return null;
   const preferred = preferredId && list.find((asset) => asset.asset_id === preferredId);
   if (preferred) return preferred;
-  const normalizedId = group?.normalized_asset_id || "";
+  const normalizedId = group?.normalized_asset_id || group?.normalizedAssetId || "";
   const normalized = normalizedId && list.find((asset) => asset.asset_id === normalizedId);
   if (normalized) return normalized;
   const normalizedKind = list.find((asset) => asset.kind === "normalized_input");
@@ -463,6 +474,18 @@ export function batchInputs(groups, options, selectedImageIds, preferredInputs =
     inputs.push({ group, asset });
   }
   return { inputs, missing };
+}
+
+/**
+ * 启动浮窗的逐组可用性：只判断这一组在当前预设下有没有兼容输入，
+ * 与是否勾选无关。取消勾选后仍能选回；确实没有兼容版本的组才禁用。
+ */
+export function runInputAvailability(groups, options, preferredInputs = {}) {
+  const available = new Map();
+  for (const group of groups || []) {
+    available.set(group.imageId, pickInputAsset(group, options, preferredInputs[group.imageId]));
+  }
+  return available;
 }
 
 export function buildBatchPayload(presetId, inputs, { consentToUpload = false, consentToCharge = false } = {}) {
@@ -510,8 +533,9 @@ export function runValidation({ presetId, groups, selectedImageIds, options, con
   const { inputs, missing } = batchInputs(groups, options, selected);
   if (missing.length) return `有 ${missing.length} 张原图没有该预设可用的输入版本，请取消选择它们。`;
   if (inputs.length !== selected.size) return "输入纹样不完整，请重新选择原图。";
-  if (normalizePresetOptions(options).recipe === "cloud_lineart" && !(consentToUpload && consentToCharge)) {
-    return "云端预设需要同时确认本批次上传与可能费用。";
+  if (normalizePresetOptions(options).recipe === "cloud_lineart") {
+    if (store.seedream?.enabled === false) return "云端尚未启用。可选本地预设，或先到设置启用云端。";
+    if (!(consentToUpload && consentToCharge)) return "云端预设需要同时确认本批次上传与可能费用。";
   }
   return "";
 }
@@ -572,30 +596,45 @@ export async function loadBatches({ cursor = "", silent = false } = {}) {
   }
 }
 
+let lastDetailRequest = 0;
+
+function rememberBatch(batch) {
+  const index = processing.batches.findIndex(entry => entry.batch_id === batch.batch_id);
+  const cached = processing.batches[index];
+  const latest = cached?.revision > batch.revision ? cached : batch;
+  if (index < 0) processing.batches.unshift(latest);
+  else processing.batches[index] = latest;
+  if (processing.selectedBatchId !== batch.batch_id) return;
+  if (processing.detail?.batch_id === batch.batch_id && processing.detail.revision > latest.revision) return;
+  processing.detail = latest;
+}
+
 export async function loadBatch(batchId, { silent = false } = {}) {
   if (!batchId) return null;
+  processing.selectedBatchId = batchId;
+  const request = ++lastDetailRequest;
+  const isCurrent = () => request === lastDetailRequest && processing.selectedBatchId === batchId;
+  processing.detailLoading = !silent;
   if (!silent) {
-    processing.detailLoading = true;
     processing.detailError = "";
     notifyProcessing("batch-loading");
   }
   try {
     const batch = await api.processingBatch(batchId);
-    processing.detail = batch;
-    processing.selectedBatchId = batchId;
-    const index = processing.batches.findIndex((entry) => entry.batch_id === batchId);
-    if (index >= 0) processing.batches[index] = batch;
-    else processing.batches.unshift(batch);
+    if (!isCurrent()) return null;
+    rememberBatch(batch);
+    processing.detailError = "";
     if (!silent) notifyProcessing("batch");
     // 结果与人工门候选都复用 /patterns；后台补齐，不阻塞进度展示。
     ensurePatternsForBatch(batch);
     return batch;
   } catch (error) {
+    if (!isCurrent()) return null;
     processing.detailError = error?.message || "批次读取失败。";
     if (!silent) notifyProcessing("batch-error");
     return null;
   } finally {
-    processing.detailLoading = false;
+    if (isCurrent()) processing.detailLoading = false;
   }
 }
 
@@ -603,7 +642,7 @@ export async function selectBatch(batchId) {
   if (!batchId) return null;
   processing.selectedBatchId = batchId;
   const local = processing.batches.find((batch) => batch.batch_id === batchId);
-  if (local) processing.detail = local;
+  processing.detail = local || null;
   notifyProcessing("select");
   return loadBatch(batchId);
 }
@@ -762,11 +801,9 @@ export async function createBatch({ presetId, inputs, consentToUpload = false, c
 
 export async function resumeItem(batchId, itemId, revision, inputAssetId) {
   return withBusy(`resume-${itemId}`, async () => {
+    if (!processing.selectedBatchId) processing.selectedBatchId = batchId;
     const batch = await api.resumeProcessingItem(batchId, itemId, buildResumePayload(revision, inputAssetId));
-    processing.detail = batch;
-    processing.selectedBatchId = batchId;
-    const index = processing.batches.findIndex((entry) => entry.batch_id === batchId);
-    if (index >= 0) processing.batches[index] = batch;
+    rememberBatch(batch);
     notifyProcessing("batch");
     ensurePatternsForBatch(batch);
     return batch;
@@ -775,10 +812,9 @@ export async function resumeItem(batchId, itemId, revision, inputAssetId) {
 
 export async function cancelBatch(batchId, revision) {
   return withBusy(`cancel-${batchId}`, async () => {
+    if (!processing.selectedBatchId) processing.selectedBatchId = batchId;
     const batch = await api.cancelProcessingBatch(batchId, { revision: Number(revision) || 1 });
-    processing.detail = batch;
-    const index = processing.batches.findIndex((entry) => entry.batch_id === batchId);
-    if (index >= 0) processing.batches[index] = batch;
+    rememberBatch(batch);
     notifyProcessing("batch");
     return batch;
   });

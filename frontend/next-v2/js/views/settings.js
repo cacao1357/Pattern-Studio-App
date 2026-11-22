@@ -185,7 +185,7 @@ function savebarHtml() {
   <div class="st-savebar" role="region" aria-label="保存设置">
     <div class="wrap st-savebar__inner">
       <p class="st-savebar__note" data-st-note data-dirty="false" aria-live="polite">正在读取当前配置…</p>
-      <p class="st-savebar__hint" data-st-hint>保存写入本机配置 · 带 revision 校验</p>
+      <p class="st-savebar__hint" data-st-hint>保存在这台电脑上，下次打开仍然有效。</p>
       <p class="st-form-error" data-st-error role="alert" hidden></p>
       <div class="st-savebar__acts">
         <button class="btn btn--ghost btn--sm" type="button" data-act="reload" hidden>重新加载</button>
@@ -393,7 +393,7 @@ function aboutSection(record) {
     ${secHead("03", "关于", "配置与版本", "st-about-title")}
     <div class="st-sec__body">
       <p class="copy">
-        数据、配置与密钥都在本机服务里；云端只在 03 修复、04 候选与 05 云端线稿时被调用。
+        数据、配置与密钥都在本机服务里；云端只在 03 云端修复、04 候选与 05 云端线稿时被调用。本地 LeftRefill 与本地提取不上传、不计费。
       </p>
       <dl class="st-facts st-facts--about">
         <div><dt>数据位置</dt><dd>本机 <span class="mono">storage/api/</span></dd></div>
@@ -406,7 +406,7 @@ function aboutSection(record) {
       </p>
       <div class="st-about__acts">
         <a class="btn btn--ghost btn--sm" href="/legacy/" target="_blank" rel="noopener">
-          ${icon("external")}打开旧版工作台（只读对照）
+          ${icon("external")}打开旧版工作台（共用本机数据）
         </a>
         <a class="btn btn--quiet btn--sm" href="#/library">去纹样库</a>
         <a class="btn btn--quiet btn--sm" href="#/notes">使用说明</a>
