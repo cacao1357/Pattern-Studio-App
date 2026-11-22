@@ -261,6 +261,18 @@ class AWorkflowTests(unittest.TestCase):
         self.assertEqual(failed["error"]["code"], "PROVIDER_DISABLED")
         self.assertEqual(self.calls, [])
 
+    def test_queued_provider_job_can_be_cancelled_before_any_call_starts(self):
+        flow = self.flow()
+        job_id = flow["decomposition_job_id"]
+
+        response = self.post(f"/jobs/{job_id}/cancel")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["state"], "cancelled")
+        self.assertIsNone(self.store.claim())
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.store.get_ai_flow(flow["pipeline_id"])["state"], "cancelled")
+
     def test_validated_selection_hook_auto_continues_exactly_once(self):
         flow = self.flow()
         self.run_next()

@@ -22,6 +22,7 @@
 
 ## 工作流与恢复
 
+- 任务中心允许取消排队中的云端任务。服务端在数据库事务中检查任务状态。如果执行器已领取该任务，取消返回 409，任务继续跟踪服务商结果。失败的外部调用应在工作台核对或重新发起，已归档修复及本地修复可通过原有入口重试。
 - 保留 `POST /api/v1/pipelines/ai` 和 `POST /api/v1/pipelines/{id}/continue`。
 - AI 提交新增可选 `prompt_version`（默认既有版本），`selection_policy` 默认 `auto_or_confirm`；没有经验证的选层规则时进入人工确认。
 - `GET /api/v1/pipelines/{id}` 增加 `workflow`（标识/版本/快照）、`recovery`、`branches`；不移除既有字段。

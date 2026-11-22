@@ -91,6 +91,32 @@ export function taskStatusText(job) {
   return jobStateLabel(job?.state);
 }
 
+/* 云端外部调用任务：排队中可取消，运行中取消会失去对已发出调用的追踪。 */
+const PROVIDER_KINDS = new Set(["decompose-layers", "cloud-lineart"]);
+
+/** 任务是否已发起或即将发起云端外部调用（与服务端 cancel 的判定一致）。 */
+function isProviderJob(job) {
+  const kind = job?.kind || "";
+  if (PROVIDER_KINDS.has(kind)) return true;
+  if (kind !== "repair") return false;
+  const parameters = job?.parameters || {};
+  return String(parameters.method || "cloud") !== "leftrefill" && !parameters.provider_call_id;
+}
+
+/** 与服务端一致：queued 阶段任何任务都可取消；running 的外部调用不可取消。 */
+export function canCancelJob(job) {
+  if (!ACTIVE.has(job?.state)) return false;
+  return job.state === "queued" || !isProviderJob(job);
+}
+
+/**
+ * 失败任务能否直接重试：付费云端调用（含未复用归档的云端修复）需要重新授权，
+ * 服务端必然拒绝，这里就不给出按钮；本地 LeftRefill 与复用 provider_call_id 的修复保留。
+ */
+export function canRetryJob(job) {
+  return job?.state === "failed" && !isProviderJob(job);
+}
+
 /* ------------------------------------------------------------------ 视图内状态 */
 
 const toolIsCurrent = () => Boolean(ctx && ctx.page && ctx.page.isConnected);
@@ -117,6 +143,11 @@ function countText() {
   if (error && !items.length) return "读取失败";
   if (!items.length) return "暂无任务";
   return visible === items.length ? `共 ${items.length} 条` : `筛选 ${visible} / ${items.length} 条`;
+}
+
+/** 搜索/状态筛选只作用于已加载分页；还有 cursor 时提示范围，不扩展服务端搜索协议。 */
+function filterIsPartial() {
+  return Boolean((String(query || "").trim() || status !== "all") && cursor);
 }
 
 function schedulePoll() {
@@ -259,6 +290,9 @@ function paintList() {
     </div>`;
   } else {
     list.innerHTML =
+      (filterIsPartial()
+        ? `<p class="tk-hint" role="status">搜索/筛选只覆盖已加载的 ${items.length} 条任务；还有更多任务未加载，点「加载更多」后继续。</p>`
+        : "") +
       (error && items.length
         ? `<p class="tk-error tk-error--inline" role="alert">本次刷新失败：${esc(error)}</p>`
         : "") + (visible.length ? visible.map(rowHtml).join("") : emptyHtml());
@@ -312,8 +346,10 @@ function detailHtml(job) {
     </div>`;
   }
   const target = taskTarget(job);
-  const active = ACTIVE.has(job.state);
-  const failed = job.state === "failed";
+  const retryable = canRetryJob(job);
+  const cancellable = canCancelJob(job);
+  const retryBlocked = job.state === "failed" && !retryable;
+  const cancelBlocked = ACTIVE.has(job.state) && !cancellable;
   const errorCode = job.error?.code ? String(job.error.code) : "";
   const errorMessage = job.error?.message ? String(job.error.message) : "";
   return `<article class="tk-detail__body">
@@ -357,17 +393,27 @@ function detailHtml(job) {
           : ""
       }
       ${
-        failed
+        retryable
           ? `<button class="btn btn--ghost btn--sm" type="button" data-tk-act="retry" data-tk-job="${esc(job.job_id)}">${icon("history")}重试</button>`
           : ""
       }
       ${
-        active
+        cancellable
           ? `<button class="btn btn--ghost btn--sm" type="button" data-tk-act="cancel" data-tk-job="${esc(job.job_id)}">${icon("close")}取消</button>`
           : ""
       }
       <button class="btn btn--quiet btn--sm" type="button" data-tk-act="copy" data-tk-job="${esc(job.job_id)}">${icon("file")}复制编号</button>
     </div>
+    ${
+      retryBlocked
+        ? `<p class="tk-hint">云端调用需要重新授权或复用归档调用，请到工作台处理。</p>`
+        : ""
+    }
+    ${
+      cancelBlocked
+        ? `<p class="tk-hint">云端调用已发出，取消不会撤回；完成后可在工作台继续。</p>`
+        : ""
+    }
     <p class="tk-hint">任务记录来自本机服务；重试会新建一条任务，云端调用需重新确认费用。</p>
   </article>`;
 }
