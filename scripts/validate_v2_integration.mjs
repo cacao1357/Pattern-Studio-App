@@ -573,6 +573,17 @@ try {
       await waitFor('window.__previousTestDocument!==true && document.readyState==="complete"','new test document loaded');
     };
     const stageKeys=['source','crop','repair','candidate','process','mask','vector','tile'];
+    async function checkActionLabels(stage, width) {
+      const overflow = await evaluate(`[...document.querySelectorAll('.wb-panel__actions button')].filter(button => {
+        const bounds = button.getBoundingClientRect();
+        const content = document.createRange();
+        content.selectNodeContents(button);
+        return [...content.getClientRects()].some(rect =>
+          rect.left < bounds.left - 1 || rect.right > bounds.right + 1 ||
+          rect.top < bounds.top - 1 || rect.bottom > bounds.bottom + 1);
+      }).map(button => button.textContent.trim())`);
+      assert.deepEqual(overflow, [], stage + ' action labels must fit their buttons at ' + width + 'px');
+    }
     async function checkCoordinateRows(prefix, width) {
       await evaluate(`(() => {
         const toggle = document.querySelector('[data-act=panel-toggle][aria-expanded=false]');
@@ -608,9 +619,22 @@ try {
         if(stage===3) {
           await waitFor(`import('/js/store.js').then(({store}) => store.session.currentAssetId === ${JSON.stringify(info.input_asset_id)} && !!document.querySelector('[data-act=skip-repair]:not(:disabled)'))`, 'skip repair available on loaded pattern');
           await waitFor("import('/js/store.js').then(({store}) => store.leftrefillModel.available !== null)", 'local repair capability');
+          // Exercise the paid label without enabling billing or submitting a job to the fixture.
+          await evaluate("import('/js/store.js').then(({store}) => { store.seedream = {...store.seedream, enabled:true}; store.notify('seedream'); })");
+          await evaluate("document.querySelector('[data-seg=repairMethod][data-val=cloud]').click()");
+          await waitFor("document.querySelector('.wb-panel__actions [data-act=run-repair]')?.textContent.includes('按次计费')", 'cloud repair action');
+          await checkActionLabels('cloud repair', width);
+          await waitFor(`(() => {
+            const button = document.querySelector('.wb-panel__actions [data-act=run-repair]');
+            button.scrollIntoView({block:'center', behavior:'instant'});
+            const box = button.getBoundingClientRect();
+            const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+            return button.contains(hit);
+          })()`, 'cloud repair button reachable at ' + width + 'px');
           if (await evaluate("import('/js/store.js').then(({store}) => store.leftrefillModel.available)")) {
             await evaluate("document.querySelector('[data-seg=repairMethod][data-val=leftrefill]').click()");
             await checkCoordinateRows('repair', width);
+            await checkActionLabels('local repair', width);
           }
           await evaluate("document.querySelector('[data-act=skip-repair]').click()");
           await waitFor("document.querySelector('.wb-panel [data-act=go-process]:not(:disabled)') && document.querySelector('.wb-panel [data-act=skip-repair]')?.textContent.includes('继续修复')", 'repair skipped without generation');
@@ -621,6 +645,7 @@ try {
           await waitFor("document.querySelector('[data-act=run-cloud-lineart]')?.disabled===true",'disabled cloud route leaves local available');
           await writeFile(path.join(output,'cloud-route-'+width+'.png'),Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
         }
+        await checkActionLabels(stageKeys[stage-1], width);
       }
       check('home/library/tasks/settings/notes and eight stages fit, with aligned coordinate fields at '+width+'px');
     }
