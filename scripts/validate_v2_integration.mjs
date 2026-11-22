@@ -78,7 +78,8 @@ try {
       const ticket = pending.get(data.id); pending.delete(data.id); clearTimeout(ticket.timer);
       data.error ? ticket.reject(new Error(data.error.message)) : ticket.resolve(data.result);
     } else if (data.method === "Runtime.exceptionThrown") {
-      errors.push(data.params.exceptionDetails.text);
+      const details = data.params.exceptionDetails;
+      errors.push(details.exception?.description || details.text);
     } else if (data.method === "Network.requestWillBeSent") {
       requests.push({ method: data.params.request.method, path: new URL(data.params.request.url).pathname });
     }
@@ -245,24 +246,71 @@ try {
     assert.ok(assignment);
     check("grouped library creates manual categories and assigns one original to multiple categories");
 
+    await evaluate("location.hash=" + JSON.stringify("#/workbench?asset=" + info.input_asset_id + "&stage=1&v=2"));
+    await waitFor("document.querySelector('.wb') && document.querySelectorAll('[data-pattern]').length>=4", "workbench one-click entry");
     await evaluate("document.querySelector('[data-act=process-batch]').click()");
     await waitFor("Boolean(document.querySelector('[data-pf-run-preset]'))", "batch preset picker");
     await evaluate(`(()=>{const select=document.querySelector('[data-pf-run-preset]');
+      select.value=[...select.options].find(o=>o.textContent.includes('云端线稿')).value;
+      select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+    await waitFor("document.querySelector('[data-pf-run-start]')?.disabled && document.querySelector('.pf-run').textContent.includes('云端尚未启用')", "disabled cloud preset explains how to proceed");
+    await evaluate(`(()=>{const select=document.querySelector('[data-pf-run-preset]');
       const option=[...select.options].find(o=>o.textContent.includes('颜色提取'));
       select.value=option.value;select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
-    await evaluate(`(()=>{const box=[...document.querySelectorAll('[data-pf-image]')].find(e=>e.closest('label').textContent.includes('synthetic-pattern'));
-      if(box?.checked)box.click();})()`);
+    await evaluate("document.querySelector('[data-pf-select-none]').click()");
+    assert.equal(await evaluate("document.querySelectorAll('[data-pf-image]:enabled:not(:checked)').length"), groupIds.length);
+    for (const name of ["batch-smoke-0", "batch-smoke-1", "batch-smoke-2"]) {
+      await evaluate(`[...document.querySelectorAll('[data-pf-image]')].find(e=>e.closest('label').textContent.includes(${JSON.stringify(name)})).click()`);
+    }
+    check("one-click processing allows individual images to be selected again after clearing the selection");
     await waitFor("document.querySelector('[data-pf-run-start]')?.disabled===false", "local preset ready");
     assert.equal(await evaluate("document.querySelectorAll('[data-pf-consent-upload]').length"),0);
     await evaluate("document.querySelector('[data-pf-run-start]').click()");
     await waitFor("import('/js/processing.js').then(m=>Boolean(m.processing.detail?.batch_id))", "batch admitted");
     const batchId=await evaluate("import('/js/processing.js').then(m=>m.processing.detail.batch_id)");
-    await waitFor("Boolean(document.querySelector('[data-pf-collapse]'))", "progress floating window");
-    await evaluate("document.querySelector('[data-pf-collapse]').click()");
+    const snapshot=await evaluate("fetch('/api/v1/processing-batches/'+ "+JSON.stringify(batchId)+").then(r=>r.json()).then(b=>b.snapshot)");
+    assert.equal(snapshot.consent_to_upload,false);
+    assert.equal(snapshot.consent_to_charge,false);
+    await waitFor("Boolean(document.querySelector('#pf-dock:not([hidden])'))", "batch progress entry");
+    const assertWorkbenchClear = async (label) => {
+      const covered = await evaluate(`(() => {
+        const wb = document.querySelector('.wb').getBoundingClientRect();
+        return [...document.querySelectorAll('.pf-window, #pf-dock')].filter(e => {
+          const box = e.getBoundingClientRect();
+          return box.width && box.height && box.right > wb.left && box.left < wb.right &&
+            box.bottom > wb.top + 1 && box.top < wb.bottom - 1;
+        }).map(e => e.id || e.className);
+      })()`);
+      assert.deepEqual(covered, [], label);
+    };
+    for (const [width,height] of [[1440,900],[1080,720],[390,844]]) {
+      await call("Emulation.setDeviceMetricsOverride",{width,height,deviceScaleFactor:1,mobile:width===390});
+      await assertWorkbenchClear("batch controls overlap the workbench after submission at "+width);
+      const dockPoint = `(() => {
+        const dock = document.querySelector('#pf-dock');
+        if (!dock) return {clickable:false};
+        const rect = dock.getBoundingClientRect();
+        const x = rect.x + rect.width / 2, y = rect.y + rect.height / 2;
+        return { x, y, clickable: dock.contains(document.elementFromPoint(x,y)) };
+      })()`;
+      await waitFor(dockPoint + ".clickable", "batch progress entry is reachable at "+width, 2500);
+      const point = await evaluate(dockPoint);
+      await call("Input.dispatchMouseEvent",{type:"mousePressed",x:point.x,y:point.y,button:"left",clickCount:1});
+      await call("Input.dispatchMouseEvent",{type:"mouseReleased",x:point.x,y:point.y,button:"left",clickCount:1});
+      await waitFor("Boolean(document.querySelector('.pf-window:not([hidden]) [data-pf-close-window]'))","progress details");
+      await evaluate("document.querySelector('[data-pf-close-window]').click()");
+      await assertWorkbenchClear("batch controls overlap the workbench after collapse at "+width);
+      if (width !== 1080) await writeFile(path.join(output,"batch-background-"+width+".png"),Buffer.from((await call("Page.captureScreenshot",{format:"png"})).data,"base64"));
+    }
+    check("background processing and collapsed progress leave the desktop and narrow workbench unobstructed");
+    await call("Emulation.setDeviceMetricsOverride",{width:1440,height:900,deviceScaleFactor:1,mobile:false});
     await waitFor(`fetch('/api/v1/processing-batches/'+${JSON.stringify(batchId)}).then(r=>r.json()).then(b=>b.state==='succeeded')`, "real batch finishes with collapsed UI",60000);
     await evaluate("window.__batchBeforeReload=true");
     await call("Page.reload");
-    await waitFor("window.__batchBeforeReload!==true && Boolean(document.querySelector('#pf-dock:not([hidden])'))", "batch recovery after reload");
+    await waitFor("window.__batchBeforeReload!==true && Boolean(document.querySelector('[data-entry=continue]'))", "resume workbench after reload");
+    await evaluate("document.querySelector('[data-entry=continue]').click()");
+    await waitFor("Boolean(document.querySelector('#pf-dock:not([hidden])')) && Boolean(document.querySelector('.wb'))", "batch recovery after reload");
+    await assertWorkbenchClear("batch controls overlap the workbench after reload");
     await evaluate("document.querySelector('#pf-dock').click()");
     await waitFor("Boolean(document.querySelector('[data-pf-export-results]'))", "restored batch result actions");
     await evaluate("document.querySelector('[data-pf-export-results]').click()");
@@ -308,6 +356,7 @@ try {
   assert(!model.assets.some(a=>a.kind==='svg'), "extraction must leave vectorization for the later stage");
   assert.equal(png.device, "cuda");
   assert.equal(model.current, "lineart");
+  await waitFor("document.querySelector('.wb-panel')?.textContent.includes('推理设备 CUDA')", "actual inference device and ink coverage visible");
   check("UI submits local model lineart and adopts the real CUDA PNG without automatic vectorization");
   await evaluate("document.querySelector('[data-act=go-vector]').click()");
   await waitFor("document.querySelector('.wb')?.dataset.stage==='vector' && document.querySelector('[data-act=run-vectorize]')?.disabled===false", "separate vector stage");
@@ -317,6 +366,38 @@ try {
   assert.equal(vector.source_asset_id,png.id);
   check("separate vectorization uses the selected lineart PNG");
   await writeFile(path.join(output,"workbench-model.png"), Buffer.from((await call("Page.captureScreenshot", {format:"png"})).data,"base64"));
+
+  await evaluate(`location.hash='#/workbench?asset='+${JSON.stringify(png.id)}+'&stage=5&v=2'`);
+  await waitFor("document.querySelector('[data-act=go-mask]')?.disabled===false", "model PNG can enter mask correction");
+  await evaluate("document.querySelector('[data-act=go-mask]').click()");
+  await waitFor("document.querySelector('[data-act=prepare-lineart-mask]')?.disabled===false", "prepare editable alpha mask");
+  await evaluate("document.querySelector('[data-act=prepare-lineart-mask]').click()");
+  await waitFor("import('/js/store.js').then(({store})=>store.currentAsset()?.kind==='transparent_png' && !store.session.busy)", "adopt prepared PNG");
+  const centerAlpha = (assetId) => evaluate(`(async()=>{
+    const {api}=await import('/js/api.js');
+    const blob=await fetch(api.assetDownloadUrl(${JSON.stringify(assetId)})).then(r=>r.blob());
+    const bitmap=await createImageBitmap(blob);
+    const ctx=new OffscreenCanvas(bitmap.width,bitmap.height).getContext('2d');
+    ctx.drawImage(bitmap,0,0);
+    return ctx.getImageData(bitmap.width/2,bitmap.height/2,1,1).data[3];
+  })()`);
+  assert.equal(await centerAlpha(png.id),0);
+  const center = await evaluate(`(()=>{
+    const rect=document.querySelector('[data-media]').getBoundingClientRect();
+    return {x:rect.left+rect.width/2,y:rect.top+rect.height/2};
+  })()`);
+  await call("Input.dispatchMouseEvent",{type:"mousePressed",...center,button:"left",buttons:1,clickCount:1});
+  await call("Input.dispatchMouseEvent",{type:"mouseReleased",...center,button:"left",clickCount:1});
+  await waitFor("document.querySelector('[data-act=run-mask]')?.disabled===false","submit actual brush stroke");
+  await evaluate("document.querySelector('[data-act=run-mask]').click()");
+  await waitFor("import('/js/store.js').then(({store})=>store.currentAsset()?.annotation_source==='human_foreground_correction' && !store.session.busy)","adopt brush correction");
+  const editedId=await evaluate("import('/js/store.js').then(({store})=>store.currentAsset().asset_id)");
+  assert.equal(await centerAlpha(editedId),255);
+  await evaluate("document.querySelector('[data-act=go-vector]').click()");
+  await waitFor("document.querySelector('[data-act=run-vectorize]')?.disabled===false","vectorize corrected ink");
+  await evaluate("document.querySelector('[data-act=run-vectorize]').click()");
+  await waitFor(`import('/js/store.js').then(({store})=>store.currentAsset()?.kind==='svg' && store.currentAsset().source_asset_id===${JSON.stringify(editedId)})`, "SVG uses corrected PNG");
+  check("real pointer adds visible ink in the model PNG's blank center and the saved correction feeds vectorization");
   }
 
   // Delay one real poll response, then change images before it reaches the store.
@@ -368,6 +449,8 @@ try {
   check("archived layers continue their workflow while cloud payment is disabled");
 
   await call("Page.reload", { ignoreCache: true });
+  await waitFor("Boolean(document.querySelector('[data-entry=continue]'))", "resume archived selection after reload");
+  await evaluate("document.querySelector('[data-entry=continue]').click()");
   await waitFor("document.querySelector('[data-act=layer][aria-pressed=true]') && document.querySelector('[data-act=compose-layers]')?.disabled===false", "selected layers restored after reload");
   await evaluate("document.querySelector('[data-act=compose-layers]').click()");
   await waitFor(`fetch('/api/v1/pipelines/'+${JSON.stringify(info.pipeline_id)}).then(r=>r.json()).then(f=>f.branches?.some(b=>b.state==='succeeded' && b.action==='compose'))`, "local recomposition branch", 30000);
@@ -475,6 +558,14 @@ try {
   const repairCapability = await evaluate(`import('/js/store.js').then(m=>({available:m.store.leftrefillModel.available,disabled:document.querySelector('[data-seg=repairMethod][data-val=leftrefill]').disabled,text:document.querySelector('.wb').textContent}))`);
   assert.equal(repairCapability.disabled, repairCapability.available === false);
   if (repairCapability.available === false) assert.match(repairCapability.text,/基础模型|基础网络|依赖|配置|检查失败|模型文件/);
+  if (repairCapability.available) {
+    await evaluate("document.querySelector('[data-seg=repairMethod][data-val=leftrefill]').click()");
+    await waitFor("Boolean(document.querySelector('[data-field=repairWidth]'))", "local repair box controls");
+    for (const [key,value] of Object.entries({repairLeft:32,repairTop:24,repairWidth:64,repairHeight:40})) {
+      await fill("wb-"+key,value);
+    }
+    assert.match(await evaluate("document.querySelector('[data-live=repair-region]').textContent"), /64 × 40 px · 原点 \(32, 24\)/);
+  }
   check("local repair entry reflects prerequisites without generating or calling cloud");
 
   // Revisit the same asset, clear it, then use the identical link again. A stale
