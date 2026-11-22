@@ -24,6 +24,7 @@ def test_snapshot_restores_legacy_image_and_excludes_local_drafts(tmp_path):
     snapshot = tmp_path / "snapshot"
     manifest = create_backup(project, snapshot)
     assert set(drafts).isdisjoint(manifest["files"])
+    assert {Path(name).parent.as_posix() for name in drafts}.issubset(manifest["excluded"])
     restored = tmp_path / "restored"
     restore_backup(snapshot, restored)
     assert (restored / image).read_bytes() == (project / image).read_bytes()

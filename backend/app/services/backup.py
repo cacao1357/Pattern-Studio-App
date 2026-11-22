@@ -310,7 +310,8 @@ def create_backup(project, destination, *, storage_root=None):
                     "source_project": str(project), "source_storage": str(storage),
                     "environment": _environment(project), "files": files, "database_summary": summary,
                     "excluded": [".env and credentials", "OS locks and SQLite sidecars", "unregistered assets",
-                                 "storage/samples development originals", "validation reports", "caches and dependencies"],
+                                 "storage/samples development originals", "validation reports", "caches and dependencies",
+                                 *sorted(LOCAL_ONLY_DIRS)],
                     "permissions": "Local operational backup only; no new display or training permission"}
         (temporary / MANIFEST).write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         verify_backup(temporary)
