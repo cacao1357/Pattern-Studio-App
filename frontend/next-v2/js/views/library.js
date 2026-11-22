@@ -1129,6 +1129,11 @@ function drawerBody(asset, pattern = null) {
   `;
 }
 
+/** 加入工作台失败不阻断打开，但必须明确告诉用户“没有加入”，避免误以为已加入。 */
+function memberFailureText(error) {
+  return `未加入工作台列表。${error?.message || "请稍后重试。"}`;
+}
+
 async function drawerAction(action, asset, button, api, pattern = null) {
   if (action === "preview") {
     const opened = window.open(http.assetPreviewUrl(asset.asset_id), "_blank");
@@ -1158,15 +1163,21 @@ async function drawerAction(action, asset, button, api, pattern = null) {
       const { asset: opened, stage } = result;
       const query = { asset: opened.asset_id, stage };
       if (opened.image_id) query.image = opened.image_id;
+      let memberError = null;
       if (opened.image_id) {
-        // 从纹样库明确打开，等于把这张原图加入工作台；失败不阻断打开。
-        await http
-          .addWorkbenchItems([opened.image_id])
-          .then(() => rememberWorkbenchMember(opened.image_id))
-          .catch(() => {});
+        // 从纹样库明确打开，等于把这张原图加入工作台；失败不阻断打开，但要说清楚。
+        try {
+          await http.addWorkbenchItems([opened.image_id]);
+          rememberWorkbenchMember(opened.image_id);
+        } catch (error) {
+          memberError = error;
+        }
       }
       api.closeDrawer();
       api.go("workbench", { query });
+      if (memberError) {
+        api.toast(memberFailureText(memberError), "warn");
+      }
     } catch (error) {
       if (button) button.disabled = false;
       api.toast(error?.message || "无法在工作台打开这个纹样", "warn");
@@ -1217,7 +1228,9 @@ function openPatternMeta(group, api) {
     name: group.name,
     meta: group.meta || {},
     sourceNote: group.source_note || "",
-    onSaved: async () => {
+    onSaved: async (result) => {
+      // 保存结果先写回当前会话与原图组：只重读 pattern 不会更新工作台的 session.image。
+      store.applyPatternMeta(group.image_id, result);
       try {
         const fresh = await http.pattern(group.image_id);
         store.replacePattern(fresh);
@@ -1496,15 +1509,19 @@ export default {
           if (pattern) openAssignDrawer(pattern, api);
           break;
         }
-        case "pattern-workbench":
+        case "pattern-workbench": {
+          let memberError = null;
           try {
             await http.addWorkbenchItems([hit.dataset.image]);
             rememberWorkbenchMember(hit.dataset.image);
-          } catch {
-            // 打开是主操作；加入失败时仍允许进入工作台，之后可从工作台补加。
+          } catch (error) {
+            // 打开是主操作；加入失败时仍允许进入工作台，但要说明没有加入。
+            memberError = error;
           }
           api.go("workbench", { query: { image: hit.dataset.image, stage: 1 } });
+          if (memberError) api.toast(memberFailureText(memberError), "warn");
           break;
+        }
         case "select-mode":
           selectMode = !selectMode;
           if (!selectMode) selected = new Set();

@@ -184,6 +184,74 @@ try {
     await waitFor(currentStage, "saved pattern can be opened again");
     assert.equal(errors.length, 0, JSON.stringify(errors));
     check("workbench prompts on return and reload, restores the asset and stage, and keeps every library version after starting fresh");
+    await waitFor(`import('/js/store.js').then(({store})=>store.session.currentAssetId===${JSON.stringify(info.input_asset_id)})`, "original session restored");
+    const latestImage = await evaluate(`(async () => {
+      const {api} = await import('/js/api.js');
+      const {store} = await import('/js/store.js');
+      const canvas = document.createElement('canvas');
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      const other = await api.uploadImage(new File([blob], 'newer-library-pattern.png', {type:'image/png'}));
+      await store.loadRecent();
+      return [other.image_id, store.recentAssets[0]?.image_id];
+    })()`);
+    assert.ok(latestImage[0] && latestImage[0] !== group.image_id);
+    assert.equal(latestImage[1], latestImage[0]);
+    await evaluate("location.hash='#/library'");
+    const editSource = `[data-act="pattern-meta"][data-image="${group.image_id}"]`;
+    await waitFor(`document.querySelector(${JSON.stringify(editSource)})`, "active pattern in library");
+    await evaluate(`document.querySelector(${JSON.stringify(editSource)}).click()`);
+    await fill("pm-source-name", "修复工序资料回归");
+    await evaluate("document.querySelector('[data-pm-save]').click()");
+    await waitFor("!document.querySelector('[data-pm-save]') && document.querySelector('.lb-page').textContent.includes('修复工序资料回归')", "updated source in library");
+    await waitFor("import('/js/store.js').then(({store})=>store.session.image?.meta?.source_name==='修复工序资料回归')", "library edit updates the open document");
+    await evaluate("location.hash='#/home'");
+    await waitFor("document.querySelector('[data-resume]')", "home resume available");
+    await evaluate("document.querySelector('[data-resume]').click()");
+    await waitFor("document.querySelector('.wb')", "home resume opens workbench");
+    const resumed = await evaluate(`import('/js/store.js').then(({store})=>({
+      asset:store.session.currentAssetId, stage:document.querySelector('.wb').dataset.stage,
+      drawer:!!document.querySelector('#drawer')
+    }))`);
+    assert.deepEqual(resumed, {asset:info.input_asset_id, stage:"repair", drawer:false});
+    assert.equal(await evaluate("document.querySelector('.wb-doc__name').textContent"), "修复工序资料回归");
+    check("home resumes the active version and stage after a different pattern enters the library");
+    const attempts = await evaluate(`(async () => {
+      const {store} = await import('/js/store.js');
+      store.datasetLoadedAt = 0;
+      const originalFetch = window.fetch;
+      let count = 0;
+      window.fetch = (...args) => {
+        if (String(args[0]).includes('/datasets/audit') && ++count <= 4) {
+          return Promise.resolve(Response.json({}, {status:503}));
+        }
+        return originalFetch(...args);
+      };
+      try {
+        location.hash = '#/home';
+        await new Promise(resolve => setTimeout(resolve, 850));
+        return count;
+      } finally {
+        window.fetch = originalFetch;
+      }
+    })()`);
+    assert.equal(attempts, 1, "one failed home data request must not trigger a render/reload loop");
+    await evaluate("location.hash='#/library'");
+    const openGroup = `[data-act="pattern-workbench"][data-image="${group.image_id}"]`;
+    await waitFor(`document.querySelector(${JSON.stringify(openGroup)})`, "library navigation after home data error");
+    await evaluate(`(() => {
+      const originalFetch = window.fetch;
+      window.fetch = (...args) => {
+        if (!String(args[0]).endsWith('/workbench/items') || args[1]?.method !== 'POST') return originalFetch(...args);
+        window.fetch = originalFetch;
+        return Promise.resolve(Response.json({error:{code:'WORKBENCH_LIMIT'}}, {status:409}));
+      };
+      document.querySelector(${JSON.stringify(openGroup)}).click();
+    })()`);
+    await waitFor("document.querySelector('.wb') && document.querySelector('#toasts').textContent.includes('500')", "library opens with a visible warning when membership fails");
+    await evaluate("location.hash='#/home'");
+    await waitFor("import('/js/store.js').then(({store})=>store.datasetLoadedAt>0)", "home data recovers on next visit");
+    check("home recovers after a failed request and library membership errors remain visible");
+    assert.equal(errors.length, 0, JSON.stringify(errors));
     await call("Browser.close",{},false);
   } else {
   if (batchOnly) {
